@@ -372,7 +372,7 @@ class App:
             f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>')  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
-                 '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Daily Financial Letter</span>'
+                 '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
                  '<h1 class="font-headline-sm text-headline-sm text-on-surface mt-4 max-w-[280px] leading-relaxed">내 주식이 지금 어떤 상황인지,<br>쉬운 글 한 장으로.</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-2 max-w-[300px]">숫자 뒤에 숨겨진 회사의 진짜 이야기와 사업 흐름을 담백하게 정리해 드립니다.</p></div>'
                  '<div class="w-full rounded-xl flex flex-col relative overflow-hidden px-1.5"><form class="flex flex-col w-full relative z-10" id="magic-link-form" method="post" action="/login">'
@@ -562,7 +562,9 @@ class App:
                 elif d == today:
                     num = (f'<div class="flex items-center justify-between"><span class="w-5 h-5 flex items-center justify-center rounded-full bg-primary-container text-on-primary font-label-micro text-label-micro font-bold">{d.day}</span>'
                            '<span class="text-[8px] text-primary-container font-semibold">오늘</span></div>')  # fmt: skip
-                elif i in (0, 6) or iso in hol:  # 주말·공휴일은 빨간 숫자 (사용자 요청 10/7)
+                elif iso in hol:  # 공휴일은 시안대로 검은 숫자 + 이름 (사용자 10/7: 시안 그대로)
+                    num = f'<span class="font-label-micro text-label-micro text-on-surface font-medium">{d.day}</span>'
+                elif i in (0, 6):  # 주말은 빨간 숫자
                     num = f'<span class="font-label-micro text-label-micro text-tertiary font-semibold">{d.day}</span>'
                 else:
                     num = f'<span class="font-label-micro text-label-micro text-on-surface">{d.day}</span>'

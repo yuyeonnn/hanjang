@@ -86,7 +86,7 @@ def test_calendar_month_grid_marks_red_days_and_events():
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 7))
     assert "2026년 10월" in html_
     red = '<span class="font-label-micro text-label-micro text-tertiary font-semibold">'
-    assert red + '9</span><span class="text-[8px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">한글날' in html_
+    assert '<span class="font-label-micro text-label-micro text-on-surface font-medium">9</span><span class="text-[8px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">한글날' in html_  # 공휴일은 시안대로 검정
     assert red + "4</span>" in html_  # 일요일
     assert "삼성 자사주</a>" in html_ and "오늘</span>" in html_
     assert "자기주식취득결정 (자사주 매입)" in html_ and "이번 달 주목할 공시 1건" in html_
