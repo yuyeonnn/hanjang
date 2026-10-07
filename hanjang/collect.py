@@ -96,7 +96,7 @@ def main(today: date) -> None:
     print(f"공휴일 {len(hs)}일 ({today.year}~{today.year + 1})")
 
     n = 0
-    for t, name in picked:
+    for t, name in picked if sources.news_dev() else []:  # 서버에선 꺼짐 — NEWS_DEV=1 인 내 컴퓨터에서만
         try:
             got = sources.news(name)
         except Exception as e:  # noqa: BLE001  뉴스 하나가 막혀도 나머지는 받는다
@@ -108,7 +108,7 @@ def main(today: date) -> None:
         )
         n += len(got)
         time.sleep(0.5)  # 구글에 몰아치지 않는다
-    print(f"뉴스 {n}건 (개발용 · 개인용만)")
+    print(f"뉴스 {n}건 (개발용 · 개인용만)" if sources.news_dev() else "뉴스 꺼짐 (NEWS_DEV 없음)")
     con.commit()
 
 

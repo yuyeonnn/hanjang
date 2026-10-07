@@ -16,11 +16,12 @@ import time
 from datetime import date, datetime
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, learn, mail, notes
+from hanjang import db, learn, mail, notes, policy
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
 LINK_TTL = 15 * 60  # 로그인 링크 15분
+LOGIN_GAP, LOGIN_HOURLY = 60, 5  # 같은 주소로 링크는 1분에 한 번, 한 시간에 다섯 번까지 (메일 폭탄·발송 계정 정지 막기)
 e = html.escape
 
 
@@ -279,10 +280,6 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<span class="font-label-micro text-label-micro text-outline tracking-wider uppercase font-mono">{e(ticker)}</span></div>'
         f'<div class="flex items-center gap-space-sm text-on-surface-variant font-label-regular text-label-regular">{tag_html}'
         '<span class="w-1 h-1 rounded-full bg-outline-variant"></span><span class="text-secondary font-medium">연간 결산 분석</span></div></header>',
-        # 시안의 사진 자리 — 쓸 권리가 있는 사진이 없어 회색 빈 칸
-        '<div class="relative w-full h-44 rounded-xl overflow-hidden mb-space-lg shadow-sm bg-surface-container">'
-        '<div class="absolute inset-0 bg-gradient-to-t from-on-background/80 via-on-background/25 to-transparent flex items-end p-space-md">'
-        f'<p class="font-citation-ref text-citation-ref text-surface-container-lowest/90 font-normal">{e(name)} · 이미지 준비 중</p></div></div>',
         f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(body["headline"])}"</p></aside>',
     ]  # fmt: skip
     if body.get("summary"):
@@ -324,12 +321,12 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         parts.append('<section class="mb-space-xl flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">긍정 요인과 부정 요인</h3></div>'
                      + side("긍정", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("부정", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
-                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">긍정·부정 요인은 코드가 정한 기준으로 분류했어요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류.</span></section>')  # fmt: skip
+                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">긍정·부정 요인은 코드가 정한 기준으로 분류했어요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
     how = ("기사·공시·재무에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else "기사·공시·재무에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART)나 기사 원문이 열려요.</p>'
+                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART)나 기사 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
                  '<div class="pt-1"><p class="font-label-regular text-label-regular text-on-surface leading-relaxed font-medium">사라·팔아라는 의견도, 목표주가도, 앞으로의 예측도 없어요. 투자 판단은 본인이 해요.</p></div></footer>')  # fmt: skip
     dialog = ('<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-end justify-center px-margin pb-6" id="citation-dialog" onclick="closeCitation(event)"><div class="bg-surface-container-lowest w-full max-w-[440px] rounded-2xl p-space-lg shadow-xl flex flex-col gap-space-sm" onclick="event.stopPropagation()"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded font-citation-ref text-citation-ref bg-primary-fixed text-on-primary-fixed font-bold" id="citation-badge"></span><span class="font-label-regular text-label-regular font-bold text-on-surface" id="citation-title"></span></div><button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container" onclick="hideCitation()" type="button"><span class="material-symbols-outlined text-[20px]">close</span></button></div><div class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed" id="citation-body"></div><div class="flex items-center justify-between pt-2"><span class="font-label-micro text-label-micro text-outline font-mono" id="citation-meta"></span><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="#" id="citation-link" rel="noopener noreferrer" target="_blank">원문 확인<span class="material-symbols-outlined text-[14px]">open_in_new</span></a></div></div></div>'
               # JSON 안의 </script> 를 막으려고 < 를 < 로
@@ -353,6 +350,7 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
+        self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
@@ -364,7 +362,8 @@ class App:
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
         uid = unsign(cookie.get("s", ""), self.secret)
         status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
-        start_response(status, [("Content-Type", "text/html; charset=utf-8"), *headers])
+        start_response(status, [("Content-Type", "text/html; charset=utf-8"), ("X-Content-Type-Options", "nosniff"),
+                                ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
         return [body.encode()]
 
     def see(self, to: str, *headers) -> tuple:
@@ -385,7 +384,9 @@ class App:
 
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
-            return self.login(form.get("email", "").strip().lower())
+            return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1")
+        if path in ("/privacy", "/method"):  # 로그인 없이 열린다
+            return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
             email = check_login(query.get("t", ""), self.secret, self.clock())
             if not email:
@@ -395,6 +396,8 @@ class App:
             self.con.commit()
             (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
             ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
+            if mail.base_url().startswith("https://"):
+                ck += "; Secure"
             return self.see("/", ("Set-Cookie", ck))
         if uid is None:
             return "200 OK", [], self.login_page()
@@ -439,12 +442,12 @@ class App:
 
     # ---- 로그인 (시안 _2) ----
 
-    def login_page(self, sent: str | None = None) -> str:
-        box = "" if not sent else (
+    def login_page(self, sent: str | None = None, error: str = "") -> str:
+        box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
             '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
             f'<span class="font-body-reading-strong text-body-compact text-on-surface truncate" id="target-email-preview">{e(sent)}</span></div>'
             '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 안전한 접속 링크를 전송했습니다. 15분 이내에 메일함 속 링크를 눌러 주세요.</p><div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 도착하지 않았나요? 스팸함을 확인하시거나 잠시 후 재전송해 보세요.</p>'
-            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>')  # fmt: skip
+            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1"><button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
@@ -454,8 +457,10 @@ class App:
                  '<div class="flex items-center justify-between mb-2"><label class="font-label-regular text-label-regular text-on-surface flex items-center gap-1.5" for="email-input"><span class="material-symbols-outlined text-primary text-base">mail</span>이메일 주소</label><span class="font-label-micro text-label-micro text-outline">비밀번호 없는 간편 시작</span></div>'
                  '<div class="relative flex items-center w-full"><input class="w-full font-body-reading text-body-reading bg-surface-container-low text-on-surface placeholder:text-outline rounded-lg px-4 py-3.5 focus:outline-none focus:bg-surface-container-lowest transition-all" id="email-input" name="email" placeholder="name@example.com" required="" type="email">'
                  '<button aria-label="이메일 지우기" class="hidden absolute right-3 text-outline hover:text-on-surface p-1 transition-colors" id="clear-btn" onclick="clearInput()" type="button"><span class="material-symbols-outlined text-lg">cancel</span></button></div>'
+                 '<label class="flex items-start gap-2 mt-3 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="agree" required type="checkbox" value="1">'
+                 '<span>[필수] 이메일 수집·이용에 동의해요 — <a class="text-primary underline" href="/privacy" target="_blank">개인정보 처리방침</a></span></label>'
                  f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">{"링크 다시 받기" if sent else "로그인 링크 받기"}</span><span class="material-symbols-outlined text-base">{"refresh" if sent else "arrow_forward"}</span></button>'
-                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">복잡한 비밀번호 설정 없이, 메일로 온 링크를 누르면 바로 연결돼요. 개인정보는 오직 이메일만 소중히 보관합니다.</p></form>'
+                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">복잡한 비밀번호 설정 없이, 메일로 온 링크를 누르면 바로 연결돼요. 받는 개인정보는 이메일 하나뿐이에요.</p></form>'
                  + box + '</div>'
                  '<div class="mt-8 flex flex-col gap-4"><div class="grid grid-cols-2 gap-4 pt-2 border-t border-outline-variant/30"><div class="flex flex-col gap-1"><div class="flex items-center gap-1.5 text-primary"><span class="material-symbols-outlined text-base">description</span><span class="font-body-reading-strong text-label-regular">공시 기반 해설</span></div><p class="font-label-micro text-label-micro text-on-surface-variant leading-relaxed">어려운 DART 공시와 분기 보고서를 일상 언어로 풀어냅니다.</p></div><div class="flex flex-col gap-1"><div class="flex items-center gap-1.5 text-secondary"><span class="material-symbols-outlined text-base">spa</span><span class="font-body-reading-strong text-label-regular">소음 없는 담백함</span></div><p class="font-label-micro text-label-micro text-on-surface-variant leading-relaxed">빨강·파랑 시세창 대신 기업 본질을 천천히 읽는 시간.</p></div></div>'
                  '<div class="text-center px-4 mt-4"><div class="inline-flex items-center justify-center gap-2 mb-2"><span class="w-4 h-[1px] bg-outline-variant"></span><span class="font-citation-ref text-citation-ref text-outline">한장의 약속</span><span class="w-4 h-[1px] bg-outline-variant"></span></div><p class="font-label-regular text-label-regular text-outline leading-relaxed">이해를 위한 서비스예요. 수익률을 장담하거나 종목을 추천하지 않아요.</p></div></div></div>'
@@ -464,9 +469,16 @@ class App:
                  "function clearInput(){emailInput.value='';clearBtn.classList.add('hidden');emailInput.focus();}</script></main>")  # fmt: skip
         return page("로그인", "bg-surface font-body-reading text-on-surface pt-safe pb-safe flex flex-col min-h-screen", inner)
 
-    def login(self, email: str):
+    def login(self, email: str, agreed: bool = False):
         if "@" not in email or len(email) > 200:
             return "200 OK", [], self.login_page()
+        if not agreed:
+            return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 로그인 링크를 보낼 수 있어요.")
+        now = self.clock()
+        times = [t for t in self.sent.get(email, []) if now - t < 3600]
+        if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
+            return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.")
+        self.sent[email] = times + [now]
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, self.clock()))}"
         mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email)
@@ -707,8 +719,26 @@ class App:
                  'onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button>'
                  '<form method="post" action="/me/delete" onsubmit="return confirm(\'탈퇴하면 이메일과 담은 종목, 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?\')">'
                  '<button class="mt-space-sm w-full py-3 font-label-regular text-label-regular text-tertiary hover:underline" type="submit">탈퇴하기</button></form>'
+                 '<p class="mt-space-lg flex justify-center gap-3 font-label-micro text-label-micro text-outline"><a class="underline" href="/privacy">개인정보 처리방침</a><span>·</span><a class="underline" href="/method">계산 방법</a></p>'
                  '</div></main>' + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
+
+    def doc(self, path: str, uid: int | None) -> str:
+        title, parts = (("개인정보 처리방침", policy.privacy(env().get("PRIVACY_CONTACT", "")))
+                        if path == "/privacy" else ("계산 방법", policy.method()))  # fmt: skip
+        body = "".join(
+            f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
+            + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)
+            + "</section>" for h, ps in parts)  # fmt: skip
+        inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-space-lg pb-24">'
+                 '<a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
+                 '<span class="font-label-regular text-label-regular font-medium">한장</span></a>'
+                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">{e(title)}</h1>'
+                 f'<p class="font-label-micro text-label-micro text-outline mt-1">마지막 고침 {policy.UPDATED}</p>{body}</div></main>'
+                 + (bottom_nav("me") if uid else ""))  # fmt: skip
+        return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     # ---- 읽기 팁 (시안에 없는 화면 — 같은 디자인 말투로) ----
 
@@ -763,13 +793,17 @@ if __name__ == "__main__":
         daemon_threads = True
 
     sys.stderr.reconfigure(encoding="utf-8")  # 윈도우 콘솔(cp949)에서 한글 로그가 깨지지 않게
+    cfg = env()
+    if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
+        sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
-    app = App(sqlite3.connect(db.PATH, check_same_thread=False), env()["SECRET"])
+    app = App(sqlite3.connect(db.PATH, check_same_thread=False), cfg["SECRET"])
     lock = threading.Lock()
 
     def serial(environ, start_response):
         with lock:
             return app(environ, start_response)
 
-    print("한장 — http://localhost:8000", file=sys.stderr)
-    make_server("127.0.0.1", 8000, serial, server_class=Server).serve_forever()
+    host, port = cfg.get("HOST", "127.0.0.1"), int(cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
+    print(f"한장 — http://{host}:{port}", file=sys.stderr)
+    make_server(host, port, serial, server_class=Server).serve_forever()

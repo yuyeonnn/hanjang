@@ -6,7 +6,7 @@ import sqlite3
 import sys
 from datetime import date
 
-from hanjang import collect, db, mail, notes
+from hanjang import backup, collect, db, mail, notes
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -24,6 +24,7 @@ def notify(con: sqlite3.Connection, week: str) -> int:
 
 def main(today: date) -> None:
     monday = today.weekday() == 0
+    print(f"백업 {backup.backup(today)}")  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
     collect.main(today)
     notes.main([], today, only_changed=not monday)
     if monday:

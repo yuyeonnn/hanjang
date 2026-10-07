@@ -9,7 +9,7 @@ import sqlite3
 import sys
 from datetime import date, datetime, timedelta
 
-from hanjang import db, llm
+from hanjang import db, llm, sources
 
 DART = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={}"
 TAXONOMY = ("RIGHTS_ISSUE", "BONUS_ISSUE", "SPLIT", "REVERSE_SPLIT", "BUYBACK", "CB_BW",
@@ -204,7 +204,7 @@ def trend(cur: int, prev: int | None) -> tuple[int, str, str]:
     return -1, "적자가 이어졌", "적자 지속"
 
 
-def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
+def facts(con: sqlite3.Connection, ticker: str, today: date, news: bool = True) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
     out = []
@@ -251,6 +251,8 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{what}{tone}", "url": DART.format(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
     out += insider_facts(con, ticker, today)
+    if not news:  # 뉴스 꺼짐 (sources.news_dev) — 기사 사실을 아예 만들지 않는다
+        return out
     news = con.execute("select url, date, press, title from news where ticker = ? and date >= ?"
                        " order by date desc limit 5",
                        (ticker, (today - timedelta(days=NEWS_DAYS)).isoformat())).fetchall()  # fmt: skip
@@ -544,8 +546,6 @@ def read_bodies(news: list[dict]) -> None:
     """기사 본문 앞부분을 사실에 붙인다(f["body"]) · 링크는 언론사 원문 주소로. 실패한 기사는 제목만."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from hanjang import sources
-
     with ThreadPoolExecutor(len(news) or 1) as ex:
         got = list(ex.map(lambda f: sources.read_article(f["url"], f["slots"]["제목"].strip("「」")), news))
     for f, (orig, body) in zip(news, got):
@@ -577,8 +577,9 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
     week = week_of(today)
     by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
     held = {t for (t,) in con.execute("select distinct ticker from holdings")}
+    news = sources.news_dev()
     for t, name in rows:
-        fs = facts(con, t, today)
+        fs = facts(con, t, today, news)
         if not fs:
             continue
         if only_changed:
