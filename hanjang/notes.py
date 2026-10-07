@@ -250,12 +250,17 @@ def write(name: str, fs: list[dict], today: date) -> tuple[dict, str]:
 # --- ⑥ 저장 ---
 
 
+def week_of(today: date) -> str:
+    """그 주 월요일 — 노트·설문의 주 단위."""
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
 def main(tickers: list[str], today: date) -> None:
     con = db.connect()
     print(f"공시 읽기 {read_disclosures(con)}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]
-    week = (today - timedelta(days=today.weekday())).isoformat()
+    week = week_of(today)
     by = {"code": 0}
     for t, name in rows:
         fs = facts(con, t, today)
