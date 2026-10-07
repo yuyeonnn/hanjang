@@ -61,6 +61,10 @@ def main(today: date) -> None:
                         [(sid, d.isoformat(), v) for d, v in pts])  # fmt: skip
         print(f"{name} {len(pts)}일")
 
+    hs = [h for y in (today.year, today.year + 1) for h in sources.holidays(y)]
+    con.executemany("insert or replace into holidays values (?, ?)", [(d.isoformat(), n) for d, n in hs])
+    print(f"공휴일 {len(hs)}일 ({today.year}~{today.year + 1})")
+
     n = 0
     for t, name in picked:
         try:
