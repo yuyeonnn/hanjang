@@ -86,3 +86,32 @@ def test_calendar_month_grid_marks_red_days_and_events():
     assert "<td class='red'><span class='n'>4</span>" in html_  # 일요일
     assert "삼성전자 자사주 매입</a>" in html_ and "class='today'" in html_
     assert "2026년 10월" in app.calendar(uid, "nonsense", today=date(2026, 10, 7))  # 이상한 값은 이번 달
+
+
+def test_survey_saves_once_and_asks_pay_from_week_six():
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    note = call(app, "/n/005930", cookie=ck)[2]
+    assert "이 노트가 도움이 됐나요?" in note and "돈을 내고도" not in note  # 1주째엔 안 묻는다
+    st, h, _ = call(app, "/feedback", "POST", "t=005930&w=2026-10-05&h=4&c=" + quote("좋아요"), ck)
+    assert h["Location"] == "/n/005930?thanks=1"
+    assert con.execute("select helpful, comment from feedback").fetchone() == (4, "좋아요")
+    assert "의견 고마워요" in call(app, "/n/005930", cookie=ck)[2]
+    call(app, "/feedback", "POST", "t=005930&w=2026-10-05&h=9", ck)  # 범위 밖은 버린다
+    assert con.execute("select count(*) from feedback").fetchone() == (1,)
+    con.execute("update users set created_at = '2026-08-01'")  # 6주가 지난 사용자
+    con.execute("delete from feedback")
+    assert "돈을 내고도" in call(app, "/n/005930", cookie=ck)[2]
+
+
+def test_weekly_notice_only_to_users_with_new_notes(capsys):
+    from hanjang import weekly
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into users (email, created_at) values ('other@x.kr', '2026-10-01')")  # 종목 없음
+    assert weekly.notify(con, "2026-10-05") == 1
+    assert weekly.notify(con, "2026-10-12") == 0  # 그 주 노트가 없으면 안 보낸다
+    assert "me@x.kr · [한장] 이번 주 노트가 올라왔어요" in capsys.readouterr().err

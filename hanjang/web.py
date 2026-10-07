@@ -14,7 +14,7 @@ import time
 from datetime import date, datetime
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, notes
+from hanjang import db, mail, notes
 from hanjang.sources import env
 
 MAX_STOCKS = 20  # PRD F2
@@ -272,7 +272,9 @@ class App:
         if path.startswith("/n/"):
             ticker = path[3:]
             self.log(uid, "note", ticker)
-            return self.note(ticker)
+            return self.note(uid, ticker, query.get("thanks") == "1")
+        if path == "/feedback" and method == "POST":
+            return self.feedback(uid, form)
         if path == "/calendar":
             self.log(uid, "calendar")
             return "200 OK", [], self.calendar(uid, query.get("m"))
@@ -296,9 +298,8 @@ class App:
     def login(self, email: str):
         if "@" not in email or len(email) > 200:
             return "200 OK", [], self.login_page()
-        link = f"/auth?t={quote(login_token(email, self.secret, self.clock()))}"
-        # ponytail: 메일 발송은 4주차 — 지금은 서버 콘솔에 찍는다 (개발용)
-        print(f"[로그인 링크] {email}: http://localhost:8000{link}", file=sys.stderr, flush=True)
+        link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, self.clock()))}"
+        mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email)
 
     def add(self, uid: int, q: str):
@@ -347,14 +348,54 @@ class App:
                    "<a href='/logout'>로그아웃</a></p>")
         return page("내 종목", "".join(out), "cards")
 
-    def note(self, ticker: str):
+    def trial_week(self, uid: int) -> int:
+        """시험 몇 주째인가 — 가입한 날이 1주째 (ERD views 의 주차 계산과 같은 기준)."""
+        (created,) = self.con.execute("select created_at from users where id = ?", (uid,)).fetchone()
+        return (date.today() - date.fromisoformat(created[:10])).days // 7 + 1
+
+    def survey(self, uid: int, ticker: str, week: str, thanks: bool) -> str:
+        """주간 설문 (PRD F7) — 1~5 + 한 줄. 6주째부터 「돈 내고도 보겠다」."""
+        done = self.con.execute("select 1 from feedback where user_id = ? and ticker = ? and week = ?",
+                                (uid, ticker, week)).fetchone()  # fmt: skip
+        if thanks or done:
+            return "<div class='box sum' style='margin-top:28px'>이번 주 노트에 대한 의견 고마워요. 다음 주 노트에 참고할게요.</div>"
+        pay = ("<p style='margin:14px 0 4px;font-weight:600'>이 노트를 돈을 내고도 보시겠어요? 낸다면 한 달에 얼마까지?</p>"
+               "<div class='row' style='flex-wrap:wrap'>" + "".join(
+                   f"<label class='chip' style='margin:0;padding:6px 10px'><input type='radio' name='pay' value='{v}' required"
+                   f" style='width:auto;padding:0;margin-right:4px'>{t}</label>"
+                   for v, t in ((0, "안 내요"), (1000, "1천 원"), (3000, "3천 원"), (5000, "5천 원"), (10000, "1만 원 이상")))
+               + "</div>") if self.trial_week(uid) >= 6 else ""  # fmt: skip
+        return (f"<form method='post' action='/feedback' class='card' style='margin-top:28px'>"
+                f"<input type='hidden' name='t' value='{e(ticker)}'><input type='hidden' name='w' value='{e(week)}'>"
+                "<b>이 노트가 도움이 됐나요?</b><div class='between' style='margin:10px 0'>"
+                + "".join(f"<label style='text-align:center;flex:1'><input type='radio' name='h' value='{i}' required"
+                          f" style='width:auto;padding:0'><br><span class='sub'>{i}</span></label>" for i in range(1, 6))
+                + "</div><div class='between sub'><span>별로예요</span><span>아주 좋아요</span></div>" + pay
+                + "<input name='c' maxlength='300' placeholder='한 줄 의견 (선택)' style='width:100%;margin:12px 0'>"
+                "<button style='width:100%'>보내기</button></form>")  # fmt: skip
+
+    def feedback(self, uid: int, form: dict):
+        ticker, week, h = form.get("t", ""), form.get("w", ""), form.get("h", "")
+        if not (h.isdigit() and 1 <= int(h) <= 5 and re.fullmatch(r"\d{6}", ticker)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", week)):
+            return self.see("/")
+        pay = form.get("pay")
+        self.con.execute("insert into feedback (user_id, ticker, week, helpful, would_pay, comment, at)"
+                         " values (?, ?, ?, ?, ?, ?, ?)",
+                         (uid, ticker, week, int(h), int(pay) if pay and pay.isdigit() else None,
+                          form.get("c", "")[:300], datetime.now().isoformat()))  # fmt: skip
+        self.con.commit()
+        return self.see(f"/n/{ticker}?thanks=1")
+
+    def note(self, uid: int, ticker: str, thanks: bool = False):
         row = self.con.execute(
             "select s.name, n.week, n.body, n.writer, n.facts from stocks s join notes n using(ticker)"
             " where s.ticker = ? order by n.week desc limit 1", (ticker,)).fetchone()  # fmt: skip
         if not row:
             return "404 Not Found", [], page("없음", "<p>이 종목은 아직 노트가 없어요. <a href='/'>내 종목</a></p>")
         name, week, body, writer, facts = row
-        return "200 OK", [], render_note(name, ticker, week, json.loads(body), writer, json.loads(facts))
+        html_ = render_note(name, ticker, week, json.loads(body), writer, json.loads(facts))
+        return "200 OK", [], html_.replace("<div class='foot'>", self.survey(uid, ticker, week, thanks) + "<div class='foot'>", 1)
 
     def calendar(self, uid: int, month: str | None, today: date | None = None) -> str:
         """④ 캘린더 — 한 달 달력. 주말·공휴일은 빨간 숫자, 칸 안에 내 종목의 공시.
