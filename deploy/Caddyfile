@@ -1,0 +1,6 @@
+# https 인증서를 저절로 받고 갱신한다. hanjang.example.com 을 실제 도메인으로 바꾼다.
+hanjang.example.com {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy 127.0.0.1:8000
+}

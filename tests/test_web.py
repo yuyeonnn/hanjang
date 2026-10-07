@@ -1,6 +1,7 @@
 """3주차 화면 — 로그인 링크 서명, 종목 담기, 노트 열기와 기록, 글자 탈출. 서버를 띄우지 않고 WSGI 를 직접 부른다."""
 
 import io
+from datetime import date
 import json
 from urllib.parse import quote, unquote
 
@@ -205,3 +206,42 @@ def test_long_short_numbers_from_index():
 def test_redone_label():
     assert web.redone("2026-10-05", "2026-10-08T07:00:00") == " · 10월 8일 고침"
     assert web.redone("2026-10-05", "2026-10-05T07:00:00") == "" and web.redone("2026-10-05", "now") == ""
+
+
+def test_login_needs_consent_and_is_rate_limited(capsys):
+    app, _ = _app()
+    s, _, body = call(app, "/login", "POST", "email=a%40b.c")
+    assert "동의해야" in body and "[메일" not in capsys.readouterr().err  # 동의 없이는 메일을 보내지 않는다
+    s, _, body = call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    assert s.startswith("200") and "[메일" in capsys.readouterr().err
+    s, _, body = call(app, "/login", "POST", "email=a%40b.c&agree=1")  # 1분 안에 또
+    assert s.startswith("429") and "[메일" not in capsys.readouterr().err
+
+
+def test_public_pages_and_security_headers():
+    app, _ = _app()
+    s, h, body = call(app, "/privacy")  # 로그인 없이
+    assert s.startswith("200") and "탈퇴하면 그 자리에서 바로 지워요" in body and h["X-Frame-Options"] == "DENY"
+    s, _, body = call(app, "/method")
+    assert f"부채비율 {notes.DEBT_GOOD}% 미만" in body and "임원 이름은 받지도" in body
+    _, _, body = call(app, "/")
+    assert 'href="/privacy"' in body and 'name="agree"' in body
+
+
+def test_news_off_drops_article_facts():
+    con = db.connect(":memory:")
+    collect.save_universe(con, [("005930", "삼성전자")], {})
+    con.execute("insert into news values ('u', '005930', '2026-10-06', '연합', '삼성전자 기사')")
+    assert any(f["id"] == "N1" for f in notes.facts(con, "005930", date(2026, 10, 7)))
+    assert not any(f["id"].startswith("N") for f in notes.facts(con, "005930", date(2026, 10, 7), news=False))
+
+
+def test_backup_keeps_last_14(tmp_path):
+    from hanjang import backup
+
+    src = tmp_path / "h.db"
+    db.connect(src).close()
+    for d in range(1, 18):
+        backup.backup(date(2026, 10, d), src, tmp_path / "b")
+    kept = sorted(p.name for p in (tmp_path / "b").iterdir())
+    assert len(kept) == 14 and kept[0] == "hanjang-20261004.db" and kept[-1] == "hanjang-20261017.db"

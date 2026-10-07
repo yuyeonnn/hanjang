@@ -343,6 +343,12 @@ def parse_ecos(body: dict, series_id: str) -> list[tuple[date, float]]:
 # --- 뉴스: 구글 뉴스 RSS — 제목·매체·링크만. ⚠️ 개발 중 개인용만 (data-rights §5) ---
 
 
+def news_dev() -> bool:
+    """`.env` 에 NEWS_DEV=1 일 때만 기사를 받고 노트에 싣는다 — 내 컴퓨터에서 나 혼자 볼 때.
+    서버(.env 에 없음)는 늘 꺼진다: 남에게 보이는 곳에 개인용 기사가 나가지 않게."""
+    return env().get("NEWS_DEV") == "1"
+
+
 @dataclass(frozen=True)
 class News:
     url: str

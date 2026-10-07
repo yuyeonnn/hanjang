@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "hanjang-web",
-      "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "python", "-m", "hanjang.web"],
+      "runtimeExecutable": "C:/venvs/hanjang/Scripts/python.exe",
+      "runtimeArgs": ["-m", "hanjang.web"],
       "port": 8000
     }
   ]

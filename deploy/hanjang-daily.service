@@ -1,0 +1,10 @@
+# 매일 실행 한 번 — 백업 → 받기 → 노트 → (월요일만) 안내 메일. 타이머가 부른다.
+[Unit]
+Description=hanjang daily run
+
+[Service]
+Type=oneshot
+User=hanjang
+WorkingDirectory=/srv/hanjang
+Environment=TZ=Asia/Seoul
+ExecStart=/home/hanjang/.local/bin/uv run --frozen python -m hanjang.daily
