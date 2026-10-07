@@ -61,16 +61,18 @@
 
 ## 📰 요즘 뉴스는요
 
-요즘 기사는 대부분 **며칠 뒤 나올 분기 실적** 이야기예요. 실적 발표를 사흘 앞두고, 기사 제목들은 한 분기 영업이익이 100조 원에 가까워졌다고 써요. [머니투데이](https://news.google.com/rss/articles/CBMiaEFVX3lxTE1yc050eTBVRGx3ZnJuX3dJZlMwNGtreHFQY01BdUpqR0QxOVBEWXFpcmVOVmxFR25hdFJoeUVneThFdk9GSnpWTTl6NUdPTFB0LXUtSHJ1SVdqM3I0TFpQenJiZVJqUmlv0gFuQVVfeXFMTjZJdjRQX0hqbFRXY2ZqZjVzZ2ktVzVGRFl4dzFHWDhIUWRJTHNWSXF6ZDNGeVlhdTZQYXJUOGowVldqakc1dGEyWmFHVHVzbVlkUTA1R1RuWmt6Y0FnNk1Fak5Za2FtdENFV3JCMWc?oc=5) · [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
+이번 주 삼성전자 기사는 거의 다 한 가지 이야기예요 — **사흘 뒤 나올 실적.** 기사 제목들은 이번 석 달 영업이익이 100조 원에 가까워졌다고 써요. [머니투데이](https://news.google.com/rss/articles/CBMiaEFVX3lxTE1yc050eTBVRGx3ZnJuX3dJZlMwNGtreHFQY01BdUpqR0QxOVBEWXFpcmVOVmxFR25hdFJoeUVneThFdk9GSnpWTTl6NUdPTFB0LXUtSHJ1SVdqM3I0TFpQenJiZVJqUmlv0gFuQVVfeXFMTjZJdjRQX0hqbFRXY2ZqZjVzZ2ktVzVGRFl4dzFHWDhIUWRJTHNWSXF6ZDNGeVlhdTZQYXJUOGowVldqakc1dGEyWmFHVHVzbVlkUTA1R1RuWmt6Y0FnNk1Fak5Za2FtdENFV3JCMWc?oc=5) · [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
 
-기사들의 눈은 그다음으로 **HBM4**에 가 있어요. [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
-> ▸ **HBM** — 여러 겹 쌓아 데이터를 아주 빨리 주고받게 만든 메모리 반도체예요. AI 계산용 칩 옆에 붙어서 쓰여요. HBM4는 그 4세대예요.
+100조가 얼마나 큰지는 작년과 견줘 보면 바로 보여요. 작년 **한 해 전체** 영업이익이 43.6조 원이었거든요. [사업보고서 (DART)](https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260310002820) 석 달 만에 그 두 배 넘게 번다는 기대라서, 기사들이 「꿈의 숫자」라고 부르는 거예요. [머니투데이](https://news.google.com/rss/articles/CBMiaEFVX3lxTE1yc050eTBVRGx3ZnJuX3dJZlMwNGtreHFQY01BdUpqR0QxOVBEWXFpcmVOVmxFR25hdFJoeUVneThFdk9GSnpWTTl6NUdPTFB0LXUtSHJ1SVdqM3I0TFpQenJiZVJqUmlv0gFuQVVfeXFMTjZJdjRQX0hqbFRXY2ZqZjVzZ2ktVzVGRFl4dzFHWDhIUWRJTHNWSXF6ZDNGeVlhdTZQYXJUOGowVldqakc1dGEyWmFHVHVzbVlkUTA1R1RuWmt6Y0FnNk1Fak5Za2FtdENFV3JCMWc?oc=5)
 
-증시 전체로 보면, 이번 주 삼성전자 실적과 미국 금리를 시장의 갈림길로 꼽은 주간 전망 기사가 있었어요. [뉴시스](https://news.google.com/rss/articles/CBMiYEFVX3lxTE5qUWh6ZW1LQ0FjRzh1T3NGb3NIQmVLV2EzN3ZFSDFKWmNsX3A3blpNZXZVVVlEWm9sbXd5NkthcG00cmRzeWRmdEd1ck1lQmlxeVlzSGgyQkEtWGhGc1pJb9IBeEFVX3lxTE05RUpnd1NFWktTOXVSNDMyS3lPX1JIMEhyM3FNUk9XU1h3N2hXdDVsQ2tLUWVyQVRna2ZPb1JPR2Y2V3R6VW5nTE1vRnpVVVpzRW5Xdl9QUy1sam9jTDlmcVJBa01aZXBwNHBMcDZYTHpKeE1iV3JhRw?oc=5)
+그래서 기사들의 눈은 벌써 그다음에 가 있어요 — 100조 이후에도 이만큼 벌 수 있느냐, 그 열쇠로 **HBM4**를 꼽아요. [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
+> ▸ **HBM** — 메모리 칩을 여러 층 쌓아 데이터를 아주 빠르게 주고받게 만든 반도체예요. AI 계산용 칩 바로 옆에 붙어 쓰여요. HBM4는 그 4세대예요.
 
-회사 밖 소식으로는, 중국 디스플레이 회사 BOE의 회장이 다음 주 한국에 와 삼성전자와 관계를 다진다는 기사가 있었어요. [전자신문](https://news.google.com/rss/articles/CBMiTkFVX3lxTFBCUmFTOUNKdUlIZmdaTHhoeEtxRGRGRDFfOG54RmFUWWE1bEVFd3FhbnQ5MFhHTHZBNEJ0bmZJR1JzWl9WSDYzUTZCMWFPUQ?oc=5)
+이 이야기가 삼성전자만의 일로 끝나지 않는다는 점도 기사에 보여요. 이번 주 증시 전체 전망 기사는 시장의 갈림길로 **삼성전자 실적과 미국 금리**를 나란히 꼽았어요. [뉴시스](https://news.google.com/rss/articles/CBMiYEFVX3lxTE5qUWh6ZW1LQ0FjRzh1T3NGb3NIQmVLV2EzN3ZFSDFKWmNsX3A3blpNZXZVVVlEWm9sbXd5NkthcG00cmRzeWRmdEd1ck1lQmlxeVlzSGgyQkEtWGhGc1pJb9IBeEFVX3lxTE05RUpnd1NFWktTOXVSNDMyS3lPX1JIMEhyM3FNUk9XU1h3N2hXdDVsQ2tLUWVyQVRna2ZPb1JPR2Y2V3R6VW5nTE1vRnpVVVpzRW5Xdl9QUy1sam9jTDlmcVJBa01aZXBwNHBMcDZYTHpKeE1iV3JhRw?oc=5) 금리는 이 회사에도 남 얘기가 아니에요 — 위에서 본 것처럼 국고채 금리가 오를 때 주가가 조금 눌려 온 편이었거든요(β −0.3). [민감도 계산 ⚠️]
 
-<sub>기사 제목만 읽고 정리했어요. 기사에 나온 기대·전망은 그 기사를 쓴 쪽의 것이고, 한장의 예측이 아니에요.</sub>
+실적 말고는, 중국 디스플레이 회사 BOE의 회장이 다음 주 한국에 와 삼성전자와 관계를 다진다는 소식이 있었어요. [전자신문](https://news.google.com/rss/articles/CBMiTkFVX3lxTFBCUmFTOUNKdUlIZmdaTHhoeEtxRGRGRDFfOG54RmFUWWE1bEVFd3FhbnQ5MFhHTHZBNEJ0bmZJR1JzWl9WSDYzUTZCMWFPUQ?oc=5) 무엇을 주고받을지는 제목만으로는 아직 알 수 없어요.
+
+<sub>기사 제목을 읽고 노트의 숫자와 이어 정리했어요. 「100조」 같은 기대는 기사가 한 말이고, 한장의 예측이 아니에요.</sub>
 
 **읽어 볼 기사**
 
