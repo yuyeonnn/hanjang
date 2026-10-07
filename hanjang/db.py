@@ -42,6 +42,15 @@ create table if not exists holdings (
 create table if not exists views (
   id integer primary key, user_id integer not null references users, page text not null,
   ticker text, at text not null);
+create table if not exists likes (
+  user_id integer not null references users, ticker text not null references stocks, week text not null,
+  at text not null, primary key (user_id, ticker, week));
+create table if not exists follows (
+  follower_id integer not null references users, followee_id integer not null references users,
+  at text not null, primary key (follower_id, followee_id));
+create table if not exists regrams (
+  id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
+  week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));
 create table if not exists feedback (
   id integer primary key, user_id integer not null references users, ticker text, week text,
   helpful integer, would_pay integer, comment text, at text not null);
@@ -57,7 +66,10 @@ def connect(path=PATH) -> sqlite3.Connection:
     # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
     for table, col, typ in (("financials", "basis", "text"), ("stocks", "induty_code", "text"),
                             ("disclosures", "amount", "integer"),
-                            ("users", "mail_on", "integer not null default 1")):  # 주간 안내 메일 켜짐(1)/꺼짐(0)  # fmt: skip
+                            ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
+                            ("users", "nickname", "text"), ("users", "bio", "text"),
+                            ("users", "photo", "blob"), ("users", "photo_at", "text")):  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
+    con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")
     return con
