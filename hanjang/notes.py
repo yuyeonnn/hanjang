@@ -257,6 +257,22 @@ def numbers(s: str) -> set[str]:
     return {t.replace(",", "") for t in re.findall(r"\d[\d,]*(?:\.\d+)?", s)}
 
 
+# 조사 짝 — (받침 없을 때, 받침 있을 때). 빈칸 값 뒤의 조사를 값의 끝소리에 맞춘다(「7월 23일와」→「7월 23일과」)
+JOSA = {"와": ("와", "과"), "과": ("와", "과"), "는": ("는", "은"), "은": ("는", "은"),
+        "가": ("가", "이"), "이": ("가", "이"), "를": ("를", "을"), "을": ("를", "을")}  # fmt: skip
+SLOT_JOSA = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}(?:(와|과|는|은|가|이|를|을)(?![가-힣]))?")
+
+
+def josa(value: str, p: str) -> str:
+    """값의 마지막 글자에 받침이 있으면 「과·은·이·을」. 한글이 아닌 끝(%, 숫자)은 읽는 소리로 — %·퍼센트는 받침 없음."""
+    last = value[-1]
+    if "가" <= last <= "힣":
+        has = (ord(last) - 0xAC00) % 28 != 0
+    else:
+        has = last in "013678"  # 영·일·삼·육·칠·팔 — 받침 있는 숫자 소리
+    return JOSA[p][1 if has else 0]
+
+
 def fill(sent: dict, by: dict[str, dict]) -> dict:
     """AI 문장의 빈칸을 코드 값으로 채운다. 쓴 빈칸의 사실은 근거(refs)에 저절로 들어간다.
     검사: ① 빈칸 밖에 숫자 금지 ② 없는 빈칸 금지 ③ 빈칸 없이 쓴 방향 낱말이 사실과 반대면 탈락."""
@@ -279,7 +295,11 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         if (dirs == {-1} and UP.search(bare)) or (dirs == {1} and DOWN.search(bare)):
             raise ValueError(f"사실과 반대 방향: {raw!r}")
     # 방향 줄기(「줄었」) 뒤에 AI 가 「었」을 한 번 더 붙이는 일이 잦다 — 「줄었었지만」 → 「줄었지만」
-    text = SLOT.sub(lambda m: by[m[1]]["slots"][m[2]], raw).replace("었었", "었")
+    def put(m):
+        v = by[m[1]]["slots"][m[2]]
+        return v + (josa(v, m[3]) if m[3] else "")
+
+    text = SLOT_JOSA.sub(put, raw).replace("었었", "었")
     return {"text": text, "refs": refs}
 
 
@@ -384,14 +404,12 @@ def code_note(fs: list[dict]) -> dict:
 
 
 def finish(note: dict, fs: list[dict], name: str = "") -> dict:
-    """좋게 본 것·걱정되는 것은 **늘 두 칸 다** 보인다 — 해당 사실이 없으면 코드가 「없었어요」를 채운다.
+    """좋게 본 것·걱정되는 것 — 해당 사실이 없는 칸은 비워 두고 화면에서 띄우지 않는다 (사용자 10/7).
     소제목이 없으면(코드 대체 글) 코드가 짓는다. 언론 키워드도 여기서 코드가 센다."""
-    seen = [f["id"] for f in fs if f["id"][0] in "FD"] or [fs[0]["id"]]
-    for key, what, title in (("good", "좋게 볼", "재무·공시에서 좋게 본 점"), ("concern", "걱정되는", "재무·공시에서 걱정되는 점")):
-        if not note.get(key):
-            note[key] = [{"text": f"재무와 공시에서 {what} 쪽으로 분류된 건 없었어요.", "refs": seen}]
-            note[f"{key}_title"] = "분류된 것 없음"
-        note.setdefault(f"{key}_title", title)
+    for key, title in (("good", "재무·공시에서 좋게 본 점"), ("concern", "재무·공시에서 걱정되는 점")):
+        note[key] = note.get(key) or []
+        if note[key]:
+            note.setdefault(f"{key}_title", title)
     note["tone_rule"] = TONE_RULE
     note["keywords"] = keywords(fs, name)
     return note

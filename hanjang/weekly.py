@@ -9,10 +9,10 @@ from hanjang import collect, db, mail, notes
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
-    """담은 종목 중 이번 주 노트가 있는 사용자에게만 한 통씩."""
+    """담은 종목 중 이번 주 노트가 있는 사용자에게만 한 통씩 — 프로필에서 메일을 끈 사람은 빼고."""
     rows = con.execute(
         "select u.email, s.name from users u join holdings h on h.user_id = u.id join stocks s using(ticker)"
-        " join notes n on n.ticker = s.ticker and n.week = ? order by u.id, h.added_at", (week,)).fetchall()  # fmt: skip
+        " join notes n on n.ticker = s.ticker and n.week = ? where u.mail_on = 1 order by u.id, h.added_at", (week,)).fetchall()  # fmt: skip
     by: dict[str, list[str]] = {}
     for email, name in rows:
         by.setdefault(email, []).append(name)

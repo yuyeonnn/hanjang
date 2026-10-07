@@ -131,7 +131,57 @@ def test_learn_tab_lists_and_opens_articles():
     assert st.startswith("200") and all(web.e(a["title"]) in body for a in learn.ARTICLES)
     st, _, body = call(app, "/learn/inverse-leverage", cookie=ck)
     assert st.startswith("200") and "하루" in body and "추천하지 않아요" in body
+    assert '<strong class="font-semibold text-primary' in body and "**" not in body
     assert call(app, "/learn/nope", cookie=ck)[0].startswith("404")
     for a in learn.ARTICLES:  # 읽기 팁에도 권유·예측 말은 없다
-        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]])
+        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "")
         assert not notes.FORBIDDEN.search(text), a["slug"]
+
+
+def test_empty_good_or_concern_side_is_hidden():
+    base = {"headline": "h", "summary": [], "sections": []}
+    only_good = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "좋아요.", "refs": ["F1"]}],
+                                "concern": [], "good_title": "성장"}, "llm:x")
+    assert "긍정</span>" in only_good and "부정</span>" not in only_good
+    old = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "없었어요.", "refs": ["F1"]}],
+                          "concern": [{"text": "없었어요.", "refs": ["F1"]}], "good_title": "분류된 것 없음",
+                          "concern_title": "분류된 것 없음"}, "llm:x")
+    assert "긍정 요인과 부정 요인" not in old  # 둘 다 비면 절째 숨긴다
+
+
+def test_avatar_opens_profile_with_real_counts():
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    assert 'href="/me"' in call(app, "/", cookie=ck)[2]
+    call(app, "/n/005930", cookie=ck)
+    st, _, body = call(app, "/me", cookie=ck)
+    assert st.startswith("200") and "me@x.kr" in body and "1 / 20개" in body and "탈퇴하기" in body
+    assert "함께한 지" not in body and "읽은 노트" not in body and "답장" not in body
+    assert "로그인 링크 받기" in call(app, "/me")[2]  # 로그인 안 하면 로그인 화면
+
+
+def test_mail_switch_and_delete_account():
+    from hanjang import weekly
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    assert "ON</span>" in call(app, "/me", cookie=ck)[2]
+    call(app, "/me/mail", "POST", "", ck)  # 끄기
+    assert "OFF</span>" in call(app, "/me", cookie=ck)[2]
+    assert weekly.notify(con, "2026-10-05") == 0  # 끈 사람에겐 안내 메일이 가지 않는다
+    call(app, "/me/mail", "POST", "", ck)
+    assert weekly.notify(con, "2026-10-05") == 1
+    st, h, _ = call(app, "/me/delete", "POST", "", ck)
+    assert st.startswith("303") and "Max-Age=0" in h["Set-Cookie"]
+    assert con.execute("select (select count(*) from users) + (select count(*) from holdings)"
+                       " + (select count(*) from views)").fetchone() == (0,)
+
+
+def test_bottom_nav_has_profile_tab():
+    app, con = _app()
+    ck = _login(app)
+    body = call(app, "/me", cookie=ck)[2]
+    assert 'href="/me"><span class="material-symbols-outlined text-[22px]">person</span>' in body
+    assert 'aria-current=page class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md transition-colors text-primary-container font-semibold" href="/me"' in body

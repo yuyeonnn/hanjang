@@ -79,10 +79,10 @@ def test_tone_is_decided_by_code_and_enforced():
     notes.check_note({**note, "concern": [{"text": "영업 적자예요.", "refs": ["F2"]}]}, list(fs.values()))
 
 
-def test_finish_always_shows_both_sides():
+def test_finish_leaves_empty_side_empty():
     fs = notes.facts(_con(), "005930", date(2026, 10, 7))  # 걱정 사실 없음
     note = notes.finish({"headline": "x", "summary": [], "sections": [], "good": [], "concern": []}, fs)
-    assert "걱정되는 쪽으로 분류된 건 없었어요" in note["concern"][0]["text"] and note["tone_rule"]
+    assert note["concern"] == [] and "concern_title" not in note and note["tone_rule"]
     assert notes.code_note(fs)["good"]  # 코드 대체 노트에도 좋게 본 것이 들어간다
 
 
@@ -164,3 +164,9 @@ def test_year_may_be_written_but_nothing_else():
 def test_unsigned_width_slot_reads_naturally():
     by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
     assert notes.fill({"text": "매출이 {F1.폭} {F1.방향}어요.", "refs": ["F1"]}, by)["text"] == "매출이 10.9% 늘었어요."
+
+
+def test_particle_follows_slot_value():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    assert notes.fill({"text": "{D1.날짜}와 {F1.값}가 있어요.", "refs": ["D1", "F1"]}, by)["text"] == "8월 21일과 333.6조원이 있어요."
+    assert notes.fill({"text": "{F1.폭}은 컸어요.", "refs": ["F1"]}, by)["text"] == "10.9%는 컸어요."

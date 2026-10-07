@@ -53,7 +53,8 @@ def connect(path=PATH) -> sqlite3.Connection:
     con.executescript(SCHEMA)
     # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
     for table, col, typ in (("financials", "basis", "text"), ("stocks", "induty_code", "text"),
-                            ("disclosures", "amount", "integer")):  # fmt: skip
+                            ("disclosures", "amount", "integer"),
+                            ("users", "mail_on", "integer not null default 1")):  # 주간 안내 메일 켜짐(1)/꺼짐(0)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     return con
