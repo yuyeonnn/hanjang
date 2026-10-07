@@ -38,6 +38,23 @@
 
 **할 일**: 쓸 지표(원/달러 환율 · 국고채 3년)마다 ECOS 의 「작성기관」을 확인한다 — 한국은행이 아니라 다른 기관(예: 금융투자협회)이 작성한 통계면 그 기관 조건을 본다.
 
+## 2-1. 주가지수 (읽기 팁 차트) — ⚠️ OECD 것만, 서비스 전 한 번 더 확인 (2026-10-08)
+
+ECOS 에서 표마다 「작성기관」을 조회했다(`StatisticTableList`).
+
+| ECOS 표 | 작성기관 | 쓰나 |
+|---|---|---|
+| 802Y001 주식시장(일) — 코스피 일별 | **한국거래소** | ❌ ECOS 약관 5조 ① 「작성기관이 상업 이용을 제한한 통계는 그 기관 승인」 → 거래소 조건(§4)을 따른다 |
+| 901Y014 주식시장(월·년) | 한국거래소 | ❌ 같은 이유 |
+| **902Y002 국제 주요국 주가지수** (월평균, 2015=100) | **OECD** | ✅ 조건부 — OECD 는 2024-07-01 부터 자료를 **CC BY 4.0**(출처 표시하면 상업 이용 가능)으로 낸다 ([OECD open by default](https://www.oecd.org/en/about/oecd-open-by-default-policy.html), [보도자료](https://www.oecd.org/en/about/news/press-releases/2024/07/oecd-data-publications-and-analysis-become-freely-accessible.html)). 단 「제3자 소유 자료가 섞이면 그쪽 허락」 단서가 있고 원자료는 각국 거래소다 |
+
+**쓰는 곳**: 읽기 팁 「오래 들고 있으면 덜 위험할까요?」의 차트와 숫자(한국·미국)만. 종목 노트에는 안 쓴다. 출처 「OECD 주가지수 · 한국은행 ECOS」.
+**할 일**: KRX 견적 문의([krx-inquiry.md](krx-inquiry.md))에 「OECD 가 공개한 한국 주가지수(월평균)를 교육용 차트에 써도 되는지」를 함께 묻는다. 안 된다면 그 글은 차트 없이 고정 문장으로 돌린다.
+
+## 2-2. DART 지분 보고 — ✅ (2026-10-08)
+
+임원·주요주주 소유보고(`elestock`)·대량보유 상황보고(`majorstock`) 모두 OpenDART API — §1 과 같은 조건. 임원 **이름은 받지도 저장하지도 않는다**(직위만). 5% 보고자는 기관 이름 그대로(공시 원문에 있는 그대로).
+
 ## 3. FRED (미국 세인트루이스 연준) — ⚠️ 쓰지 않는다
 
 - 미국 10년 금리(`DGS10`) 자체는 「Public Domain: Citation Requested」 — 출처만 밝히면 되는 자료다. ([DGS10](https://fred.stlouisfed.org/series/DGS10))

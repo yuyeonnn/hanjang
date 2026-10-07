@@ -73,6 +73,11 @@ def main(today: date) -> None:
         for rno, v in dart.buybacks(t, lo, today).items():
             got += con.execute("update disclosures set amount = ? where rcept_no = ?", (v, rno)).rowcount
     print(f"  업종 코드 · 자사주 취득 금액 {got}건 · DART {dart.calls}콜")
+    ins = [x for t in tickers for x in dart.insiders(t, lo)]  # 종목마다 2콜 — 임원·주요주주 · 5% 대량보유
+    con.executemany("insert or replace into insiders values (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(x.rcept_no, x.ticker, x.day.isoformat(), x.kind, x.who, x.change, x.rate, x.rate_chg)
+                     for x in ins])  # fmt: skip
+    print(f"  지분 보고 {len(ins)}건 (임원·주요주주 · 5% 대량보유)")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
 
     for sid, name in sources.MACRO.items():
@@ -80,6 +85,11 @@ def main(today: date) -> None:
         con.executemany("insert or replace into macro values (?, ?, ?)",
                         [(sid, d.isoformat(), v) for d, v in pts])  # fmt: skip
         print(f"{name} {len(pts)}일")
+
+    for sid, name in sources.INDEX.items():
+        pts = sources.ecos(sid, date(1957, 1, 1), today, "M")
+        con.executemany("insert or replace into macro values (?, ?, ?)", [(sid, d.isoformat(), v) for d, v in pts])
+        print(f"{name} 주가지수 {len(pts)}달 (OECD)")
 
     hs = [h for y in (today.year, today.year + 1) for h in sources.holidays(y)]
     con.executemany("insert or replace into holidays values (?, ?)", [(d.isoformat(), n) for d, n in hs])

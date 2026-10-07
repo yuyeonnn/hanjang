@@ -56,7 +56,7 @@ PK `(ticker, date)`. 보정 계산은 퀀트점프 코드를 복사한다 — �
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
-| `series_id` | text | `ECOS:USDKRW` · `ECOS:KTB3Y` · `FRED:DGS10` |
+| `series_id` | text | `ECOS:<표>:<항목>` — 환율·국고채(일별), `ECOS:902Y002:KOR`·`USA` OECD 주가지수(월별, 날짜는 그 달 1일 · 읽기 팁 「오래 들고 있으면」 글) |
 | `date` | date | |
 | `value` | real | |
 
@@ -134,6 +134,19 @@ PK `(ticker, as_of, series_id)`. 지표 **전부** 저장한다 — 노트에는
 
 PK `(ticker, date, kind)`. 공시에서 뽑는다.
 
+### `insiders` — 지분 보고 (DART 임원·주요주주 소유보고 · 5% 대량보유 보고)
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `rcept_no` | PK | DART 접수번호 |
+| `ticker` | FK stocks | |
+| `date` | date | 보고일 |
+| `kind` | text | `임원` · `5%` |
+| `who` | text | 임원은 **직위만**(이름은 받지 않는다 — 노트에 쓸 일이 없다) · 5% 는 보고자(기관) 이름 |
+| `change` | integer | 보유 주식 증감(주) |
+| `rate` | real | 보유 비율 % (5% 만) |
+| `rate_chg` | real | 직전 보고 대비 %p (5% 만 · DART 값이 주식 증감과 부호가 어긋나는 일이 있어 노트엔 안 쓴다) |
+
 ### `notes` — 만든 기업 노트
 
 | 컬럼 | 타입 | 비고 |
@@ -145,7 +158,7 @@ PK `(ticker, date, kind)`. 공시에서 뽑는다.
 | `writer` | text | `llm:<모델>` 또는 `code` (숫자 대조 검사에서 떨어져 코드 문장으로 대신한 경우) |
 | `made_at` | timestamp | |
 
-PK `(ticker, week)`. 같은 주에 다시 만들면 덮어쓴다.
+PK `(ticker, week)`. 같은 주에 다시 만들면 덮어쓴다 — 화~일은 사실이 바뀐 종목만 다시 만든다(`made_at` 이 그 주 월요일보다 뒤면 화면에 「고침」).
 
 ---
 

@@ -27,7 +27,8 @@ def env() -> dict[str, str]:
 
 
 def _ymd(s: str) -> date:
-    return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+    """「20261008」 · 월별은 「202608」 → 그 달 1일."""
+    return date(int(s[:4]), int(s[4:6]), int(s[6:8]) if len(s) >= 8 else 1)
 
 
 def _won(s: str | None) -> int | None:
@@ -104,6 +105,20 @@ class Disclosure:
     ticker: str
     day: date
     title: str
+
+
+@dataclass(frozen=True)
+class Insider:
+    """지분 보고 한 건 — 임원·주요주주 소유보고(kind 「임원」) 또는 5% 대량보유 보고(kind 「5%」).
+    임원은 이름을 받지 않고 직위만(이름은 노트에 쓸 일이 없다). 5% 보고자는 기관 이름 그대로."""
+    rcept_no: str
+    ticker: str
+    day: date
+    kind: str
+    who: str
+    change: int | None  # 보유 주식 수 증감(주)
+    rate: float | None  # 보유 비율 % (5% 보고만)
+    rate_chg: float | None  # 직전 보고 대비 %p (5% 보고만)
 
 
 @dataclass(frozen=True)
@@ -199,6 +214,15 @@ class Dart:
         cc = self.corps().get(ticker)
         return self._call("company.json", corp_code=cc).json().get("induty_code") if cc else None
 
+    def insiders(self, ticker: str, since: date) -> list[Insider]:
+        """임원·주요주주 소유보고(elestock) + 5% 대량보유 보고(majorstock) — since 이후 것만. 둘 다 회사별 전체 이력을 준다."""
+        cc = self.corps().get(ticker)
+        if not cc:
+            return []
+        rows = [("임원", r) for r in self._list("elestock.json", corp_code=cc)["list"]]
+        rows += [("5%", r) for r in self._list("majorstock.json", corp_code=cc)["list"]]
+        return [x for kind, r in rows if (x := parse_insider(kind, r, ticker)).day >= since]
+
     def buybacks(self, ticker: str, start: date, end: date) -> dict[str, int]:
         """자기주식 취득 결정의 취득 예정 금액(보통주, 원) — {접수번호: 금액}. 주요사항보고서 전용 API."""
         cc = self.corps().get(ticker)
@@ -207,6 +231,25 @@ class Dart:
         rows = self._list("tsstkAqDecsn.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"),
                           end_de=end.strftime("%Y%m%d"))["list"]  # fmt: skip
         return {r["rcept_no"]: v for r in rows if (v := _won(r.get("aqpln_prc_ostk")))}
+
+
+def _num(s: str | None) -> float | None:
+    s = (s or "").replace(",", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_insider(kind: str, r: dict, ticker: str) -> Insider:
+    if kind == "임원":
+        who = "주요주주" if "주요주주" in (r.get("isu_main_shrholdr") or "") else (r.get("isu_exctv_ofcps") or "임원").strip()
+        chg, rate, rchg = _num(r.get("sp_stock_lmp_irds_cnt")), None, None
+    else:
+        who, chg = (r.get("repror") or "").strip(), _num(r.get("stkqy_irds"))
+        rate, rchg = _num(r.get("stkrt")), _num(r.get("stkrt_irds"))
+    return Insider(r["rcept_no"], ticker, date.fromisoformat(r["rcept_dt"]), kind, who,
+                   None if chg is None else int(chg), rate, rchg)  # fmt: skip
 
 
 def parse_corps(xml: str) -> dict[str, str]:
@@ -274,11 +317,17 @@ MACRO = {  # 쓸 지표 — 출처 표시 「한국은행 ECOS」 (data-rights �
 }
 
 
-def ecos(series_id: str, start: date, end: date) -> list[tuple[date, float]]:
+# 읽기 팁 「오래 갖고 있으면」 글의 재료 — OECD 주가지수(월평균, 2015=100). 작성기관 OECD (CC BY 4.0, data-rights §2-1).
+# ECOS 일별 코스피(802Y001)는 작성기관이 한국거래소라 쓰지 않는다
+INDEX = {"ECOS:902Y002:KOR": "한국", "ECOS:902Y002:USA": "미국"}
+
+
+def ecos(series_id: str, start: date, end: date, cycle: str = "D") -> list[tuple[date, float]]:
     key = env()["ECOS_API_KEY"]
     _, stat, item = series_id.split(":")
-    url = (f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/100000/{stat}/D/"
-           f"{start:%Y%m%d}/{end:%Y%m%d}/{item}")  # fmt: skip
+    fmt = "%Y%m%d" if cycle == "D" else "%Y%m"
+    url = (f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/100000/{stat}/{cycle}/"
+           f"{start:{fmt}}/{end:{fmt}}/{item}")  # fmt: skip
     return parse_ecos(_get(url, key).json(), series_id)
 
 

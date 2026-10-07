@@ -24,6 +24,9 @@ create table if not exists macro (
 create table if not exists news (
   url text primary key, ticker text not null references stocks, date text not null,
   press text, title text not null);
+create table if not exists insiders (
+  rcept_no text primary key, ticker text not null references stocks, date text not null, kind text not null,
+  who text not null, change integer, rate real, rate_chg real);
 create table if not exists holidays (date text primary key, name text not null);
 create table if not exists events (
   ticker text not null references stocks, date text not null, kind text not null,
