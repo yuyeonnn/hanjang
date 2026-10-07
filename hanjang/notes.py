@@ -44,6 +44,37 @@ TITLE_RULES = (
     (r"매매거래정지|관리종목지정|상장폐지|감사의견(거절|부적정|한정)", "TRADING_HALT", 3),
     (r"사업보고서|반기보고서|분기보고서|기업설명회", "OTHER", 1),
 )
+# 공시 제목 → 「무슨 일인지」 쉬운 말 (우리가 쓴 고정 문장, 숫자 없음). 첫 번째로 맞는 것을 쓴다.
+# AI 가 「자사주 매입 공시」라는 이름만 반복하지 않고 뜻을 풀어 쓰게 하려고 사실에 붙인다
+TITLE_PLAIN = (
+    (r"자기주식취득신탁계약", "증권사에 돈을 맡겨 자기 회사 주식을 조금씩 사들이기로 했어요"),
+    (r"자기주식취득결정", "회사가 시장에서 자기 회사 주식을 사들이기로 했어요 — 시중에 도는 주식이 줄어요"),
+    (r"자기주식처분", "회사가 갖고 있던 자기 회사 주식을 팔거나 나눠 주기로 했어요"),
+    (r"주식소각|자기주식소각", "회사가 갖고 있던 자기 주식을 아예 없애기로(소각) 했어요 — 전체 주식 수가 줄어요"),
+    (r"(?<!무)유상증자결정", "새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
+    (r"발행결과", "앞서 정한 증자·채권 발행을 실제로 마쳤다는 결과 보고예요"),
+    (r"무상증자결정", "주주에게 새 주식을 공짜로 나눠 주기로 했어요"),
+    (r"전환사채권발행결정", "나중에 주식으로 바꿀 수 있는 채권(전환사채)을 팔아 돈을 빌리기로 했어요"),
+    (r"신주인수권부사채권발행결정", "새 주식을 살 권리가 붙은 채권을 팔아 돈을 빌리기로 했어요"),
+    (r"교환사채권발행결정", "회사가 가진 다른 주식으로 바꿔 줄 수 있는 채권을 팔아 돈을 빌리기로 했어요"),
+    (r"배당결정", "번 돈의 일부를 주주에게 배당으로 나눠 주기로 했어요"),
+    (r"주주명부폐쇄|기준일설정", "배당 등을 받을 주주를 정하는 기준일을 알렸어요"),
+    (r"영업\(잠정\)실적|매출액또는손익구조", "최근 실적(매출·이익)을 미리 알렸어요"),
+    (r"단일판매공급계약", "큰 판매·공급 계약을 맺었어요"),
+    (r"소송등의제기", "회사가 소송을 걸었거나 소송을 당했어요"),
+    (r"소송등의판결", "진행 중이던 소송에 판결이 나왔어요"),
+    (r"합병", "다른 회사와 합치기로 했어요"),
+    (r"분할", "회사의 일부 사업을 떼어 내기로 했어요"),
+    (r"타법인주식및출자증권(취득|양수)", "다른 회사의 주식을 사서 지분을 갖기로 했어요"),
+    (r"최대주주변경", "가장 큰 주주가 바뀌었어요"),
+)
+
+
+def plain(title: str) -> str:
+    t = re.sub(r"[\s·ㆍ・]", "", title)
+    return next((s for pat, s in TITLE_PLAIN if re.search(pat, t)), "")
+
+
 # 제목이 코드 정의와 반대인 것 — 규칙·AI 분류 뒤에 덧씌운다 (퀀트점프 RECODE 중 자주 걸리는 것)
 RECODE = (
     (("BUYBACK",), "처분|해지|매도", "OTHER"),
@@ -216,7 +247,8 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         d = date.fromisoformat(d)
         tone = {1: " — 주주에게 반가운 쪽으로 분류", -1: " — 주주에게 걸리는 쪽으로 분류"}.get(dr, "")
         day = f"{d.month}월 {d.day}일"
-        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{tone}", "url": DART.format(rno),
+        what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
+        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{what}{tone}", "url": DART.format(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
     news = con.execute("select url, date, press, title from news where ticker = ? and date >= ?"
                        " order by date desc limit 5",
@@ -279,9 +311,19 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
     raw, refs = sent["text"], list(dict.fromkeys(sent["refs"]))
     # 연도(「2025년」)만은 직접 써도 된다 — 사실의 연도와 글자 그대로 같을 때만. 다른 숫자는 전부 빈칸으로
     years = {f["slots"]["연도"] for f in by.values() if "연도" in f.get("slots", {})}
+    # 날짜(「10월 1일」)와 그 달(「7월」)도 사실에 있는 것과 글자 그대로 같으면 직접 써도 된다
+    days = {f["slots"]["날짜"] for f in by.values() if "날짜" in f.get("slots", {})}
+    months = {d.split()[0] for d in days}
     bare = SLOT.sub("", raw)
-    for y in years:
+    for y in sorted(years | days, key=len, reverse=True):
         bare = bare.replace(y, "")
+    for mth in months:
+        bare = re.sub(rf"(?<!\d){mth}", "", bare)
+    # 기사(N)만 근거인 문장은 그 기사 제목·본문에 적힌 숫자를 그대로 옮겨도 된다 (토큰 대조)
+    news_only = refs and all(r.startswith("N") for r in refs)
+    src = set().union(*(numbers(by[r]["text"] + " " + by[r].get("body", "")) for r in refs if r in by)) if news_only else set()
+    if news_only and numbers(bare) <= src:
+        bare = re.sub(r"\d", "", bare)
     if re.search(r"\d", bare):
         raise ValueError(f"숫자는 빈칸으로만: {raw!r}")
     used = SLOT.findall(raw)
@@ -300,6 +342,11 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = SLOT_JOSA.sub(put, raw).replace("었었", "었")
+    if "{" in text or "}" in text:  # 영어 이름 같은, 정해 두지 않은 빈칸을 지어낸 경우 (「{N1.body}」)
+        raise ValueError(f"없는 빈칸이 남음: {raw!r}")
+    kinds = [by[fid]["slots"]["종류"] for fid, key in used if key == "종류"]
+    if len(kinds) != len(set(kinds)):  # 「(자사주 매입, 자사주 매입, …)」 같은 이름 반복
+        raise ValueError(f"같은 공시 이름 반복: {raw!r}")
     return {"text": text, "refs": refs}
 
 
@@ -308,7 +355,7 @@ def check_note(note: dict, fs: list[dict]) -> dict:
     ① 문장마다 있는 사실 id ② 사실에 없는 숫자 금지(빈칸을 채운 뒤에도 한 번 더) ③ 금지어 ④ 예측 말투
     ⑤ 좋게 본 것은 +1 사실만, 걱정되는 것은 −1 사실만 근거로 — 그런 사실이 있는데 비워 두면 탈락."""
     ids = {f["id"] for f in fs}
-    allowed = set().union(*(numbers(f["text"]) for f in fs)) if fs else set()
+    allowed = set().union(*(numbers(f["text"] + " " + f.get("body", "")) for f in fs)) if fs else set()
     quoted = [f["text"] for f in fs]
     for key, sign in (("good", 1), ("concern", -1)):
         want = {f["id"] for f in fs if f["tone"] == sign}
@@ -420,7 +467,8 @@ def write(name: str, fs: list[dict], today: date) -> tuple[dict, str]:
     label = {1: "좋게 본 것", -1: "걱정되는 것", 0: "중립"}
     payload = {"today": today.isoformat(), "name": name,
                "facts": [{"id": f["id"], "text": f["text"], "tone": label[f["tone"]],
-                          "slots": [f"{{{f['id']}.{k}}}" for k in f["slots"]]} for f in fs]}  # fmt: skip
+                          "slots": [f"{{{f['id']}.{k}}}" for k in f["slots"]]} | ({"body": f["body"]} if f.get("body") else {})
+                         for f in fs]}  # fmt: skip
     got = llm.ask("writer", "note", payload, lambda j: fill_note(j, fs), schema(fs))
     note, writer = (got, f"llm:{llm.MODELS['writer']}") if got else (code_note(fs), "code")
     return finish(note, fs, name), writer
@@ -434,6 +482,23 @@ def week_of(today: date) -> str:
     return (today - timedelta(days=today.weekday())).isoformat()
 
 
+READ_N = 4  # 종목마다 본문까지 읽는 기사 수 — 퀀트점프 WHY_READ 와 같게
+
+
+def read_bodies(news: list[dict]) -> None:
+    """기사 본문 앞부분을 사실에 붙인다(f["body"]) · 링크는 언론사 원문 주소로. 실패한 기사는 제목만."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from hanjang import sources
+
+    with ThreadPoolExecutor(len(news) or 1) as ex:
+        got = list(ex.map(lambda f: sources.read_article(f["url"], f["slots"]["제목"].strip("「」")), news))
+    for f, (orig, body) in zip(news, got):
+        f["url"] = orig or f["url"]
+        if body:
+            f["body"] = body
+
+
 def main(tickers: list[str], today: date) -> None:
     con = db.connect()
     ruled, ai = read_disclosures(con)
@@ -442,10 +507,13 @@ def main(tickers: list[str], today: date) -> None:
     rows = [r for r in rows if not tickers or r[0] in tickers]
     week = week_of(today)
     by = {"code": 0}
+    held = {t for (t,) in con.execute("select distinct ticker from holdings")}
     for t, name in rows:
         fs = facts(con, t, today)
         if not fs:
             continue
+        if t in held:  # ⚠️ 개발 중 개인용만 — 기사 본문 앞부분을 읽어 「요즘 기사」를 풍부하게 (저장하지 않음)
+            read_bodies([f for f in fs if f["id"].startswith("N")][:READ_N])
         note, writer = write(name, fs, today)
         note["links"] = {f["id"]: f["url"] for f in fs}
         con.execute("insert or replace into notes values (?, ?, ?, ?, ?, ?)",
