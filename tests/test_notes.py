@@ -92,3 +92,9 @@ def test_prediction_wording_only_allowed_for_news():
         notes.check_note(_note("매출이 늘어날 전망이에요."), fs)
     fs.append({"id": "N1", "text": "10월 5일 기사 제목 「실적 개선 전망」", "url": "https://n", "tone": 0})
     notes.check_note(_note("기사는 실적이 좋아질 것으로 보인다고 써요.", refs=("N1",)), fs)
+
+
+def test_forbidden_words_do_not_catch_ordinary_words():
+    f = notes.FORBIDDEN.search
+    assert not f("신규 임원 인사라고 써요") and not f("회사라서") and not f("수주 목표가 올라갔다고 써요")
+    assert f("지금 사라") and f("목표가를 올렸어요") and f("목표주가") and f("매수")

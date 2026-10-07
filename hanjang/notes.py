@@ -33,7 +33,10 @@ RECODE = (
     (("DIVIDEND",), "주주명부폐쇄|기준일설정", "OTHER"),
     (("HOLDER_CHANGE",), "최대주주등소유주식변동", "OTHER"),
 )
-FORBIDDEN = re.compile(r"매수|매도|사라|팔아라|비중|목표\s*주가|목표가|예측|오를\s*것|내릴\s*것|유망|추천")
+# 「사라」는 앞에 한글이 붙으면 낱말 일부다(인사라고·회사라서) — 따로 선 「사라」만.
+# 「목표가」는 「수주·매출·판매 목표가」(회사 사업 목표)면 주가 목표가 아니다.
+FORBIDDEN = re.compile(r"매수|매도|(?<![가-힣])(사라|사세요|팔아라|파세요)|비중|목표\s*주가"
+                       r"|(?<!수주 )(?<!수주)(?<!매출 )(?<!판매 )목표가|예측|오를\s*것|내릴\s*것|유망|추천")
 # 좋게 본 것(+1)·걱정되는 것(−1)은 코드가 정한다 — AI 가 고르지 않는다. 화면에 이 기준을 그대로 밝힌다
 DEBT_GOOD, DEBT_BAD = 100, 200  # 부채비율 %
 ROE_GOOD = 10  # %. 0 미만(적자)은 걱정
@@ -235,10 +238,10 @@ def finish(note: dict, fs: list[dict]) -> dict:
     return note
 
 
-def write(name: str, fs: list[dict]) -> tuple[dict, str]:
+def write(name: str, fs: list[dict], today: date) -> tuple[dict, str]:
     """(노트, writer) — writer 는 'llm:<모델>' 또는 'code'."""
     label = {1: "좋게 본 것", -1: "걱정되는 것", 0: "중립"}
-    payload = {"name": name, "facts": [{"id": f["id"], "text": f["text"], "tone": label[f["tone"]]} for f in fs]}
+    payload = {"today": today.isoformat(), "name": name, "facts": [{"id": f["id"], "text": f["text"], "tone": label[f["tone"]]} for f in fs]}
     got = llm.ask("writer", "note", payload, lambda j: check_note(j, fs))
     note, writer = (got, f"llm:{llm.MODELS['writer']}") if got else (code_note(fs), "code")
     return finish(note, fs), writer
@@ -258,7 +261,7 @@ def main(tickers: list[str], today: date) -> None:
         fs = facts(con, t, today)
         if not fs:
             continue
-        note, writer = write(name, fs)
+        note, writer = write(name, fs, today)
         note["links"] = {f["id"]: f["url"] for f in fs}
         con.execute("insert or replace into notes values (?, ?, ?, ?, ?, ?)",
                     (t, week, json.dumps(fs, ensure_ascii=False), json.dumps(note, ensure_ascii=False),
