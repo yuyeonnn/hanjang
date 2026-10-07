@@ -38,7 +38,7 @@ def test_won_units():
 
 def _note(text, refs=("F1",)):
     return {"headline": "작년에 많이 팔았어요.", "summary": [{"text": text, "refs": list(refs)}],
-            "sections": []}
+            "sections": [], "good": [{"text": "많이 팔았어요.", "refs": ["F1"]}], "concern": []}
 
 
 def test_check_rejects_rounded_or_made_up_numbers():
@@ -63,3 +63,32 @@ def test_recode_and_code_fallback():
     fs = notes.facts(_con(), "005930", date(2026, 10, 7))
     note = notes.code_note(fs)
     notes.check_note({**note, "headline": "사실만 옮겼어요."}, fs)  # 대체 글도 검사를 통과한다
+
+
+def test_tone_is_decided_by_code_and_enforced():
+    con = _con()
+    collect.save_financials(con, [sources.Financial("005930", 2025, 333605938000000, -100, 1, 10, 30,
+                                                    "20260310002820")])  # 영업 적자 · 부채비율 300%
+    fs = {f["id"]: f for f in notes.facts(con, "005930", date(2026, 10, 7))}
+    assert (fs["F1"]["tone"], fs["F2"]["tone"], fs["F3"]["tone"], fs["D1"]["tone"]) == (1, -1, -1, 1)
+    note = _note("매출이 늘었어요.")
+    with pytest.raises(ValueError, match="concern"):  # 걱정 사실이 있는데 비워 두면 탈락
+        notes.check_note(note, list(fs.values()))
+    with pytest.raises(ValueError, match="섞임"):  # 좋은 사실을 걱정 칸에
+        notes.check_note({**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}]}, list(fs.values()))
+    notes.check_note({**note, "concern": [{"text": "영업 적자예요.", "refs": ["F2"]}]}, list(fs.values()))
+
+
+def test_finish_always_shows_both_sides():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))  # 걱정 사실 없음
+    note = notes.finish({"headline": "x", "summary": [], "sections": [], "good": [], "concern": []}, fs)
+    assert "걱정되는 쪽으로 분류된 건 없었어요" in note["concern"][0]["text"] and note["tone_rule"]
+    assert notes.code_note(fs)["good"]  # 코드 대체 노트에도 좋게 본 것이 들어간다
+
+
+def test_prediction_wording_only_allowed_for_news():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    with pytest.raises(ValueError, match="예측"):
+        notes.check_note(_note("매출이 늘어날 전망이에요."), fs)
+    fs.append({"id": "N1", "text": "10월 5일 기사 제목 「실적 개선 전망」", "url": "https://n", "tone": 0})
+    notes.check_note(_note("기사는 실적이 좋아질 것으로 보인다고 써요.", refs=("N1",)), fs)

@@ -108,6 +108,11 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str) -> s
                      + " ".join(sentence(s, links) for s in sec["sentences"]) + "</p>")  # fmt: skip
         if sec["title"].startswith("요즘 기사"):
             parts.append('<p class="sub">⚠️ 개발용 — 기사 제목은 개인용으로만 모은 것이라 남에게 보여주면 안 돼요.</p>')
+    if "good" in body:
+        parts.append("<h2>좋게 본 것과 걱정되는 것</h2>"
+                     "<p><b class='good'>좋게 본 것.</b> " + " ".join(sentence(s, links) for s in body["good"]) + "</p>"
+                     "<p><b class='bad'>걱정되는 것.</b> " + " ".join(sentence(s, links) for s in body["concern"]) + "</p>"
+                     f"<p class='sub'>{e(body.get('tone_rule', ''))}</p>")  # fmt: skip
     how = ("기사·공시·재무에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else "코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
     parts.append(f'<p class="foot">{how} [번호]를 누르면 원문이 열려요.<br>'
