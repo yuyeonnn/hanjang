@@ -16,10 +16,15 @@ import time
 from datetime import date, datetime
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, learn, mail, notes, policy
+from hanjang import db, learn, llm, mail, notes, policy
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
+NICK = re.compile(r"[가-힣A-Za-z0-9_]{2,20}")  # 남에게 보이는 이름 — 이메일은 절대 보이지 않는다
+BIO_MAX = 150
+BODY_MAX = 6_000_000  # 요청 본문 상한 — 캡처 사진(브라우저에서 줄여 보낸다)도 이 안에
+PHOTO_MAX = 300_000  # 프로필 사진 — 브라우저가 256px JPEG 로 줄여 보낸다. 이보다 크면 받지 않는다
+SCAN_HOURLY = 10  # 한 사람이 한 시간에 캡처를 읽힐 수 있는 횟수 (AI 비용)
 LINK_TTL = 15 * 60  # 로그인 링크 15분
 LOGIN_GAP, LOGIN_HOURLY = 60, 5  # 같은 주소로 링크는 1분에 한 번, 한 시간에 다섯 번까지 (메일 폭탄·발송 계정 정지 막기)
 e = html.escape
@@ -62,9 +67,14 @@ def page(title: str, body_attr: str, inner: str) -> str:
 
 
 def avatar(initial: str) -> str:
-    """시안의 프로필 사진 자리 — 사진이 없으니 이메일 첫 글자 동그라미. 누르면 내 프로필."""
-    return (f'<a href="/me" aria-label="내 프로필" class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center '
-            f'text-on-surface-variant font-label-regular text-label-regular hover:bg-surface-container-highest transition-colors">{e(initial.upper())}</a>')  # fmt: skip
+    """시안의 프로필 사진 자리 — 사진(「/p/…」 주소)이 있으면 사진, 없으면 첫 글자 동그라미. 누르면 내 프로필."""
+    inside = (f'<img alt="" class="w-full h-full object-cover" src="{e(initial)}">' if initial.startswith("/p/") else e(initial.upper()))
+    return (f'<a href="/me" aria-label="내 프로필" class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high flex items-center justify-center '
+            f'text-on-surface-variant font-label-regular text-label-regular hover:bg-surface-container-highest transition-colors">{inside}</a>')  # fmt: skip
+
+
+def photo_url(uid: int, at: str | None) -> str | None:
+    return f"/p/{uid}.jpg?v={quote(at)}" if at else None
 
 
 def top_bar(initial: str) -> str:
@@ -72,15 +82,18 @@ def top_bar(initial: str) -> str:
             + avatar(initial) + "</div></div></header>")  # fmt: skip
 
 
+TABS = (("cards", "/", "newspaper", "내 종목"), ("feed", "/feed", "dynamic_feed", "피드"), ("calendar", "/calendar", "calendar_today", "캘린더"),
+        ("learn", "/learn", "menu_book", "읽기 팁"), ("me", "/me", "person", "프로필"))  # fmt: skip
+
+
 def bottom_nav(tab: str) -> str:
     on = "transition-colors text-primary-container font-semibold"
     off = "text-on-surface-variant hover:text-on-surface transition-colors"
-    return ('<nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl"><div class="max-w-[480px] mx-auto h-14 flex items-center justify-around px-margin">'
-            f'<a {"aria-current=page " if tab == "cards" else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md {on if tab == "cards" else off}" href="/"><span class="material-symbols-outlined text-[22px]">newspaper</span><span class="font-label-micro text-label-micro mt-0.5">내 종목</span></a>'
-            f'<a {"aria-current=page " if tab == "calendar" else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md {on if tab == "calendar" else off}" href="/calendar"><span class="material-symbols-outlined text-[22px]">calendar_today</span><span class="font-label-micro text-label-micro mt-0.5">캘린더</span></a>'
-            f'<a {"aria-current=page " if tab == "learn" else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md {on if tab == "learn" else off}" href="/learn"><span class="material-symbols-outlined text-[22px]">menu_book</span><span class="font-label-micro text-label-micro mt-0.5">읽기 팁</span></a>'
-            f'<a {"aria-current=page " if tab == "me" else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md {on if tab == "me" else off}" href="/me"><span class="material-symbols-outlined text-[22px]">person</span><span class="font-label-micro text-label-micro mt-0.5">프로필</span></a>'
-            "</div></nav>")  # fmt: skip
+    return ('<nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl"><div class="max-w-[480px] mx-auto h-14 flex items-center justify-around px-1">'
+            + "".join(f'<a {"aria-current=page " if tab == k else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-1 {on if tab == k else off}" href="{href}">'
+                      f'<span class="material-symbols-outlined text-[22px]">{icon}</span><span class="font-label-micro text-label-micro mt-0.5">{label}</span></a>'
+                      for k, href, icon, label in TABS)
+            + "</div></nav>")  # fmt: skip
 
 
 def safe_url(u: str) -> str:
@@ -261,10 +274,11 @@ def redone(week: str, made: str) -> str:
 
 
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
-                industry: str | None = None, initial: str = "", survey: str = "", made: str = "") -> str:
+                industry: str | None = None, initial: str = "", survey: str = "", made: str = "",
+                stats: tuple[int, int, bool] = (0, 0, False), regram: str = "") -> str:
+    """stats = (이 주 노트를 연 횟수, 좋아요 수, 내가 눌렀나)."""
     facts = facts or []
     every = body["summary"] + [x for sec in body["sections"] for x in sec["sentences"]] + body.get("good", []) + body.get("concern", [])
-    minutes = max(1, round(sum(len(x["text"]) for x in every) / 500))  # 한글 분당 500자쯤
     used = " ".join(x["text"] for x in every)
     tags = [t for t in (industry_label(industry), "코스피 대형주") if t]  # 유니버스 = 코스피 시총 상위 100
     tag_html = '<span class="w-1 h-1 rounded-full bg-outline-variant"></span>'.join(f'<span class="">{e(t)}</span>' for t in tags)
@@ -272,14 +286,14 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             + avatar(initial) + '</div></div></header>')  # fmt: skip
     parts = [
         '<div class="flex items-center justify-between py-space-sm mb-space-xs"><button class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors py-1 group" onclick="location.href=\'/\'" type="button"><span class="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-0.5">arrow_back</span>'
-        f'<span class="font-label-regular text-label-regular text-on-surface-variant font-medium">내 종목 · {e(week)} 주 노트{e(redone(week, made))}</span></button>'
-        '<div class="flex items-center gap-1.5 px-space-sm py-0.5 rounded-full bg-surface-container-high text-on-surface-variant"><span class="material-symbols-outlined text-[14px]">schedule</span>'
-        f'<span class="font-label-micro text-label-micro">{minutes}분이면 다 읽어요</span></div></div>',
+        f'<span class="font-label-regular text-label-regular text-on-surface-variant font-medium">내 종목 · {e(week)} 주 노트{e(redone(week, made))}</span></button></div>',
         '<header class="mb-space-lg"><div class="flex items-baseline gap-2 mb-1">'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2>'
         f'<span class="font-label-micro text-label-micro text-outline tracking-wider uppercase font-mono">{e(ticker)}</span></div>'
         f'<div class="flex items-center gap-space-sm text-on-surface-variant font-label-regular text-label-regular">{tag_html}'
-        '<span class="w-1 h-1 rounded-full bg-outline-variant"></span><span class="text-secondary font-medium">연간 결산 분석</span></div></header>',
+        '<span class="w-1 h-1 rounded-full bg-outline-variant"></span><span class="text-secondary font-medium">연간 결산 분석</span></div>'
+        + (f'<p class="mt-1 font-label-regular text-label-regular text-outline">{e(made[:10].replace("-", "."))} · 읽음 {stats[0]:,}</p>' if re.match(r"\d{4}-\d{2}-\d{2}", made) else "")
+        + '</header>',
         f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(body["headline"])}"</p></aside>',
     ]  # fmt: skip
     if body.get("summary"):
@@ -324,6 +338,14 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">긍정·부정 요인은 코드가 정한 기준으로 분류했어요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
     how = ("기사·공시·재무에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else "기사·공시·재무에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
+    views, likes, liked = stats
+    faces = "".join('<span class="w-7 h-7 rounded-full bg-surface-container-high border-2 border-surface flex items-end justify-center overflow-hidden -ml-2 first:ml-0">'
+                    '<span class="material-symbols-outlined text-outline text-[22px] translate-y-1" style="font-variation-settings: \'FILL\' 1;">person</span></span>'
+                    for _ in range(min(likes, 3)))  # fmt: skip  누가 눌렀는지는 보여주지 않는다 — 모양만
+    parts.append(f'<div class="mb-space-lg flex items-center justify-end gap-space-md"><form method="post" action="/like" class="flex items-center gap-space-sm"><input type="hidden" name="t" value="{e(ticker)}"><input type="hidden" name="w" value="{e(week)}">'
+                 f'<button type="submit" aria-pressed="{"true" if liked else "false"}" aria-label="좋아요{" 취소" if liked else ""}" class="w-10 h-10 rounded-full flex items-center justify-center border {"border-tertiary/40 bg-tertiary-fixed/50" if liked else "border-outline-variant/60"} transition-colors">'
+                 f'<span class="material-symbols-outlined text-[20px] {"text-tertiary" if liked else "text-outline"}" style="font-variation-settings: \'FILL\' {1 if liked else 0};">favorite</span></button>'
+                 f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
                  f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART)나 기사 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
@@ -350,21 +372,30 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
-        self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
+        self.sent: dict[str, list[float]] = {}
+        self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
         form = {}
         if method == "POST":
             n = int(environ.get("CONTENT_LENGTH") or 0)
-            form = {k: v[0] for k, v in parse_qs(environ["wsgi.input"].read(n).decode()).items()}
+            if n > BODY_MAX:
+                start_response("413 Payload Too Large", [("Content-Type", "text/plain; charset=utf-8")])
+                return ["사진이 너무 커요".encode()]
+            raw = environ["wsgi.input"].read(n).decode()
+            if environ.get("CONTENT_TYPE", "").startswith("application/json"):
+                form = {"_json": json.loads(raw or "{}")}
+            else:
+                form = {k: v[0] for k, v in parse_qs(raw).items()}
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
         uid = unsign(cookie.get("s", ""), self.secret)
         status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
-        start_response(status, [("Content-Type", "text/html; charset=utf-8"), ("X-Content-Type-Options", "nosniff"),
+        kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8")]
+        start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
-        return [body.encode()]
+        return [body if isinstance(body, bytes) else body.encode()]
 
     def see(self, to: str, *headers) -> tuple:
         return "303 See Other", [("Location", to), *headers], ""
@@ -375,8 +406,9 @@ class App:
         self.con.commit()
 
     def initial(self, uid: int) -> str:
-        row = self.con.execute("select email from users where id = ?", (uid,)).fetchone()
-        return (row[0][:1] if row else "") or "?"
+        """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 이메일 첫 글자."""
+        row = self.con.execute("select email, photo_at from users where id = ?", (uid,)).fetchone()
+        return (photo_url(uid, row[1]) or row[0][:1]) if row else "?"
 
     def simple(self, title: str, msg: str) -> str:
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
@@ -403,8 +435,28 @@ class App:
             return "200 OK", [], self.login_page()
         if path == "/logout":
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
+        # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)
+        if not self.con.execute("select nickname from users where id = ?", (uid,)).fetchone()[0]:
+            if path == "/welcome" and method == "POST":
+                return self.welcome(uid, form.get("nickname", "").strip())
+            return "200 OK", [], self.welcome_page()
+        if path == "/welcome":
+            return self.see("/")
         if path == "/add" and method == "POST":
             return self.add(uid, form.get("q", "").strip())
+        if path.startswith("/p/") and path.endswith(".jpg") and path[3:-4].isdigit():  # 프로필 사진 (로그인한 사람만)
+            row = self.con.execute("select photo from users where id = ? and photo is not null", (int(path[3:-4]),)).fetchone()
+            if not row:
+                return "404 Not Found", [], self.simple("없음", "사진이 없어요.")
+            return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "private, max-age=31536000")], bytes(row[0])
+        if path == "/me/photo" and method == "POST":
+            return self.save_photo(uid, (form.get("_json") or {}).get("img", ""))
+        if path == "/me/photo/delete" and method == "POST":
+            self.con.execute("update users set photo = null, photo_at = null where id = ?", (uid,))
+            self.con.commit()
+            return self.see("/me/settings")
+        if path == "/scan" and method == "POST":
+            return self.scan(uid, (form.get("_json") or {}).get("img", ""))
         if path == "/remove" and method == "POST":
             self.con.execute("delete from holdings where user_id = ? and ticker = ?", (uid, form.get("t")))
             self.con.commit()
@@ -416,21 +468,50 @@ class App:
             ticker = path[3:]
             self.log(uid, "note", ticker)
             return self.note(uid, ticker, query.get("thanks") == "1")
+        if path == "/feed":
+            self.log(uid, "feed")
+            return "200 OK", [], self.feed(uid, query.get("q", "").strip())
+        if path.startswith("/u/") and path[3:].isdigit():
+            if int(path[3:]) == uid:
+                return self.see("/me")
+            self.log(uid, "user")
+            return self.user_page(uid, int(path[3:]))
+        if path == "/follow" and method == "POST":  # 한 번 더 누르면 언팔로우
+            other = int(form["u"]) if form.get("u", "").isdigit() else 0
+            if other != uid and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
+                if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
+                    self.con.execute("insert into follows values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
+                self.con.commit()
+            return self.see(f"/u/{other}" if other else "/feed")
+        if path == "/regram" and method == "POST":
+            return self.regram(uid, form)
+        if path == "/me/profile" and method == "POST":
+            return self.save_profile(uid, form.get("nickname", "").strip(), form.get("bio", "").strip())
+        if path == "/like" and method == "POST":  # 한 번 더 누르면 취소
+            t, w = form.get("t", ""), form.get("w", "")
+            if self.con.execute("select 1 from notes where ticker = ? and week = ?", (t, w)).fetchone():
+                if not self.con.execute("delete from likes where user_id = ? and ticker = ? and week = ?", (uid, t, w)).rowcount:
+                    self.con.execute("insert into likes values (?, ?, ?, ?)", (uid, t, w, datetime.now().isoformat()))
+                self.con.commit()
+            return self.see(f"/n/{quote(t)}")
         if path == "/feedback" and method == "POST":
             return self.feedback(uid, form)
         if path == "/me/mail" and method == "POST":
             self.con.execute("update users set mail_on = 1 - mail_on where id = ?", (uid,))
             self.con.commit()
-            return self.see("/me")
+            return self.see("/me/settings")
         if path == "/me/delete" and method == "POST":
             # 탈퇴 — 이 사용자의 모든 행을 지운다 (되돌릴 수 없음, 화면에서 한 번 더 확인)
-            for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("users", "id")):
+            for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("likes", "user_id"),
+                               ("regrams", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"), ("users", "id")):  # fmt: skip
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         if path == "/me":
             self.log(uid, "me")
             return "200 OK", [], self.profile(uid)
+        if path == "/me/settings":
+            return "200 OK", [], self.settings(uid, query.get("msg"))
         if path == "/learn" or path.startswith("/learn/"):
             slug = path[7:]
             self.log(uid, "learn", slug or None)
@@ -483,18 +564,71 @@ class App:
         mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email)
 
-    def add(self, uid: int, q: str):
-        row = self.con.execute("select ticker from stocks where active = 1 and (ticker = ? or name = ?)",
-                               (q, q)).fetchone()  # fmt: skip
-        if not row:
-            return self.see("/?msg=" + quote(f"「{q}」은(는) 아직 노트가 없어요. 코스피 큰 회사 100곳부터 시작했어요."))
-        (n,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
-        if n >= MAX_STOCKS:
-            return self.see("/?msg=" + quote(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요."))
-        self.con.execute("insert or ignore into holdings values (?, ?, ?)",
-                         (uid, row[0], datetime.now().isoformat()))  # fmt: skip
+    def match(self, q: str) -> str | None:
+        """이름·코드 → 종목 코드. 띄어쓰기·대소문자는 무시한다(「삼성 SDI」→ 삼성SDI)."""
+        key = re.sub(r"\s+", "", q).upper()
+        row = self.con.execute("select ticker from stocks where active = 1 and (ticker = ? or upper(replace(name, ' ', '')) = ?)",
+                               (key, key)).fetchone()  # fmt: skip
+        return row[0] if row else None
+
+    def add_many(self, uid: int, names: list[str]) -> tuple[list[str], list[str], bool]:
+        """(담은 것, 못 찾은 것, 20개가 차서 멈췄나). 이미 담은 종목은 담은 것으로 센다."""
+        added, unknown = [], []
+        for q in dict.fromkeys(x.strip() for x in names if x.strip()):
+            t = self.match(q)
+            if not t:
+                unknown.append(q)
+                continue
+            (n,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
+            have = self.con.execute("select 1 from holdings where user_id = ? and ticker = ?", (uid, t)).fetchone()
+            if not have and n >= MAX_STOCKS:
+                return added, unknown, True
+            self.con.execute("insert or ignore into holdings values (?, ?, ?)", (uid, t, datetime.now().isoformat()))
+            added.append(self.con.execute("select name from stocks where ticker = ?", (t,)).fetchone()[0])
         self.con.commit()
-        return self.see("/")
+        return added, unknown, False
+
+    @staticmethod
+    def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
+        parts = [f"{len(added)}종목을 담았어요 ({', '.join(added[:5])}{' 외' if len(added) > 5 else ''})."] if added else []
+        if unknown:
+            parts.append(f"「{', '.join(unknown[:5])}」은(는) 아직 노트가 없어요 — 코스피 큰 회사 100곳부터 시작했어요.")
+        if full:
+            parts.append(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요.")
+        return " ".join(parts) or "담을 종목을 찾지 못했어요."
+
+    def add(self, uid: int, q: str):
+        """한 종목, 또는 쉼표·줄바꿈·띄어쓰기로 여러 종목을 한 번에 (「삼성전자, SK하이닉스」)."""
+        if not q:
+            return self.see("/")
+        names = [q] if self.match(q) else [w for part in re.split(r"[,\n;/·]+", q)
+                                           for w in ([part] if self.match(part) else part.split())]  # fmt: skip
+        added, unknown, full = self.add_many(uid, names)
+        if len(names) == 1 and added and not full:
+            return self.see("/")
+        return self.see("/?msg=" + quote(self.added_msg(added, unknown, full)))
+
+    def scan(self, uid: int, img: str):
+        """보유 종목 캡처 → AI 가 종목 이름만 읽는다 → 코드가 우리 종목과 맞춰 담는다. 사진은 저장하지 않는다."""
+        def reply(msg, code="200 OK"):
+            return code, [("Content-Type", "application/json; charset=utf-8")], json.dumps({"msg": msg}, ensure_ascii=False)
+
+        if not re.match(r"data:image/(jpeg|png|webp);base64,", img):
+            return reply("사진을 읽지 못했어요. 캡처 사진(JPG·PNG)을 골라 주세요.", "400 Bad Request")
+        now = self.clock()
+        times = [t for t in self.scans.get(uid, []) if now - t < 3600]
+        if len(times) >= SCAN_HOURLY:
+            return reply("사진 읽기는 한 시간에 10번까지예요. 잠시 뒤에 다시 해 주세요.", "429 Too Many Requests")
+        self.scans[uid] = times + [now]
+        schema = {"type": "object", "additionalProperties": False, "required": ["names"],
+                  "properties": {"names": {"type": "array", "items": {"type": "string"}}}}  # fmt: skip
+        try:
+            got = llm.ask("scan", "holdings", {}, lambda j: [str(x) for x in j["names"]][:40], schema, image=img)
+        except RuntimeError:
+            got = None
+        if not got:
+            return reply("사진에서 종목을 찾지 못했어요. 증권사 앱의 「보유 종목」 화면을 캡처해 주세요.")
+        return reply(self.added_msg(*self.add_many(uid, got)))
 
     # ---- 내 종목 (시안 _3) ----
 
@@ -521,7 +655,13 @@ class App:
                  '<section class="sticky top-0 z-30 bg-surface/95 backdrop-blur-md px-margin py-3 border-b border-surface-container-high transition-all duration-200"><div class="relative w-full">'
                  '<form method="post" action="/add" class="h-11 w-full bg-surface-container-low/60 rounded-xl flex items-center px-3 border border-surface-container-high/60 focus-within:border-primary-container focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline text-[20px] mr-2">search</span>'
                  '<input autocomplete="off" class="w-full bg-transparent text-on-surface font-body-compact text-body-compact placeholder:text-outline focus:outline-none" id="stock-search-input" name="q" placeholder="종목 이름 또는 코드로 담기" type="text">'
-                 '<button class="shrink-0 ml-1.5 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold shadow-sm active:scale-95 transition-transform" id="btn-quick-add" type="submit">담기</button></form>'
+                 '<button class="shrink-0 ml-1.5 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold shadow-sm active:scale-95 transition-transform" id="btn-quick-add" type="submit">담기</button>'
+                 '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기" title="보유 종목 캡처로 담기">'
+                 '<span class="material-symbols-outlined text-[20px]">photo_camera</span><input accept="image/*" class="hidden" id="scan-input" type="file"></label></form>'
+                 '<div class="hidden fixed inset-0 z-[60] bg-surface/90 backdrop-blur-sm flex-col items-center justify-center gap-3 px-margin text-center" id="scan-wait" role="status">'
+                 '<span class="material-symbols-outlined text-primary text-[40px] animate-pulse">document_scanner</span>'
+                 '<p class="font-headline-sm text-headline-sm text-on-surface">분석 중…</p>'
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant">캡처에서 종목 이름만 읽고 있어요. 사진은 저장하지 않아요.</p></div>'
                  '<div class="hidden absolute left-0 right-0 top-12 mt-1 bg-surface-container-lowest rounded-xl shadow-sm border border-surface-container-high/70 overflow-hidden z-40" id="search-flyout"><div class="p-1.5 flex flex-col gap-0.5" id="search-results"></div></div>'
                  "</div></section>" + note
                  + '<header class="px-margin pt-5 pb-2"><div class="flex items-baseline justify-between mb-1"><div class="flex items-center gap-2"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">내 종목</h1>'
@@ -541,7 +681,15 @@ class App:
                  "+(i===0?'<button class=\"px-2.5 py-1 bg-primary-container text-on-primary font-label-micro text-label-micro rounded-lg shadow-sm hover:opacity-90 active:scale-95 transition-all\" type=\"submit\">+ 담기</button>':'<button class=\"px-2.5 py-1 bg-surface-container text-on-surface font-label-micro text-label-micro rounded-lg hover:bg-surface-container-high transition-colors\" type=\"submit\">담기</button>')+'</form>').join('');"
                  "fly.classList.toggle('hidden',hit.length===0);}"
                  "inp.addEventListener('input',draw);inp.addEventListener('focus',draw);"
-                 "document.addEventListener('click',ev=>{if(!inp.contains(ev.target)&&!fly.contains(ev.target))fly.classList.add('hidden');});</script></main>"
+                 "document.addEventListener('click',ev=>{if(!inp.contains(ev.target)&&!fly.contains(ev.target))fly.classList.add('hidden');});"
+                 # 캡처 → 브라우저에서 1600px 로 줄여 JPEG 로 → /scan. 끝나면 결과 문장과 함께 새로 그린다
+                 "const sc=document.getElementById('scan-input'),wait=document.getElementById('scan-wait');"
+                 "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;wait.classList.remove('hidden');wait.classList.add('flex');"
+                 "try{const bmp=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');"
+                 "c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);"
+                 "const r=await fetch('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
+                 "const j=await r.json();location.href='/?msg='+encodeURIComponent(j.msg);}"
+                 "catch(err){location.href='/?msg='+encodeURIComponent('사진을 읽지 못했어요. 다시 해 주세요.');}});</script></main>"
                  + bottom_nav("cards"))  # fmt: skip
         return page("내 종목", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -595,8 +743,12 @@ class App:
         if not row:
             return "404 Not Found", [], self.simple("없음", "이 종목은 아직 노트가 없어요. <a class='text-primary underline' href='/'>내 종목</a>")
         name, week, body, writer, facts, ind, made = row
+        (views,) = self.con.execute("select count(*) from views where page = 'note' and ticker = ? and at >= ?", (ticker, week)).fetchone()
+        (likes,) = self.con.execute("select count(*) from likes where ticker = ? and week = ?", (ticker, week)).fetchone()
+        liked = bool(self.con.execute("select 1 from likes where user_id = ? and ticker = ? and week = ?", (uid, ticker, week)).fetchone())
         return "200 OK", [], render_note(name, ticker, week, json.loads(body), writer, json.loads(facts), ind,
-                                         self.initial(uid), self.survey(uid, ticker, week, thanks), made)  # fmt: skip
+                                         self.initial(uid), self.survey(uid, ticker, week, thanks), made, (views, likes, liked),
+                                         self.regram_form(uid, "note", ticker, week))  # fmt: skip
 
     # ---- 캘린더 (시안 _4) ----
 
@@ -690,7 +842,21 @@ class App:
     # ---- 내 프로필 (시안에 없는 화면 — 같은 디자인 말투로. 가진 정보만) ----
 
     def profile(self, uid: int) -> str:
-        email, created, mail_on = self.con.execute("select email, created_at, mail_on from users where id = ?", (uid,)).fetchone()
+        """내 프로필 — 남이 보는 모양 그대로(이름·자기소개·팔로워·리그램). 설정은 오른쪽 위 톱니바퀴."""
+        email, nick, bio, at = self.con.execute("select email, nickname, bio, photo_at from users where id = ?", (uid,)).fetchone()
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+                 f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick or email, "w-14 h-14", photo_url(uid, at))}<div class="flex flex-col min-w-0 flex-1">'
+                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
+                 '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
+                 + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
+                 + "</div></main>" + bottom_nav("me"))  # fmt: skip
+        return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def settings(self, uid: int, msg: str | None = None) -> str:
+        email, created, mail_on, nick, bio = self.con.execute(
+            "select email, created_at, mail_on, nickname, bio from users where id = ?", (uid,)).fetchone()  # fmt: skip
+        (at,) = self.con.execute("select photo_at from users where id = ?", (uid,)).fetchone()
         (held,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
         joined = date.fromisoformat(created[:10])
         # 주간 안내 메일 켜기/끄기 — 누르면 바로 바뀐다 (답장 같은 절차 없이, 사용자 10/7)
@@ -707,10 +873,33 @@ class App:
                     f'<span class="material-symbols-outlined text-primary text-[18px]">{icon}</span>{label}</span>'
                     f'<span class="font-body-reading-strong text-body-compact text-on-surface">{value}</span></div>')  # fmt: skip
 
-        inner = (top_bar(email[:1]) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
-                 '<header class="pt-5 flex items-center gap-space-md"><span class="w-14 h-14 rounded-full bg-primary-fixed flex items-center justify-center text-primary font-headline-md text-headline-md">'
-                 f'{e(email[:1].upper())}</span><div class="flex flex-col min-w-0"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">내 프로필</h1>'
-                 f'<span class="font-body-compact text-body-compact text-on-surface-variant truncate">{e(email)}</span></div></header>'
+        field = "w-full font-body-compact text-body-compact bg-surface-container-low rounded-lg px-4 py-3 focus:outline-none"
+        photo = ('<div class="mt-space-lg flex items-center gap-space-md">'
+                 '<label class="relative cursor-pointer" aria-label="프로필 사진 바꾸기">' + self.face(nick or email, "w-20 h-20", photo_url(uid, at))
+                 + '<span class="absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-primary text-on-primary flex items-center justify-center border-2 border-surface">'
+                 '<span class="material-symbols-outlined text-[16px]">photo_camera</span></span><input accept="image/*" class="hidden" id="photo-input" type="file"></label>'
+                 '<div class="flex flex-col gap-1"><span class="font-label-regular text-label-regular text-on-surface font-semibold">프로필 사진</span>'
+                 + ('<form method="post" action="/me/photo/delete"><button class="font-label-micro text-label-micro text-outline underline" type="submit">사진 지우기</button></form>' if at else "")
+                 + '</div></div>'
+                 # 고른 사진 → 가운데 정사각형으로 잘라 256px JPEG → /me/photo
+                 "<script>document.getElementById('photo-input').addEventListener('change',async ev=>{const f=ev.target.files[0];if(!f)return;"
+                 "try{const b=await createImageBitmap(f);const s=Math.min(b.width,b.height);const c=document.createElement('canvas');c.width=c.height=256;"
+                 "c.getContext('2d').drawImage(b,(b.width-s)/2,(b.height-s)/2,s,s,0,0,256,256);"
+                 "const r=await fetch('/me/photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
+                 "const j=await r.json();location.href='/me/settings'+(j.msg?'?msg='+encodeURIComponent(j.msg):'');}"
+                 "catch(err){location.href='/me/settings?msg='+encodeURIComponent('사진을 바꾸지 못했어요. 다시 해 주세요.');}});</script>")  # fmt: skip
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+                 '<a class="pt-5 flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/me"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
+                 '<span class="font-label-regular text-label-regular font-medium">내 프로필</span></a>'
+                 '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-sm">설정</h1>'
+                 f'<span class="font-body-compact text-body-compact text-on-surface-variant truncate">{e(email)}</span>'
+                 + (f'<p class="mt-space-sm font-body-compact text-body-compact text-tertiary" role="alert">{e(msg)}</p>' if msg else "")
+                 + photo + '<form method="post" action="/me/profile" class="mt-space-lg flex flex-col gap-space-sm">'
+                 '<label class="font-label-regular text-label-regular text-on-surface" for="nick">닉네임</label>'
+                 f'<input class="{field}" id="nick" name="nickname" maxlength="20" required value="{e(nick or "")}">'
+                 '<label class="font-label-regular text-label-regular text-on-surface" for="bio">자기소개</label>'
+                 f'<textarea class="{field}" id="bio" name="bio" maxlength="{BIO_MAX}" rows="2">{e(bio or "")}</textarea>'
+                 '<button class="self-end px-4 py-2 rounded-lg bg-primary text-on-primary font-label-regular text-label-regular font-semibold" type="submit">저장</button></form>'
                  '<section class="mt-space-lg flex flex-col divide-y divide-surface-container-high/80 border-y border-surface-container-high">'
                  + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
                  + row("bookmark", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
@@ -721,7 +910,202 @@ class App:
                  '<button class="mt-space-sm w-full py-3 font-label-regular text-label-regular text-tertiary hover:underline" type="submit">탈퇴하기</button></form>'
                  '<p class="mt-space-lg flex justify-center gap-3 font-label-micro text-label-micro text-outline"><a class="underline" href="/privacy">개인정보 처리방침</a><span>·</span><a class="underline" href="/method">계산 방법</a></p>'
                  '</div></main>' + bottom_nav("me"))  # fmt: skip
-        return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+        return page("설정", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    # ---- 팔로우 · 리그램 · 피드 (뉴닉 「뉴니커」처럼 — 좋아한 글을 내 팔로워에게) ----
+
+    def counts(self, uid: int) -> tuple[int, int]:
+        q = "select count(*) from follows where {} = ?"
+        return (self.con.execute(q.format("followee_id"), (uid,)).fetchone()[0],
+                self.con.execute(q.format("follower_id"), (uid,)).fetchone()[0])  # fmt: skip
+
+    @staticmethod
+    def face(name: str, size: str = "w-9 h-9", photo: str | None = None) -> str:
+        inside = f'<img alt="" class="w-full h-full object-cover" src="{e(photo)}">' if photo else e((name or "?")[:1].upper())
+        return (f'<span class="{size} shrink-0 overflow-hidden rounded-full bg-primary-fixed text-primary flex items-center justify-center font-label-regular text-label-regular font-semibold">'
+                f'{inside}</span>')  # fmt: skip
+
+    def follow_line(self, uid: int) -> str:
+        fer, fing = self.counts(uid)
+        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant">팔로워 <b class="text-on-surface">{fer:,}</b>'
+                f'<span class="mx-2 text-outline-variant">|</span>팔로잉 <b class="text-on-surface">{fing:,}</b></p>')  # fmt: skip
+
+    def save_photo(self, uid: int, img: str):
+        """프로필 사진 — JPEG 만, 작게(PHOTO_MAX). 브라우저가 이미 256px 정사각형으로 잘라 보낸다."""
+        import base64
+        import binascii
+
+        def reply(msg="", code="200 OK"):
+            return code, [("Content-Type", "application/json; charset=utf-8")], json.dumps({"msg": msg}, ensure_ascii=False)
+
+        head = "data:image/jpeg;base64,"
+        try:
+            raw = base64.b64decode(img[len(head):], validate=True) if img.startswith(head) else b""
+        except binascii.Error:
+            raw = b""
+        if not raw.startswith(b"\xff\xd8\xff") or len(raw) > PHOTO_MAX:
+            return reply("사진을 바꾸지 못했어요. 다른 사진으로 해 주세요.", "400 Bad Request")
+        self.con.execute("update users set photo = ?, photo_at = ? where id = ?", (raw, datetime.now().isoformat(timespec="seconds"), uid))
+        self.con.commit()
+        return reply()
+
+    def nick_error(self, uid: int, nick: str) -> str:
+        """닉네임 검사 — 문제가 없으면 빈 글. 겹침은 대소문자를 무시하고 본다(DB 유일 색인과 같게)."""
+        if not NICK.fullmatch(nick):
+            return "닉네임은 한글·영문·숫자·_ 2~20자로 정해 주세요."
+        if notes.FORBIDDEN.search(nick):
+            return "닉네임에 쓸 수 없는 말이 들어 있어요."
+        if self.con.execute("select 1 from users where nickname = ? collate nocase and id != ?", (nick, uid)).fetchone():
+            return f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요."
+        return ""
+
+    def welcome_page(self, nick: str = "", error: str = "") -> str:
+        inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-16 pb-12">'
+                 '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span>'
+                 '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">닉네임을 정해 주세요</h1>'
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">다른 사람에게는 이메일 대신 이 이름이 보여요. 한글·영문·숫자 2~20자, 다른 사람과 겹칠 수 없어요.</p>'
+                 '<form method="post" action="/welcome" class="mt-space-lg flex flex-col gap-space-sm">'
+                 f'<input autofocus class="w-full font-body-reading text-body-reading bg-surface-container-low rounded-lg px-4 py-3.5 focus:outline-none" maxlength="20" name="nickname" required value="{e(nick)}">'
+                 + (f'<p class="font-body-compact text-body-compact text-tertiary" role="alert">{e(error)}</p>' if error else "")
+                 + '<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">시작하기</button></form>'
+                 '</div></main>')  # fmt: skip
+        return page("닉네임", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def welcome(self, uid: int, nick: str):
+        if err := self.nick_error(uid, nick):
+            return "200 OK", [], self.welcome_page(nick, err)
+        try:
+            self.con.execute("update users set nickname = ? where id = ?", (nick, uid))
+            self.con.commit()
+        except sqlite3.IntegrityError:  # 거의 같은 때 누가 먼저 가져간 경우
+            return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.")
+        return self.see("/")
+
+    def save_profile(self, uid: int, nick: str, bio: str):
+        if err := self.nick_error(uid, nick):  # 닉네임은 바꿀 수는 있어도 비울 수는 없다
+            return self.see("/me/settings?msg=" + quote(err))
+        if len(bio) > BIO_MAX or notes.FORBIDDEN.search(bio):
+            return self.see("/me/settings?msg=" + quote("자기소개에 종목을 사라·팔라는 말이나 추천은 쓸 수 없어요."))
+        try:
+            self.con.execute("update users set nickname = ?, bio = ? where id = ?", (nick, bio or None, uid))
+            self.con.commit()
+        except sqlite3.IntegrityError:
+            return self.see("/me/settings?msg=" + quote(f"「{nick}」은(는) 이미 누가 쓰고 있어요."))
+        return self.see("/me/settings")
+
+    def regram_form(self, uid: int, kind: str, ref: str, week: str) -> str:
+        """노트·읽기 팁 글 아래 — 리그램(한 줄 코멘트는 선택). 이미 했으면 취소 버튼."""
+        done = self.con.execute("select 1 from regrams where user_id = ? and kind = ? and ref = ? and week = ?", (uid, kind, ref, week)).fetchone()
+        (n,) = self.con.execute("select count(*) from regrams where kind = ? and ref = ? and week = ?", (kind, ref, week)).fetchone()
+        undo = '<input type="hidden" name="undo" value="1">' if done else ""
+        return (f'<form method="post" action="/regram" class="flex items-center gap-1.5"><input type="hidden" name="k" value="{e(kind)}"><input type="hidden" name="r" value="{e(ref)}"><input type="hidden" name="w" value="{e(week)}">{undo}'
+                f'<button type="submit" aria-pressed="{"true" if done else "false"}" aria-label="리그램{" 취소" if done else ""} — 내 팔로워의 피드에 보여요" title="리그램 — 내 팔로워의 피드에 보여요" '
+                f'class="w-10 h-10 rounded-full flex items-center justify-center border {"border-secondary/40 bg-secondary-container/60 text-secondary" if done else "border-outline-variant/60 text-outline"} transition-colors">'
+                f'<span class="material-symbols-outlined text-[20px]">repeat</span></button>'
+                f'<span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">{n:,}</span></form>')  # fmt: skip
+
+    def regram(self, uid: int, form: dict):
+        kind, ref, week = form.get("k", ""), form.get("r", ""), form.get("w", "")
+        back = f"/n/{quote(ref)}" if kind == "note" else f"/learn/{quote(ref)}"
+        ok = (kind == "note" and self.con.execute("select 1 from notes where ticker = ? and week = ?", (ref, week)).fetchone()) or (
+            kind == "learn" and ref in learn.BY_SLUG and week == "")
+        if not ok:
+            return self.see("/feed")
+        if form.get("undo"):
+            self.con.execute("delete from regrams where user_id = ? and kind = ? and ref = ? and week = ?", (uid, kind, ref, week))
+            self.con.commit()
+            return self.see(back)
+        if not self.con.execute("select nickname from users where id = ?", (uid,)).fetchone()[0]:
+            return self.see("/me/settings?msg=" + quote("리그램하려면 닉네임을 먼저 정해 주세요. 팔로워에게 이 이름으로 보여요."))
+        self.con.execute("insert or ignore into regrams (user_id, kind, ref, week, at) values (?, ?, ?, ?, ?)",
+                         (uid, kind, ref, week, datetime.now().isoformat()))  # fmt: skip
+        self.con.commit()
+        return self.see(back)
+
+    def regram_list(self, where: str, args: tuple, title: str, mine: bool = False) -> str:
+        rows = self.con.execute(
+            "select r.user_id, u.nickname, r.kind, r.ref, r.week, r.comment, r.at, u.photo_at from regrams r join users u on u.id = r.user_id "
+            + where + " order by r.at desc limit 50", args).fetchall()  # fmt: skip
+        cards = []
+        for who, nick, kind, ref, week, comment, at, pat in rows:
+            if kind == "note":
+                hit = self.con.execute("select s.name, n.body from stocks s left join notes n on n.ticker = s.ticker and n.week = ?"
+                                       " where s.ticker = ?", (week, ref)).fetchone()  # fmt: skip
+                if not hit:
+                    continue
+                head, sub, href, tag = hit[0], (json.loads(hit[1])["headline"] if hit[1] else ""), f"/n/{ref}", f"{week} 주 노트"
+            else:
+                a = learn.BY_SLUG.get(ref)
+                if not a:
+                    continue
+                head, sub, href, tag = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁"
+            d = at[:10].replace("-", ".")
+            who_html = "" if mine else (f'<a href="/u/{who}" class="flex items-center gap-2">{self.face(nick, "w-7 h-7", photo_url(who, pat))}'
+                                        f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(nick)}</span></a>')  # fmt: skip
+            cards.append(f'<article class="py-space-md flex flex-col gap-space-xs"><div class="flex items-center justify-between">{who_html}'
+                         f'<span class="font-label-micro text-label-micro text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">repeat</span>{d}</span></div>'
+                         + (f'<p class="font-body-compact text-body-compact text-on-surface">{e(comment)}</p>' if comment else "")
+                         + f'<a href="{e(href)}" class="block rounded-xl border border-outline-variant/50 bg-surface-container-low px-space-md py-space-sm hover:bg-surface-container">'
+                         f'<span class="font-label-micro text-label-micro text-outline">{e(tag)}</span>'
+                         f'<p class="font-body-reading-strong text-body-compact text-on-surface">{e(head)}</p>'
+                         f'<p class="font-body-compact text-body-compact text-on-surface-variant line-clamp-2">{e(sub)}</p></a></article>')  # fmt: skip
+        if not cards:
+            return ""
+        body = "".join(cards)
+        return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
+                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{body}</div></section>')  # fmt: skip
+
+    def people(self, uid: int, q: str) -> str:
+        if not q:
+            return ""
+        rows = self.con.execute("select id, nickname, bio, photo_at from users where nickname is not null and id != ? and nickname like ? limit 20",
+                                (uid, f"%{q}%")).fetchall()  # fmt: skip
+        items = "".join(f'<a href="/u/{i}" class="py-space-sm flex items-center gap-space-sm">{self.face(n, photo=photo_url(i, p))}<span class="flex flex-col min-w-0">'
+                        f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(n)}</span>'
+                        f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(b or "")}</span></span></a>' for i, n, b, p in rows)  # fmt: skip
+        none = '<p class="py-2 font-body-compact text-body-compact text-outline">그런 닉네임이 없어요.</p>'
+        return f'<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/80">{items or none}</div>'
+
+    def popular(self) -> str:
+        """팔로우한 사람의 리그램이 없을 때 — 이번 주 노트를 많이 읽힌 순서로."""
+        rows = self.con.execute(
+            "select s.ticker, s.name, n.body, (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week) c"
+            " from notes n join stocks s using(ticker) where n.week = (select max(week) from notes) order by c desc, s.name limit 20").fetchall()  # fmt: skip
+        cards = "".join(f'<a href="/n/{e(t)}" class="py-space-md flex flex-col gap-0.5"><span class="flex items-center justify-between">'
+                        f'<span class="font-body-reading-strong text-body-compact text-on-surface">{e(name)}</span>'
+                        f'<span class="font-label-micro text-label-micro text-outline">읽음 {c:,}</span></span>'
+                        f'<span class="font-body-compact text-body-compact text-on-surface-variant line-clamp-2">{e(json.loads(b)["headline"])}</span></a>'
+                        for t, name, b, c in rows)  # fmt: skip
+        return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
+                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{cards}</div></section>')  # fmt: skip
+
+    def feed(self, uid: int, q: str) -> str:
+        mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
+        (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
+        body = self.regram_list(mine, (uid, uid), "리그램") if n else self.popular()
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+                 '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
+                 + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
+                 f'<input class="flex-1 bg-transparent font-body-compact text-body-compact focus:outline-none" name="q" value="{e(q)}" placeholder="닉네임으로 사람 찾기"></form>'
+                 + self.people(uid, q) + body
+                 + "</div></main>" + bottom_nav("feed"))  # fmt: skip
+        return page("피드", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def user_page(self, uid: int, other: int):
+        row = self.con.execute("select nickname, bio, photo_at from users where id = ? and nickname is not null", (other,)).fetchone()
+        if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
+            return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
+        nick, bio, pat = row
+        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+                 f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
+                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other)}</div>'
+                 f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{"팔로잉" if on else "팔로우"}</button></form></header>'
+                 + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True)
+                 + "</div></main>" + bottom_nav("feed"))  # fmt: skip
+        return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
 
@@ -768,7 +1152,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
-                     + end)  # fmt: skip
+                     + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
         groups = "".join(
             f'<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><div class="flex items-center justify-between mb-space-sm"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">{e(c)}</h2></div>'

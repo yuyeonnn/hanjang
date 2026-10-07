@@ -24,9 +24,9 @@ def _app(now=1_000_000.0):
     return web.App(con, SECRET, clock=lambda: now), con
 
 
-def call(app, path, method="GET", form="", cookie=""):
+def call(app, path, method="GET", form="", cookie="", ctype="application/x-www-form-urlencoded"):
     p, _, q = path.partition("?")
-    env = {"REQUEST_METHOD": method, "PATH_INFO": p, "QUERY_STRING": q, "HTTP_COOKIE": cookie,
+    env = {"REQUEST_METHOD": method, "PATH_INFO": p, "QUERY_STRING": q, "HTTP_COOKIE": cookie, "CONTENT_TYPE": ctype,
            "CONTENT_LENGTH": str(len(form.encode())), "wsgi.input": io.BytesIO(form.encode())}
     got = {}
     body = b"".join(app(env, lambda s, h: got.update(status=s, headers=dict(h))))
@@ -41,10 +41,12 @@ def test_login_link_expires_and_cannot_be_forged():
     assert web.check_login(t, "other", 60) is None
 
 
-def _login(app):
+def _login(app, nick="나"):
     link = "/auth?t=" + quote(web.login_token("me@x.kr", SECRET, 1_000_000.0))
     _, h, _ = call(app, link)
-    return h["Set-Cookie"].split(";")[0]
+    ck = h["Set-Cookie"].split(";")[0]
+    call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉"), ck)  # 가입할 때 닉네임
+    return ck
 
 
 def test_flow_add_open_note_and_log_view():
@@ -157,6 +159,8 @@ def test_avatar_opens_profile_with_real_counts():
     assert 'href="/me"' in call(app, "/", cookie=ck)[2]
     call(app, "/n/005930", cookie=ck)
     st, _, body = call(app, "/me", cookie=ck)
+    assert st.startswith("200") and 'href="/me/settings"' in body and "탈퇴하기" not in body  # 프로필엔 설정 버튼만
+    st, _, body = call(app, "/me/settings", cookie=ck)
     assert st.startswith("200") and "me@x.kr" in body and "1 / 20개" in body and "탈퇴하기" in body
     assert "함께한 지" not in body and "읽은 노트" not in body and "답장" not in body
     assert "로그인 링크 받기" in call(app, "/me")[2]  # 로그인 안 하면 로그인 화면
@@ -168,9 +172,9 @@ def test_mail_switch_and_delete_account():
     app, con = _app()
     ck = _login(app)
     call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
-    assert "ON</span>" in call(app, "/me", cookie=ck)[2]
+    assert "ON</span>" in call(app, "/me/settings", cookie=ck)[2]
     call(app, "/me/mail", "POST", "", ck)  # 끄기
-    assert "OFF</span>" in call(app, "/me", cookie=ck)[2]
+    assert "OFF</span>" in call(app, "/me/settings", cookie=ck)[2]
     assert daily.notify(con, "2026-10-05") == 0  # 끈 사람에겐 안내 메일이 가지 않는다
     call(app, "/me/mail", "POST", "", ck)
     assert daily.notify(con, "2026-10-05") == 1
@@ -185,7 +189,7 @@ def test_bottom_nav_has_profile_tab():
     ck = _login(app)
     body = call(app, "/me", cookie=ck)[2]
     assert 'href="/me"><span class="material-symbols-outlined text-[22px]">person</span>' in body
-    assert 'aria-current=page class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md transition-colors text-primary-container font-semibold" href="/me"' in body
+    assert 'aria-current=page class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-1 transition-colors text-primary-container font-semibold" href="/me"' in body
 
 
 def test_long_short_numbers_from_index():
@@ -245,3 +249,101 @@ def test_backup_keeps_last_14(tmp_path):
         backup.backup(date(2026, 10, d), src, tmp_path / "b")
     kept = sorted(p.name for p in (tmp_path / "b").iterdir())
     assert len(kept) == 14 and kept[0] == "hanjang-20261004.db" and kept[-1] == "hanjang-20261017.db"
+
+
+def test_like_toggle_views_and_date():
+    """좋아요는 한 번 더 누르면 취소 · 읽음은 이 주 노트를 연 횟수 · 날짜는 노트를 만든 날. 누가 눌렀는지는 안 보인다."""
+    app, con = _app()
+    con.execute("update notes set made_at = '2026-10-06T07:00:00'")
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가'), (2, 'z@b.c', '2026-10-01', '나')")
+    me, other = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    call(app, "/like", "POST", "t=005930&w=2026-10-05", other)
+    call(app, "/n/005930", cookie=other)
+    _, _, body = call(app, "/n/005930", cookie=me)
+    assert "2026.10.06 · 읽음 2" in body and "좋아요 1개" in body and "z@b.c" not in body
+    call(app, "/like", "POST", "t=005930&w=2026-10-05", me)
+    _, _, body = call(app, "/n/005930", cookie=me)
+    assert "좋아요 2개" in body and 'aria-pressed="true"' in body
+    call(app, "/like", "POST", "t=005930&w=2026-10-05", me)  # 다시 누르면 취소
+    assert con.execute("select count(*) from likes").fetchone()[0] == 1
+    call(app, "/like", "POST", "t=005930&w=1999-01-04", me)  # 없는 노트엔 안 쌓인다
+    assert con.execute("select count(*) from likes").fetchone()[0] == 1
+
+
+def test_follow_regram_feed_and_privacy():
+    """닉네임이 있어야 남에게 보인다 · 팔로우한 사람의 리그램이 피드에 · 이메일은 어디에도 안 보인다 · 코멘트 금지어."""
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉'), (2, 'you@b.c', '2026-10-01', '너닉')")
+    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부") + "&bio=" + quote("메모리 회사를 봐요"), you)
+    assert call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부"), me)[1]["Location"].startswith("/me/settings?msg=")  # 같은 이름은 안 된다
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가나") + "&bio=" + quote("지금 사세요"), me)[1]["Location"]  # 자기소개 금지어
+    call(app, "/regram", "POST", "k=note&r=005930&w=2026-10-05", you)
+    _, _, body = call(app, "/feed", cookie=me)
+    assert "많이 읽은 노트" in body and "반도체공부" not in body  # 팔로우 전 — 조회수 순 노트
+    call(app, "/follow", "POST", "u=2", me)
+    _, _, body = call(app, "/feed", cookie=me)
+    assert "반도체공부" in body and "삼성전자" in body and "you@b.c" not in body and "많이 읽은 노트" not in body
+    _, _, body = call(app, "/u/2", cookie=me)
+    assert "팔로워 <b class=\"text-on-surface\">1</b>" in body and "메모리 회사를 봐요" in body and ">팔로잉</button>" in body
+    _, _, body = call(app, "/feed?q=" + quote("반도체"), cookie=me)
+    assert 'href="/u/2"' in body
+    call(app, "/me/delete", "POST", "", you)  # 탈퇴하면 팔로우·리그램도 지운다
+    assert con.execute("select (select count(*) from follows) + (select count(*) from regrams)").fetchone()[0] == 0
+
+
+def test_add_many_by_paste_and_scan(monkeypatch):
+    """여러 종목 한 번에(쉼표·줄바꿈·띄어쓰기) · 캡처는 AI 가 이름만 읽고 코드가 우리 종목과 맞춰 담는다."""
+    app, con = _app()
+    collect.save_universe(con, [("005930", "삼성전자"), ("000660", "SK하이닉스"), ("006400", "삼성SDI")], {})
+    ck = _login(app)
+    _, h, _ = call(app, "/add", "POST", "q=" + quote("삼성전자, SK하이닉스\n없는회사"), ck)
+    assert "2종목을 담았어요" in unquote(h["Location"]) and "없는회사" in unquote(h["Location"])
+    from hanjang import llm
+
+    seen = {}
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: seen.update(k) or ["삼성 SDI", "SK하이닉스", "123456"])
+    s, h, body = call(app, "/scan", "POST", json.dumps({"img": "data:image/jpeg;base64,AAAA"}), ck, ctype="application/json")
+    assert h["Content-Type"].startswith("application/json") and "2종목을 담았어요" in json.loads(body)["msg"]
+    assert seen["image"].startswith("data:image/jpeg")
+    assert con.execute("select count(*) from holdings").fetchone()[0] == 3
+    s, _, body = call(app, "/scan", "POST", json.dumps({"img": "javascript:x"}), ck, ctype="application/json")
+    assert s.startswith("400")
+
+
+def test_profile_photo_upload_serve_and_delete():
+    import base64
+
+    app, con = _app()
+    ck = _login(app)
+    jpg = b"\xff\xd8\xff\xe0" + b"0" * 100
+    s, _, body = call(app, "/me/photo", "POST", json.dumps({"img": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}), ck, ctype="application/json")
+    assert s.startswith("200")
+    s, h, body = call_raw(app, "/p/1.jpg", ck)
+    assert h["Content-Type"] == "image/jpeg" and body == jpg
+    assert '/p/1.jpg?v=' in call(app, "/me", cookie=ck)[2]  # 위쪽 동그라미·프로필에 사진
+    s, _, _ = call(app, "/me/photo", "POST", json.dumps({"img": "data:image/jpeg;base64," + base64.b64encode(b"<svg>").decode()}), ck, ctype="application/json")
+    assert s.startswith("400")  # JPEG 가 아니면 받지 않는다
+    call(app, "/me/photo/delete", "POST", "", ck)
+    assert call_raw(app, "/p/1.jpg", ck)[0].startswith("404")
+
+
+def call_raw(app, path, cookie=""):
+    env = {"REQUEST_METHOD": "GET", "PATH_INFO": path, "QUERY_STRING": "", "HTTP_COOKIE": cookie, "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO()}
+    got = {}
+    body = b"".join(app(env, lambda s, h: got.update(status=s, headers=dict(h))))
+    return got["status"], got["headers"], body
+
+
+def test_nickname_is_asked_at_signup_and_unique():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (9, 'x@b.c', '2026-10-01', 'Hanjang')")
+    _, h, _ = call(app, "/auth?t=" + quote(web.login_token("new@b.c", SECRET, 1_000_000.0)))
+    ck = h["Set-Cookie"].split(";")[0]
+    assert "닉네임을 정해 주세요" in call(app, "/", cookie=ck)[2]  # 정하기 전엔 다른 화면으로 못 간다
+    assert "닉네임을 정해 주세요" in call(app, "/feed", cookie=ck)[2]
+    assert "이미 누가 쓰고 있어요" in call(app, "/welcome", "POST", "nickname=hanjang", ck)[2]  # 대소문자만 달라도 겹침
+    assert "2~20자" in call(app, "/welcome", "POST", "nickname=a", ck)[2]
+    assert call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[1]["Location"] == "/"
+    assert "닉네임을 정해 주세요" not in call(app, "/", cookie=ck)[2]
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=", ck)[1]["Location"]  # 비울 수 없다

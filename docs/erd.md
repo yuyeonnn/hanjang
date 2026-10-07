@@ -204,6 +204,45 @@ from views v join users u on u.id = v.user_id
 where v.page = 'note' group by week;
 ```
 
+### `likes` — 좋아요 (2026-10-08)
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `user_id` | FK users | |
+| `ticker` | FK stocks | |
+| `week` | date | 그 주 노트 — 주가 바뀌면 새로 센다 |
+| `at` | timestamp | |
+
+PK `(user_id, ticker, week)` — 한 사람이 한 노트에 한 번. 다시 누르면 지운다. 화면에는 **개수만**(누가 눌렀는지는 안 보인다). 노트 위의 「읽음」은 `views` 에서 그 주 노트를 연 횟수를 센다. 탈퇴하면 함께 지운다.
+
+### `users` 에 더한 칸 (2026-10-08)
+
+`nickname` (남에게 보이는 이름, 한글·영문·숫자·_ 2~20자, 대소문자 무시 유일 — 비어 있으면 남에게 안 보인다) · `bio` (자기소개, 150자, 선택). **이메일은 어떤 화면에도 남에게 보이지 않는다.**
+
+### `follows` — 팔로우
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `follower_id` | FK users | 팔로우하는 사람 |
+| `followee_id` | FK users | 팔로우받는 사람 (닉네임이 있어야 한다) |
+| `at` | timestamp | |
+
+PK `(follower_id, followee_id)`. 다시 누르면 지운다.
+
+### `regrams` — 리그램 (좋아한 글을 내 팔로워 피드에)
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | PK | |
+| `user_id` | FK users | 닉네임이 있어야 할 수 있다 |
+| `kind` | text | `note`(종목 노트) · `learn`(읽기 팁 글) |
+| `ref` | text | 종목 코드 또는 글 slug |
+| `week` | date | 노트는 그 주 · 읽기 팁은 빈 글 |
+| `comment` | text | 쓰지 않음 — 코멘트는 10/8 사용자 요청으로 뺐다(늘 빈 값). 리그램은 아이콘 버튼 하나 |
+| `at` | timestamp | |
+
+UNIQUE `(user_id, kind, ref, week)`. 피드 = 내가 팔로우한 사람 + 나의 리그램, 최근 50개. 탈퇴하면 팔로우(양쪽)·리그램을 함께 지운다.
+
 ### `feedback` — 주간 설문
 
 | 컬럼 | 타입 | 비고 |
