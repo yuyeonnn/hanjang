@@ -3,7 +3,7 @@
 **한장(Hanjang)** — 내가 가진 주식이 지금 어떤 상황인지, 공시·재무·뉴스·수급을 **쉬운 글 한 장**으로 꿰어 보여주는 앱.
 네이버·토스는 정보를 늘어놓고, 한장은 설명한다. 약속하는 것은 **수익이 아니라 이해**다.
 
-> 지금 단계: **0단계 샘플**. 코드 없음. 구상 [docs/concept.md](docs/concept.md) · 제품 [docs/PRD.md](docs/PRD.md) · DB [docs/erd.md](docs/erd.md) · 일정 [docs/plan.md](docs/plan.md) · 샘플 [docs/sample-note.md](docs/sample-note.md).
+> 지금 단계: **0단계 샘플**. 코드 없음. 구상 [docs/concept.md](docs/concept.md) · 제품 [docs/PRD.md](docs/PRD.md) · DB [docs/erd.md](docs/erd.md) · 일정 [docs/plan.md](docs/plan.md) · 샘플 [docs/sample-note.md](docs/sample-note.md) · 데이터 사용권 [docs/data-rights.md](docs/data-rights.md).
 > **퀀트점프(`../quant-jump`, 개인용 엔진) 없이 혼자 돈다.** 데이터를 직접 받고 노트를 직접 만든다. 퀀트점프에서는 코드만 복사해 온다.
 
 ## 불변식
