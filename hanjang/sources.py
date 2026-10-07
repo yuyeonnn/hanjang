@@ -310,6 +310,67 @@ def news(name: str, count: int = 5) -> list[News]:
     return parse_news(r.text, count)
 
 
+ROBOTS_UA = "Mozilla/5.0 (hanjang dev; personal use)"
+_robots: dict = {}
+BLOCKED = re.compile(r"403 ERROR|Request blocked|Just a moment|Access Denied|Attention Required|404 Not Found", re.I)
+
+
+def robots_ok(url: str) -> bool:
+    """그 사이트 robots.txt 가 이 주소를 허용하나 — 호스트별 한 번. 못 받으면 False (우회하지 않는다)."""
+    from urllib.parse import urlparse
+    from urllib.robotparser import RobotFileParser
+
+    host = urlparse(url).netloc
+    if host not in _robots:
+        rp = RobotFileParser()
+        try:
+            rp.parse(httpx.get(f"https://{host}/robots.txt", headers={"User-Agent": ROBOTS_UA},
+                               timeout=15, follow_redirects=True).text.splitlines())  # fmt: skip
+        except httpx.HTTPError:
+            rp = None
+        _robots[host] = rp
+    return bool(_robots[host] and _robots[host].can_fetch(ROBOTS_UA, url))
+
+
+def md_text(md: str) -> str:
+    """Jina 마크다운 → 평문: 이미지·링크 주소·제목 기호·강조를 벗기고 공백을 합친다."""
+    md = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", md)
+    md = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", md)
+    md = re.sub(r"[#*_>`|]+", " ", md)
+    return re.sub(r"\s+", " ", md).strip()
+
+
+def jina_body(text: str, title: str, n: int = 2000) -> str:
+    """Jina Reader 응답 → 본문 평문. 기사 제목이 나오는 자리부터 자른다(앞쪽 사이트 메뉴를 건너뛴다)."""
+    head, _, md = text.rpartition("Markdown Content:")
+    if t := re.search(r"^Title: *(\S.*)$", head, re.M):
+        title = t[1]
+    letters = re.findall(r"[0-9A-Za-z가-힣]", title)[:12]
+    if len(letters) >= 6 and (m := re.search(r"[^0-9A-Za-z가-힣]{0,4}".join(map(re.escape, letters)), md)):
+        md = md[m.start():]
+    return md_text(md)[:n]
+
+
+def read_article(url: str, title: str) -> tuple[str, str]:
+    """구글 뉴스 링크 → (언론사 원문 주소, 본문 앞 2,000자). ⚠️ 개발 중 개인용만 (data-rights §5).
+    본문은 글쓰기 입력으로만 쓰고 저장하지 않는다. robots 가 막으면 본문은 안 받는다. 어디서 실패하든 제목만으로 계속."""
+    from googlenewsdecoder import gnewsdecoder  # 구글이 방식을 바꾸면 깨진다 — 실패는 정상 경로
+
+    try:
+        got = gnewsdecoder(url)
+    except Exception:  # noqa: BLE001
+        return url, ""
+    orig = str(got.get("decoded_url") or "") if (got.get("status") or got.get("success")) else ""
+    if not orig or "news.google.com" in orig or not robots_ok(orig):
+        return orig or url, ""
+    try:
+        r = httpx.get("https://r.jina.ai/" + orig, timeout=30, follow_redirects=True)
+    except httpx.HTTPError:
+        return orig, ""
+    body = jina_body(r.text, title) if r.status_code == 200 else ""
+    return orig, "" if BLOCKED.search(body[:300]) else body
+
+
 def parse_news(xml: str, count: int = 5) -> list[News]:
     """제목 끝의 「 - 매체」 꼬리를 떼고 매체는 `<source>` 에서 읽는다."""
     out = []

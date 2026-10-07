@@ -170,3 +170,40 @@ def test_particle_follows_slot_value():
     by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
     assert notes.fill({"text": "{D1.날짜}와 {F1.값}가 있어요.", "refs": ["D1", "F1"]}, by)["text"] == "8월 21일과 333.6조원이 있어요."
     assert notes.fill({"text": "{F1.폭}은 컸어요.", "refs": ["F1"]}, by)["text"] == "10.9%는 컸어요."
+
+
+def test_disclosure_fact_carries_plain_meaning():
+    fs = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    assert "무슨 일: 회사가 시장에서 자기 회사 주식을 사들이기로 했어요" in fs["D1"]["text"]
+    assert notes.plain("주식소각결정").startswith("회사가 갖고 있던 자기 주식을 아예 없애기로")
+    assert notes.plain("[기재정정]주요사항보고서(유상증자결정)").startswith("새 주식을 찍어 팔아")
+
+
+def test_news_sentence_may_copy_numbers_from_its_article_body():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    by["N1"] = {"id": "N1", "text": "10월 5일 기사 제목 「삼성 실적」", "tone": 0, "url": "https://n",
+                "slots": {"날짜": "10월 5일", "매체": "가", "제목": "「삼성 실적」"}, "body": "HBM4 공급이 3분기에 12% 늘었다"}
+    assert notes.fill({"text": "기사는 HBM4 공급이 12% 늘었다고 해요.", "refs": ["N1"]}, by)["text"].startswith("기사는 HBM4")
+    with pytest.raises(ValueError, match="빈칸으로만"):  # 기사에 없는 숫자
+        notes.fill({"text": "기사는 공급이 30% 늘었다고 해요.", "refs": ["N1"]}, by)
+    with pytest.raises(ValueError, match="빈칸으로만"):  # 재무 사실과 섞이면 예외 없음
+        notes.fill({"text": "공급이 12% 늘었어요.", "refs": ["N1", "F1"]}, by)
+
+
+def test_dates_of_facts_may_be_written_directly():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    assert notes.fill({"text": "8월 21일에 자사주 매입 공시가 있었어요.", "refs": ["D1"]}, by)["text"].startswith("8월 21일")
+    assert notes.fill({"text": "8월에는 자사주를 사들였어요.", "refs": ["D1"]}, by)
+    with pytest.raises(ValueError, match="빈칸으로만"):
+        notes.fill({"text": "9월 3일에 공시가 있었어요.", "refs": ["D1"]}, by)  # 사실에 없는 날짜
+
+
+def test_made_up_slot_and_repeated_kind_are_rejected():
+    con = _con()
+    collect.save_disclosures(con, [sources.Disclosure("20260821000999", "005930", date(2026, 8, 21), "주식소각결정")])
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1 where rcept_no='20260821000999'")
+    by = {f["id"]: f for f in notes.facts(con, "005930", date(2026, 10, 7))}
+    with pytest.raises(ValueError, match="빈칸"):
+        notes.fill({"text": "규모가 {N1.body}예요.", "refs": ["F1"]}, by)
+    with pytest.raises(ValueError, match="반복"):
+        notes.fill({"text": "주식을 사고 없앴어요({D1.종류}, {D2.종류}).", "refs": ["D1", "D2"]}, by)
