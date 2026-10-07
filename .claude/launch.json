@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hanjang-web",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "-m", "hanjang.web"],
+      "port": 8000
+    }
+  ]
+}
