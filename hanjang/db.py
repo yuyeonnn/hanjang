@@ -13,7 +13,7 @@ create table if not exists stocks (
 create table if not exists financials (
   ticker text not null references stocks, fiscal_year integer not null,
   revenue integer, operating_income integer, net_income integer, equity integer, liabilities integer,
-  rcept_no text not null, primary key (ticker, fiscal_year));
+  rcept_no text not null, basis text, primary key (ticker, fiscal_year));
 create table if not exists disclosures (
   rcept_no text primary key, ticker text not null references stocks, date text not null,
   title text not null, code text, importance integer, direction integer, risk_tags text,
@@ -51,4 +51,9 @@ def connect(path=PATH) -> sqlite3.Connection:
     con = sqlite3.connect(path)
     con.execute("pragma foreign_keys = on")
     con.executescript(SCHEMA)
+    # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
+    for table, col, typ in (("financials", "basis", "text"), ("stocks", "induty_code", "text"),
+                            ("disclosures", "amount", "integer")):  # fmt: skip
+        if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
+            con.execute(f"alter table {table} add column {col} {typ}")
     return con

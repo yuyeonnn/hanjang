@@ -16,12 +16,15 @@ spent = {"usd": 0.0, "calls": 0}  # 이번 실행 비용 — 끝에 찍는다
 CAP_USD = 3.0  # 한 번 실행 상한. ponytail: 주간 1회 · 100종목이면 $1 안쪽 (실측 뒤 조정)
 
 
-def _openai(model: str, system: str, user: str) -> str:
+def _openai(model: str, system: str, user: str, schema: dict | None = None) -> str:
     for wait in (10, 30, 60, None):
         r = httpx.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {env()['OPENAI_API_KEY']}"},
-            json={"model": model, "temperature": 0, "response_format": {"type": "json_object"},
+            json={"model": model, "temperature": 0,
+                  # 스키마가 있으면 구조화 출력(strict) — 정해 둔 칸·선택지 밖의 값은 API 가 아예 만들지 않는다
+                  "response_format": {"type": "json_schema", "json_schema": {"name": "out", "strict": True, "schema": schema}}
+                  if schema else {"type": "json_object"},
                   "messages": [{"role": "system", "content": system},
                                {"role": "user", "content": user}]},
             timeout=120,
@@ -40,7 +43,7 @@ def _openai(model: str, system: str, user: str) -> str:
     return j["choices"][0]["message"]["content"]
 
 
-def ask(prompt: str, task: str, payload, check):
+def ask(prompt: str, task: str, payload, check, schema: dict | None = None):
     """묻고 `check(parsed)` 로 검사 — 실패하면 두 번까지 다시, 그래도 실패면 None.
     같은 입력에도 답이 매번 조금 달라서, 한 번 더 물으면 통과하는 일이 많다(실측 12장 중 2장)."""
     system = (PROMPTS / f"{prompt}.md").read_text(encoding="utf-8")
@@ -49,7 +52,7 @@ def ask(prompt: str, task: str, payload, check):
         if spent["usd"] >= CAP_USD:
             raise RuntimeError(f"실행 비용 상한 ${CAP_USD} 도달")
         try:
-            return check(json.loads(_openai(MODELS[prompt], system, user)))
+            return check(json.loads(_openai(MODELS[prompt], system, user, schema)))
         except (ValueError, KeyError, TypeError):
             continue
     return None
