@@ -16,7 +16,7 @@ def save_universe(con: sqlite3.Connection, picked: list[tuple[str, str]], corps:
     """새로 고른 종목만 active. 빠진 종목은 지우지 않고 active=0 (ERD stocks)."""
     con.execute("update stocks set active = 0")
     con.executemany(
-        "insert into stocks values (?, ?, ?, 1) on conflict(ticker) do update set"
+        "insert into stocks (ticker, name, corp_code, active) values (?, ?, ?, 1) on conflict(ticker) do update set"
         " name = excluded.name, corp_code = excluded.corp_code, active = 1",
         [(t, n, corps.get(t)) for t, n in picked],
     )
@@ -24,9 +24,10 @@ def save_universe(con: sqlite3.Connection, picked: list[tuple[str, str]], corps:
 
 def save_financials(con: sqlite3.Connection, rows: list[sources.Financial]):
     con.executemany(
-        "insert or replace into financials values (?, ?, ?, ?, ?, ?, ?, ?)",
+        "insert or replace into financials (ticker, fiscal_year, revenue, operating_income, net_income, equity,"
+        " liabilities, rcept_no, basis) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [(f.ticker, f.fiscal_year, f.revenue, f.operating_income, f.net_income, f.equity,
-          f.liabilities, f.rcept_no) for f in rows],
+          f.liabilities, f.rcept_no, f.basis) for f in rows],
     )  # fmt: skip
 
 
@@ -51,8 +52,27 @@ def main(today: date) -> None:
     save_financials(con, fin)
     print(f"재무 {len(fin)}행 ({today.year - 2}~{today.year - 1})")
 
-    ds = dart.disclosures(today - timedelta(days=DISCLOSURE_DAYS), today, set(tickers))
+    lo = today - timedelta(days=DISCLOSURE_DAYS)
+    ds = dart.disclosures(lo, today, set(tickers))
     save_disclosures(con, ds)
+    # 받은 기간 안에서 이번 목록에 없는 공시 = 정정되어 최종본이 아닌 옛 판 → 지운다 (같은 공시가 두 번 나오지 않게)
+    con.execute("create temp table if not exists got (r text primary key)")
+    con.execute("delete from got")
+    con.executemany("insert or ignore into got values (?)", [(d.rcept_no,) for d in ds])
+    gone = con.execute("delete from disclosures where date between ? and ? and rcept_no not in (select r from got)",
+                       (lo.isoformat(), today.isoformat())).rowcount  # fmt: skip
+    print(f"  정정되어 옛 판이 된 공시 {gone}건 정리")
+
+    for (t,) in con.execute("select ticker from stocks where active = 1 and induty_code is null").fetchall():
+        con.execute("update stocks set induty_code = ? where ticker = ?", (dart.industry(t), t))
+    # 자기주식 취득 결정은 금액을 전용 API 로 받는다 (제목만으로는 규모를 모른다)
+    want = con.execute("select distinct ticker from disclosures where amount is null and date >= ?"
+                       " and replace(title, ' ', '') like '%자기주식취득결정%'", (lo.isoformat(),)).fetchall()  # fmt: skip
+    got = 0
+    for (t,) in want:
+        for rno, v in dart.buybacks(t, lo, today).items():
+            got += con.execute("update disclosures set amount = ? where rcept_no = ?", (v, rno)).rowcount
+    print(f"  업종 코드 · 자사주 취득 금액 {got}건 · DART {dart.calls}콜")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
 
     for sid, name in sources.MACRO.items():

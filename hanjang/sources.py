@@ -116,6 +116,7 @@ class Financial:
     equity: int | None
     liabilities: int | None
     rcept_no: str
+    basis: str = "CFS"  # CFS 연결 · OFS 별도 — 연결이 없는 회사만 별도. 섞이면 비교가 깨지니 기록한다
 
 
 class Dart:
@@ -175,7 +176,7 @@ class Dart:
                 while True:
                     j = self._list("list.json", bgn_de=lo.strftime("%Y%m%d"),
                                    end_de=hi.strftime("%Y%m%d"), corp_cls="Y", pblntf_ty=form,
-                                   page_no=page, page_count=100)  # fmt: skip
+                                   last_reprt_at="Y", page_no=page, page_count=100)  # 정정공시는 최종본만  # fmt: skip
                     out += [d for d in parse_disclosures(j["list"]) if d.ticker in tickers]
                     if page >= j["total_page"]:
                         break
@@ -192,6 +193,20 @@ class Dart:
             rows += self._list("fnlttMultiAcnt.json", corp_code=",".join(codes[i : i + 100]),
                                bsns_year=str(year), reprt_code="11011")["list"]  # fmt: skip
         return parse_financials(rows, year)
+
+    def industry(self, ticker: str) -> str | None:
+        """회사 개황의 업종 코드(통계청 한국표준산업분류) — 「264」「2611」「64992」."""
+        cc = self.corps().get(ticker)
+        return self._call("company.json", corp_code=cc).json().get("induty_code") if cc else None
+
+    def buybacks(self, ticker: str, start: date, end: date) -> dict[str, int]:
+        """자기주식 취득 결정의 취득 예정 금액(보통주, 원) — {접수번호: 금액}. 주요사항보고서 전용 API."""
+        cc = self.corps().get(ticker)
+        if not cc:
+            return {}
+        rows = self._list("tsstkAqDecsn.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"),
+                          end_de=end.strftime("%Y%m%d"))["list"]  # fmt: skip
+        return {r["rcept_no"]: v for r in rows if (v := _won(r.get("aqpln_prc_ostk")))}
 
 
 def parse_corps(xml: str) -> dict[str, str]:
@@ -225,8 +240,30 @@ def parse_financials(rows: list[dict], year: int) -> list[Financial]:
             continue
         r = v.pop("_r")
         vals = {c: v.get(c) for c in set(Dart.ACCOUNTS.values())}
-        out.append(Financial(tkr, year, **vals, rcept_no=r["rcept_no"]))
+        out.append(Financial(tkr, year, **vals, rcept_no=r["rcept_no"], basis=fs))
     return out
+
+
+# 업종 이름표 — 통계청 한국표준산업분류(고시 · 저작권법 제7조로 자유 이용) 코드를 쉬운 말로 줄인 우리 이름.
+# 코드 앞자리가 가장 길게 맞는 것을 쓴다. 없으면 이름표를 달지 않는다(지어내지 않는다)
+INDUSTRY = {
+    "2611": "반도체", "2612": "반도체", "262": "전자부품", "26": "전자·통신장비",
+    "28202": "2차전지", "282": "전지", "2830": "전선·케이블", "28": "전기장비",
+    "20423": "화장품", "20": "화학", "311": "조선", "313": "항공우주", "3191": "철도차량", "31": "운송장비",
+    "252": "방위산업", "25": "금속가공", "5821": "게임", "58": "소프트웨어",
+    "64992": "지주회사", "641": "은행", "64": "금융", "6612": "증권", "66": "금융서비스",
+    "10": "식료품", "12": "담배", "19": "석유정제", "21": "제약·바이오", "22": "타이어·고무", "24": "철강·금속",
+    "29": "기계", "30": "자동차", "35": "전력·가스", "41": "건설", "46": "무역·도매", "50": "해운", "51": "항공",
+    "52": "물류", "59": "엔터테인먼트", "61": "통신", "62": "IT 서비스", "63": "인터넷 플랫폼", "65": "보험",
+    "70": "연구개발", "72": "엔지니어링", "96": "생활 서비스",
+}  # fmt: skip
+
+
+def industry_label(code: str | None) -> str | None:
+    for n in range(len(code or ""), 1, -1):
+        if code[:n] in INDUSTRY:
+            return INDUSTRY[code[:n]]
+    return None
 
 
 # --- 한국은행 ECOS ---

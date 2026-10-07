@@ -98,3 +98,64 @@ def test_forbidden_words_do_not_catch_ordinary_words():
     f = notes.FORBIDDEN.search
     assert not f("신규 임원 인사라고 써요") and not f("회사라서") and not f("수주 목표가 올라갔다고 써요")
     assert f("지금 사라") and f("목표가를 올렸어요") and f("목표주가") and f("매수")
+
+
+def test_slots_fill_numbers_and_direction_from_code():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    by = {f["id"]: f for f in fs}
+    got = notes.fill({"text": "{F1.연도} 매출이 {F1.변화} {F1.방향}어요({F1.값}).", "refs": []}, by)
+    assert got == {"text": "2025년 매출이 +10.9% 늘었어요(333.6조원).", "refs": ["F1"]}  # 근거도 저절로
+    with pytest.raises(ValueError, match="빈칸으로만"):  # AI 가 숫자를 직접 쓰면 탈락
+        notes.fill({"text": "매출이 10.9% 늘었어요.", "refs": ["F1"]}, by)
+    with pytest.raises(ValueError, match="없는 빈칸"):
+        notes.fill({"text": "{F1.주가}예요.", "refs": ["F1"]}, by)
+
+
+def test_direction_word_against_fact_is_rejected():
+    con = _con()
+    collect.save_financials(con, [sources.Financial("005930", 2025, 200000000000000, 43601051000000, 1, 10, 3,
+                                                    "20260310002820")])  # 매출 감소
+    by = {f["id"]: f for f in notes.facts(con, "005930", date(2026, 10, 7))}
+    assert by["F1"]["slots"]["방향"] == "줄었" and by["F1"]["tone"] == -1
+    with pytest.raises(ValueError, match="반대 방향"):
+        notes.fill({"text": "매출이 크게 늘었어요.", "refs": ["F1"]}, by)
+    assert notes.fill({"text": "매출이 {F1.방향}어요.", "refs": ["F1"]}, by)["text"] == "매출이 줄었어요."
+
+
+def test_turnaround_is_said_in_words_not_percent():
+    assert notes.trend(5, -3)[:2] == (1, "흑자로 돌아섰")
+    assert notes.trend(-5, 3)[:2] == (-1, "적자로 돌아섰")
+    assert notes.trend(-5, -3)[2] == "적자 지속"
+    assert notes.trend(110, 100) == (1, "늘었", "+10.0%")
+
+
+def test_title_rules_decide_without_ai():
+    assert notes.by_rule("주요사항보고서(자기주식취득결정)") == ("BUYBACK", 3)
+    assert notes.by_rule("[기재정정]단일판매ㆍ공급계약체결") == ("MAJOR_CONTRACT", 2)
+    assert notes.by_rule("현금ㆍ현물배당결정") == ("DIVIDEND", 2)
+    assert notes.by_rule("연결재무제표기준영업(잠정)실적(공정공시)") == ("EARNINGS", 2)
+    assert notes.by_rule("최대주주등소유주식변동신고서") == ("OTHER", 1)
+    assert notes.by_rule("투자설명서") is None  # 규칙에 없으면 AI 에게
+
+
+def test_schema_limits_refs_to_this_notes_facts():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    s = notes.schema(fs)
+    refs = s["properties"]["summary"]["items"]["properties"]["refs"]["items"]["enum"]
+    assert refs == [f["id"] for f in fs] and s["additionalProperties"] is False
+
+
+def test_fallback_headline_is_the_companys_biggest_issue():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    assert notes.code_headline(fs) == "2025년 영업이익이 늘었어요(43.6조원, +33.2%)."
+    con = _con()
+    collect.save_disclosures(con, [sources.Disclosure("20261001000001", "005930", date(2026, 10, 1), "유상증자결정")])
+    con.execute("update disclosures set code='RIGHTS_ISSUE', importance=3, direction=-1 where rcept_no='20261001000001'")
+    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "10월 1일에 유상증자 공시가 있었어요."
+
+
+def test_year_may_be_written_but_nothing_else():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    assert notes.fill({"text": "2025년 매출이 {F1.방향}었지만 괜찮아요.", "refs": ["F1"]}, by)["text"] == "2025년 매출이 늘었지만 괜찮아요."
+    with pytest.raises(ValueError, match="빈칸으로만"):
+        notes.fill({"text": "2024년 매출이 늘었어요.", "refs": ["F1"]}, by)  # 사실에 없는 연도
