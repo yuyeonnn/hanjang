@@ -5,7 +5,7 @@
 > 넘어가는 조건: 내가 읽어서 「남에게 보여줄 만하다」 ([concept.md](concept.md) §9).
 
 **뺀 것** — 비중 절(「그래서 비중은 이렇게 정했어요」) · 20일 예측·환산 주가·「−10% 빠질 확률」·1주 예측 등급 · AI 매수/매도 논거 중 전망 문장(「주가 지지 요인으로 작용할 가능성」) · 외국인·기관 매매(토스 출처라 개인용 — 불변식 3).
-**더한 것** — 용어 풀이(밑줄 대신 `▸` 줄) · 거시 민감도 문장에 「보장 없음」 · 맨 위 한 줄을 예측 대신 사실로.
+**더한 것** — 용어 풀이(밑줄 대신 `▸` 줄) · 거시 민감도 문장에 「보장 없음」 · 맨 위 한 줄을 예측 대신 사실로 · 뉴스를 목록만이 아니라 **제목들로 쓴 짧은 글**로 (기대·전망은 기사의 것이라고 밝힘).
 
 ---
 
@@ -61,7 +61,21 @@
 
 ## 📰 요즘 뉴스는요
 
+요즘 기사는 대부분 **며칠 뒤 나올 분기 실적** 이야기예요. 실적 발표를 사흘 앞두고, 기사 제목들은 한 분기 영업이익이 100조 원에 가까워졌다고 써요. [머니투데이](https://news.google.com/rss/articles/CBMiaEFVX3lxTE1yc050eTBVRGx3ZnJuX3dJZlMwNGtreHFQY01BdUpqR0QxOVBEWXFpcmVOVmxFR25hdFJoeUVneThFdk9GSnpWTTl6NUdPTFB0LXUtSHJ1SVdqM3I0TFpQenJiZVJqUmlv0gFuQVVfeXFMTjZJdjRQX0hqbFRXY2ZqZjVzZ2ktVzVGRFl4dzFHWDhIUWRJTHNWSXF6ZDNGeVlhdTZQYXJUOGowVldqakc1dGEyWmFHVHVzbVlkUTA1R1RuWmt6Y0FnNk1Fak5Za2FtdENFV3JCMWc?oc=5) · [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
+
+기사들의 눈은 그다음으로 **HBM4**에 가 있어요. [마켓인](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
+> ▸ **HBM** — 여러 겹 쌓아 데이터를 아주 빨리 주고받게 만든 메모리 반도체예요. AI 계산용 칩 옆에 붙어서 쓰여요. HBM4는 그 4세대예요.
+
+증시 전체로 보면, 이번 주 삼성전자 실적과 미국 금리를 시장의 갈림길로 꼽은 주간 전망 기사가 있었어요. [뉴시스](https://news.google.com/rss/articles/CBMiYEFVX3lxTE5qUWh6ZW1LQ0FjRzh1T3NGb3NIQmVLV2EzN3ZFSDFKWmNsX3A3blpNZXZVVVlEWm9sbXd5NkthcG00cmRzeWRmdEd1ck1lQmlxeVlzSGgyQkEtWGhGc1pJb9IBeEFVX3lxTE05RUpnd1NFWktTOXVSNDMyS3lPX1JIMEhyM3FNUk9XU1h3N2hXdDVsQ2tLUWVyQVRna2ZPb1JPR2Y2V3R6VW5nTE1vRnpVVVpzRW5Xdl9QUy1sam9jTDlmcVJBa01aZXBwNHBMcDZYTHpKeE1iV3JhRw?oc=5)
+
+회사 밖 소식으로는, 중국 디스플레이 회사 BOE의 회장이 다음 주 한국에 와 삼성전자와 관계를 다진다는 기사가 있었어요. [전자신문](https://news.google.com/rss/articles/CBMiTkFVX3lxTFBCUmFTOUNKdUlIZmdaTHhoeEtxRGRGRDFfOG54RmFUWWE1bEVFd3FhbnQ5MFhHTHZBNEJ0bmZJR1JzWl9WSDYzUTZCMWFPUQ?oc=5)
+
+<sub>기사 제목만 읽고 정리했어요. 기사에 나온 기대·전망은 그 기사를 쓴 쪽의 것이고, 한장의 예측이 아니에요.</sub>
+
+**읽어 볼 기사**
+
 - 10월 5일 · 마켓인 — [삼전 또 최대 실적 예고…'100조 이후' HBM4에 쏠린 눈](https://news.google.com/rss/articles/CBMic0FVX3lxTE5PcnNlTVJaYVRzZ1dST2xNTVpzSHd1RC1FTFUtdXcyZUZ1VmpENDkwdnFOalp1Zlh4X1hQRl9oS3ItNmRpTlVleHpwQXBaYzROaElXQXVDT293WWltSElrLXY2ZnN5bzdNMDkyaTl4QklWR0E?oc=5)
+- 10월 5일 · 머니투데이 — [분기 영업익 100조 '꿈의 숫자' 눈앞…삼성전자 실적 D-3](https://news.google.com/rss/articles/CBMiaEFVX3lxTE1yc050eTBVRGx3ZnJuX3dJZlMwNGtreHFQY01BdUpqR0QxOVBEWXFpcmVOVmxFR25hdFJoeUVneThFdk9GSnpWTTl6NUdPTFB0LXUtSHJ1SVdqM3I0TFpQenJiZVJqUmlv0gFuQVVfeXFMTjZJdjRQX0hqbFRXY2ZqZjVzZ2ktVzVGRFl4dzFHWDhIUWRJTHNWSXF6ZDNGeVlhdTZQYXJUOGowVldqakc1dGEyWmFHVHVzbVlkUTA1R1RuWmt6Y0FnNk1Fak5Za2FtdENFV3JCMWc?oc=5)
 - 10월 5일 · 전자신문 — [천옌순 BOE 회장, 내주 방한…삼성전자와 관계 강화](https://news.google.com/rss/articles/CBMiTkFVX3lxTFBCUmFTOUNKdUlIZmdaTHhoeEtxRGRGRDFfOG54RmFUWWE1bEVFd3FhbnQ5MFhHTHZBNEJ0bmZJR1JzWl9WSDYzUTZCMWFPUQ?oc=5)
 - 10월 4일 · 뉴시스 — [[주간증시전망]코스피, 7000선 안착할까…삼성전자 실적·美 금리 '분수령'](https://news.google.com/rss/articles/CBMiYEFVX3lxTE5qUWh6ZW1LQ0FjRzh1T3NGb3NIQmVLV2EzN3ZFSDFKWmNsX3A3blpNZXZVVVlEWm9sbXd5NkthcG00cmRzeWRmdEd1ck1lQmlxeVlzSGgyQkEtWGhGc1pJb9IBeEFVX3lxTE05RUpnd1NFWktTOXVSNDMyS3lPX1JIMEhyM3FNUk9XU1h3N2hXdDVsQ2tLUWVyQVRna2ZPb1JPR2Y2V3R6VW5nTE1vRnpVVVpzRW5Xdl9QUy1sam9jTDlmcVJBa01aZXBwNHBMcDZYTHpKeE1iV3JhRw?oc=5)
 
