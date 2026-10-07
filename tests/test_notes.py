@@ -207,3 +207,11 @@ def test_made_up_slot_and_repeated_kind_are_rejected():
         notes.fill({"text": "규모가 {N1.body}예요.", "refs": ["F1"]}, by)
     with pytest.raises(ValueError, match="반복"):
         notes.fill({"text": "주식을 사고 없앴어요({D1.종류}, {D2.종류}).", "refs": ["D1", "D2"]}, by)
+
+
+def test_dedupe_paren_list():
+    assert notes.dedupe("공시가 나왔어요(7월 23일·7월 23일·7월 20일).") == "공시가 나왔어요(7월 23일·7월 20일)."
+    assert notes.dedupe("(10월 1일, 「A, B」, 「A, B」)") == "(10월 1일, 「A, B」)"
+    assert notes.dedupe("(매출 97.1조원 · 영업이익 47.2조원)") == "(매출 97.1조원 · 영업이익 47.2조원)"
+    assert notes.dedupe("소식이 나왔어요(「A」, 「B」). 끝") == "소식이 나왔어요. 끝"
+    assert notes.dedupe("「A」라는 기사(「A」)") == "「A」라는 기사(「A」)"

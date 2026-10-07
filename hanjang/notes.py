@@ -305,6 +305,21 @@ def josa(value: str, p: str) -> str:
     return JOSA[p][1 if has else 0]
 
 
+LIST_SEP = re.compile(r"( ?· ?|, )(?![^「」]*」)")  # 괄호 속 나열의 구분자 — 「제목」 안의 것은 빼고
+
+
+def dedupe(text: str) -> str:
+    """괄호 속 나열에서 같은 항목을 한 번만 — 「(7월 23일·7월 23일·7월 20일)」 → 「(7월 23일·7월 20일)」."""
+    def one(m):
+        parts = LIST_SEP.split(m[1])
+        items, seps = [x.strip() for x in parts[::2]], parts[1::2]
+        return "(" + (seps[0] if seps else "").join(dict.fromkeys(items)) + ")"
+
+    text = re.sub(r"\(([^()]*)\)", one, text)
+    # 괄호에 기사 제목만 둘 이상 늘어놓은 것은 통째로 뺀다 — 출처 번호로 기사가 열린다
+    return re.sub(r" ?\(「[^()」]*」(?:, ?「[^()」]*」)+\)", "", text)
+
+
 def fill(sent: dict, by: dict[str, dict]) -> dict:
     """AI 문장의 빈칸을 코드 값으로 채운다. 쓴 빈칸의 사실은 근거(refs)에 저절로 들어간다.
     검사: ① 빈칸 밖에 숫자 금지 ② 없는 빈칸 금지 ③ 빈칸 없이 쓴 방향 낱말이 사실과 반대면 탈락."""
@@ -341,7 +356,7 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         v = by[m[1]]["slots"][m[2]]
         return v + (josa(v, m[3]) if m[3] else "")
 
-    text = SLOT_JOSA.sub(put, raw).replace("었었", "었")
+    text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
     if "{" in text or "}" in text:  # 영어 이름 같은, 정해 두지 않은 빈칸을 지어낸 경우 (「{N1.body}」)
         raise ValueError(f"없는 빈칸이 남음: {raw!r}")
     kinds = [by[fid]["slots"]["종류"] for fid, key in used if key == "종류"]
