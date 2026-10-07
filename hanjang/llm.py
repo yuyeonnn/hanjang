@@ -41,10 +41,11 @@ def _openai(model: str, system: str, user: str) -> str:
 
 
 def ask(prompt: str, task: str, payload, check):
-    """한 번 묻고 `check(parsed)` 로 검사 — 실패하면 한 번 더, 그래도 실패면 None."""
+    """묻고 `check(parsed)` 로 검사 — 실패하면 두 번까지 다시, 그래도 실패면 None.
+    같은 입력에도 답이 매번 조금 달라서, 한 번 더 물으면 통과하는 일이 많다(실측 12장 중 2장)."""
     system = (PROMPTS / f"{prompt}.md").read_text(encoding="utf-8")
     user = json.dumps({"task": task, "input": payload}, ensure_ascii=False, default=str)
-    for _ in range(2):
+    for _ in range(3):
         if spent["usd"] >= CAP_USD:
             raise RuntimeError(f"실행 비용 상한 ${CAP_USD} 도달")
         try:
