@@ -81,6 +81,20 @@ def kospi_universe(n: int = 100) -> list[tuple[str, str]]:
     raise RuntimeError("최근 10일 시세가 비었다")
 
 
+def holidays(year: int) -> list[tuple[date, str]]:
+    """공휴일·대체공휴일 — 한국천문연구원 특일 정보 (이용허락범위 제한 없음). 1년 한 콜."""
+    key = env()["DATA_GO_KR_SERVICE_KEY"]
+    url = "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo"
+    body = _get(url, key, serviceKey=key, solYear=str(year), _type="json", numOfRows=100).json()
+    return parse_holidays(body["response"]["body"])
+
+
+def parse_holidays(body: dict) -> list[tuple[date, str]]:
+    items = body["items"]["item"] if body.get("totalCount") else []
+    items = items if isinstance(items, list) else [items]  # 1건이면 dict 로 온다
+    return [(_ymd(str(i["locdate"])), i["dateName"]) for i in items if i.get("isHoliday") == "Y"]
+
+
 # --- DART ---
 
 

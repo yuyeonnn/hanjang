@@ -2,14 +2,16 @@
 `uv run python -m hanjang.web` → http://localhost:8000
 화면: 로그인 → ② 내 종목 카드 → ③ 기업 노트 · ④ 캘린더. 열 때마다 `views` 한 행 (시험 판정의 원천)."""
 
+import calendar
 import hashlib
 import hmac
 import html
 import json
+import re
 import sqlite3
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from urllib.parse import parse_qs, quote
 
 from hanjang import db, notes
@@ -48,8 +50,8 @@ def check_login(token: str, secret: str, now: float) -> str | None:
 # --- 화면 조각 ---
 
 CSS = """
-:root{--bg:#faf9f6;--fg:#1d1d1f;--sub:#6b6b70;--line:#e6e4df;--card:#fff;--accent:#2f5d50;--good:#2f6f4f;--bad:#a2412f}
-@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#ececec;--sub:#a0a0a5;--line:#2c2c2c;--card:#1d1d1d;--accent:#8cc7b3;--good:#8fd0ad;--bad:#e59a87}}
+:root{--bg:#faf9f6;--fg:#1d1d1f;--sub:#6b6b70;--line:#e6e4df;--card:#fff;--accent:#2f5d50;--good:#2f6f4f;--bad:#a2412f;--red:#d1352b}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#ececec;--sub:#a0a0a5;--line:#2c2c2c;--card:#1d1d1d;--accent:#8cc7b3;--good:#8fd0ad;--bad:#e59a87;--red:#ff6b5e}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;word-break:keep-all}
 main{max-width:640px;margin:0 auto;padding:16px 16px 96px}
 a{color:var(--accent)}h1{font-size:22px;margin:8px 0}h2{font-size:17px;margin:28px 0 8px}
@@ -61,6 +63,13 @@ sup a{font-size:11px;text-decoration:none;margin-left:2px}.lead{font-size:19px;f
 .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line)}
 nav a{flex:1;text-align:center;padding:14px 0;text-decoration:none;color:var(--sub)}nav a.on{color:var(--accent);font-weight:700}
+.top{position:sticky;top:0;z-index:1;background:var(--bg);padding:12px 0;margin:-16px 0 4px}
+.cal{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}.cal th{font-weight:600;padding:4px 0;color:var(--sub)}
+.cal td{vertical-align:top;border:1px solid var(--line);height:64px;padding:2px 3px;background:var(--card);overflow:hidden}
+.cal .n{display:block;font-weight:600}.cal .red .n,.cal th.red{color:var(--red)}.cal .dim{opacity:.4}
+.cal .today{outline:2px solid var(--accent);outline-offset:-2px}.cal .hol{display:block;color:var(--red);font-size:10px;line-height:1.3}
+.cal .ev{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:10px;line-height:1.25;word-break:break-all;text-decoration:none;color:var(--fg);margin-top:2px;padding-top:2px;border-top:1px dotted var(--line)}
+.cal .ev.good{color:var(--good)}.cal .ev.bad{color:var(--bad)}
 .good{color:var(--good)}.bad{color:var(--bad)}.foot{margin-top:32px;font-size:13px;color:var(--sub);border-top:1px solid var(--line);padding-top:12px}
 """
 
@@ -166,7 +175,7 @@ class App:
             return self.note(ticker)
         if path == "/calendar":
             self.log(uid, "calendar")
-            return "200 OK", [], self.calendar(uid)
+            return "200 OK", [], self.calendar(uid, query.get("m"))
         return "404 Not Found", [], page("없음", "<p>없는 화면이에요. <a href='/'>처음으로</a></p>")
 
     def login_page(self, sent: str | None = None) -> str:
@@ -205,7 +214,11 @@ class App:
             " (select max(week) from notes where ticker = s.ticker)"
             " where h.user_id = ? order by h.added_at", (uid,)).fetchall()  # fmt: skip
         names = self.con.execute("select name from stocks where active = 1 order by name").fetchall()
-        out = ["<h1>내 종목</h1>", f"<p class='box'>{e(msg)}</p>" if msg else ""]
+        search = ("<form method='post' action='/add' class='row top'>"
+                  "<input class='grow' name='q' list='names' required placeholder='종목 이름 또는 코드로 담기'>"
+                  "<button>담기</button></form><datalist id='names'>"
+                  + "".join(f"<option value='{e(n)}'>" for (n,) in names) + "</datalist>")  # fmt: skip
+        out = [search, "<h1>내 종목</h1>", f"<p class='box'>{e(msg)}</p>" if msg else ""]
         for t, name, week, body in rows:
             head = json.loads(body)["headline"] if body else "이번 주 노트를 준비 중이에요."
             out.append(f"<div class='row'><a class='card grow' href='/n/{e(t)}'><b>{e(name)}</b>"
@@ -214,11 +227,7 @@ class App:
                        f"<button class='ghost' title='빼기'>✕</button></form></div>")  # fmt: skip
         if not rows:
             out.append("<p class='sub'>가진 종목이나 궁금한 종목을 담아 보세요. 매주 한 장씩 노트가 와요.</p>")
-        out.append("<form method='post' action='/add' class='row' style='margin-top:16px'>"
-                   "<input class='grow' name='q' list='names' required placeholder='종목 이름 또는 코드'>"
-                   "<button>담기</button></form><datalist id='names'>"
-                   + "".join(f"<option value='{e(n)}'>" for (n,) in names) + "</datalist>"
-                   "<p class='sub' style='margin-top:24px'><a href='/logout'>로그아웃</a></p>")  # fmt: skip
+        out.append("<p class='sub' style='margin-top:24px'><a href='/logout'>로그아웃</a></p>")
         return page("내 종목", "".join(out), "cards")
 
     def note(self, ticker: str):
@@ -230,31 +239,78 @@ class App:
         name, week, body, writer = row
         return "200 OK", [], render_note(name, ticker, week, json.loads(body), writer)
 
-    def calendar(self, uid: int) -> str:
-        """④ 캘린더 — 지금은 내 종목의 지난 90일 중요 공시를 날짜순으로.
-        ponytail: 앞으로의 일정(실적 발표일·배당 기준일)은 공시 본문을 읽어야 나온다 — 다음 단계."""
-        since = (date.today() - timedelta(days=notes.EVENT_DAYS)).isoformat()
+    def calendar(self, uid: int, month: str | None, today: date | None = None) -> str:
+        """④ 캘린더 — 한 달 달력. 주말·공휴일은 빨간 숫자, 칸 안에 내 종목의 공시.
+        ponytail: 앞으로의 일정(실적 발표일·배당 기준일)은 공시 본문을 읽어야 나온다 — 지금은 지난 공시만."""
+        today = today or date.today()
+        y, m = (int(x) for x in month.split("-")) if month and re.fullmatch(r"\d{4}-\d{2}", month) else (today.year, today.month)
+        y, m = (y, m) if 1 <= m <= 12 and 2000 <= y <= 2100 else (today.year, today.month)
+        weeks = calendar.Calendar(firstweekday=6).monthdatescalendar(y, m)  # 일요일부터
+        lo, hi = weeks[0][0].isoformat(), weeks[-1][-1].isoformat()
+        hol = dict(self.con.execute("select date, name from holidays where date between ? and ?", (lo, hi)))
+        if (end := date(y, 12, 31)).weekday() < 5 and m == 12:
+            hol.setdefault(end.isoformat(), "증시 휴장")  # 연말 휴장 — 공휴일 자료엔 없다
         rows = self.con.execute(
             "select d.date, s.name, d.code, d.title, d.rcept_no, d.direction from disclosures d"
             " join holdings h on h.ticker = d.ticker and h.user_id = ? join stocks s on s.ticker = d.ticker"
-            " where d.date >= ? and d.importance >= 2 and d.code != 'OTHER' order by d.date desc",
-            (uid, since)).fetchall()  # fmt: skip
-        out = ["<h1>캘린더</h1><p class='sub'>내 종목의 최근 90일 주요 공시예요. 앞으로의 일정(실적 발표일·배당일)은 준비 중이에요.</p>"]
-        for d, name, code, title, rno, dr in rows:
+            " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date",
+            (uid, lo, hi)).fetchall()  # fmt: skip
+        by: dict[str, list] = {}
+        for r in rows:
+            by.setdefault(r[0], []).append(r)
+        prev = f"{y - (m == 1)}-{(m - 2) % 12 + 1:02d}"
+        nxt = f"{y + (m == 12)}-{m % 12 + 1:02d}"
+        out = [f"<div class='row'><h1 class='grow'>{y}년 {m}월</h1>"
+               f"<a href='/calendar?m={prev}'>‹ 이전</a> <a href='/calendar?m={nxt}'>다음 ›</a></div>",
+               "<table class='cal'><tr>" + "".join(f"<th{' class=red' if i in (0, 6) else ''}>{d}</th>"
+                                                  for i, d in enumerate("일월화수목금토")) + "</tr>"]  # fmt: skip
+        for wk in weeks:
+            out.append("<tr>")
+            for i, d in enumerate(wk):
+                iso = d.isoformat()
+                cls = " ".join(c for c, on in (("red", i in (0, 6) or iso in hol), ("dim", d.month != m),
+                                               ("today", d == today)) if on)  # fmt: skip
+                cell = f"<span class='n'>{d.day}</span>"
+                if iso in hol:
+                    cell += f"<span class='hol'>{e(hol[iso])}</span>"
+                for _, name, code, _, rno, dr in by.get(iso, []):
+                    tone = {1: " good", -1: " bad"}.get(dr, "")
+                    cell += (f"<a class='ev{tone}' href='{e(notes.DART.format(rno))}' target='_blank' rel='noopener'>"
+                             f"{e(name)} {e(notes.EVENT_KO[code])}</a>")  # fmt: skip
+                out.append(f"<td class='{cls}'>{cell}</td>")
+            out.append("</tr>")
+        out.append("</table><h2>이 달의 일정</h2>")
+        mine = [r for r in rows if r[0][:7] == f"{y}-{m:02d}"]
+        for d, name, code, title, rno, dr in mine:
             tone = {1: " <span class='good'>반가운 쪽</span>", -1: " <span class='bad'>걸리는 쪽</span>"}.get(dr, "")
             out.append(f"<a class='card' href='{e(notes.DART.format(rno))}' target='_blank' rel='noopener'>"
                        f"<span class='sub'>{e(d)} · {e(name)}</span><br><b>{e(notes.EVENT_KO[code])}</b>{tone}"
                        f"<br><span class='sub'>{e(title)}</span></a>")  # fmt: skip
-        if not rows:
-            out.append("<p class='sub'>최근 90일 동안 내 종목에 큰 공시가 없었어요.</p>")
+        if not mine:
+            out.append("<p class='sub'>이 달엔 내 종목의 큰 공시가 없어요.</p>")
+        out.append("<p class='sub'>지난 공시만 보여요. 앞으로의 일정(실적 발표일·배당일)은 준비 중이에요. 공휴일: 한국천문연구원.</p>")
         return page("캘린더", "".join(out), "calendar")
 
 
 if __name__ == "__main__":
-    from wsgiref.simple_server import make_server
+    import threading
+    from socketserver import ThreadingMixIn
+    from wsgiref.simple_server import WSGIServer, make_server
+
+    class Server(ThreadingMixIn, WSGIServer):
+        """연결마다 스레드 — 브라우저가 미리 열어 둔 빈 연결 하나에 서버 전체가 멈추지 않게.
+        ponytail: DB 는 연결 하나를 잠금으로 돌려 쓴다. 사용자가 늘면 요청마다 연결로"""
+
+        daemon_threads = True
 
     sys.stderr.reconfigure(encoding="utf-8")  # 윈도우 콘솔(cp949)에서 한글 로그가 깨지지 않게
     db.connect().close()
     app = App(sqlite3.connect(db.PATH, check_same_thread=False), env()["SECRET"])
+    lock = threading.Lock()
+
+    def serial(environ, start_response):
+        with lock:
+            return app(environ, start_response)
+
     print("한장 — http://localhost:8000", file=sys.stderr)
-    make_server("127.0.0.1", 8000, app).serve_forever()
+    make_server("127.0.0.1", 8000, serial, server_class=Server).serve_forever()

@@ -65,3 +65,24 @@ def test_unknown_stock_and_forged_cookie():
     assert "아직 노트가 없어요" in unquote(h["Location"])
     assert "링크 받기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
     assert web.safe_url("javascript:alert(1)") == "#"
+
+
+def test_calendar_month_grid_marks_red_days_and_events():
+    from datetime import date
+
+    from hanjang import sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into holidays values ('2026-10-09', '한글날')")
+    collect.save_disclosures(con, [sources.Disclosure("20261002000001", "005930", date(2026, 10, 2),
+                                                      "주요사항보고서(자기주식취득결정)")])  # fmt: skip
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    (uid,) = con.execute("select id from users").fetchone()
+    html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 7))
+    assert "2026년 10월" in html_
+    assert "<td class='red'><span class='n'>9</span><span class='hol'>한글날</span>" in html_
+    assert "<td class='red'><span class='n'>4</span>" in html_  # 일요일
+    assert "삼성전자 자사주 매입</a>" in html_ and "class='today'" in html_
+    assert "2026년 10월" in app.calendar(uid, "nonsense", today=date(2026, 10, 7))  # 이상한 값은 이번 달
