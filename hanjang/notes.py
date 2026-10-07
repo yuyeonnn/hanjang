@@ -101,7 +101,7 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
-TITLES = ("회사 사정은 어떤가요?", "요즘 무슨 일이 있었나요?", "요즘 기사는요")
+TITLES = ("회사 사정은 어떤가요?", "요즘 무슨 일이 있었나요?", "임원·큰손은 어떻게 움직였나요?", "요즘 기사는요")
 NEWS_DAYS = 7
 EVENT_DAYS = 90
 
@@ -250,6 +250,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{what}{tone}", "url": DART.format(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
+    out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title from news where ticker = ? and date >= ?"
                        " order by date desc limit 5",
                        (ticker, (today - timedelta(days=NEWS_DAYS)).isoformat())).fetchall()  # fmt: skip
@@ -260,6 +261,36 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         day = f"{d.month}월 {d.day}일"
         out.append({"id": f"N{k}", "text": f"{day} {press or ''} 기사 제목 「{title}」", "url": url, "tone": 0,
                     "slots": {"날짜": day, "매체": press or "기사", "제목": f"「{title}」"}})  # fmt: skip
+    return out
+
+
+def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
+    """지분 보고 — I1: 최근 90일 임원·주요주주 보고 집계 · I2~I3: 5% 대량보유 보고 최근 두 건.
+    「샀다·팔았다」가 아니라 「보유 주식을 늘렸다·줄였다」 — 회사에서 받은 주식(보상)도 들어가기 때문. tone 은 늘 중립(0)."""
+    rows = con.execute("select rcept_no, date, kind, who, change, rate from insiders where ticker = ? and date >= ?"
+                       " order by date desc, rcept_no desc",
+                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
+    out = []
+    ex = [r for r in rows if r[2] == "임원" and r[4]]
+    if ex:
+        span = f"최근 {EVENT_DAYS}일"
+        slots, parts = {"기간": span, "건수": f"{len(ex)}건"}, []
+        for key, word, side in (("늘린", "늘린", [r for r in ex if r[4] > 0]), ("줄인", "줄인", [r for r in ex if r[4] < 0])):
+            if side:
+                n, total = f"{len(side)}건", f"{abs(sum(r[4] for r in side)):,}주"
+                slots |= {f"{key}보고": n, f"{key}주식": total}
+                parts.append(f"{word} 보고 {n}(합계 {total})")
+        out.append({"id": "I1", "text": f"{span} 임원·주요주주 지분 보고 {len(ex)}건 — 보유 주식을 " + " · ".join(parts),
+                    "url": DART.format(ex[0][0]), "tone": 0, "slots": slots})  # fmt: skip
+    for k, (rno, d, _, who, chg, rate) in enumerate([r for r in rows if r[2] == "5%"][:2], len(out) + 1):
+        d = date.fromisoformat(d)
+        day = f"{d.month}월 {d.day}일"
+        way = f", 직전 보고보다 보유 주식 {abs(chg):,}주 {'늘림' if chg > 0 else '줄임'}" if chg else ""
+        slots = {"날짜": day, "누가": who} | ({"비율": f"{rate:.2f}%"} if rate is not None else {})
+        if chg:
+            slots |= {"주식": f"{abs(chg):,}주", "방향": "늘렸" if chg > 0 else "줄였"}
+        out.append({"id": f"I{k}", "text": f"{day} {who}의 5% 이상 대량보유 보고 — 보유 비율 {rate:.2f}%{way}" if rate is not None
+                    else f"{day} {who}의 5% 이상 대량보유 보고{way}", "url": DART.format(rno), "tone": 0, "slots": slots})  # fmt: skip
     return out
 
 
@@ -313,11 +344,14 @@ def dedupe(text: str) -> str:
     def one(m):
         parts = LIST_SEP.split(m[1])
         items, seps = [x.strip() for x in parts[::2]], parts[1::2]
+        if len(items) > 1 and all(x in m.string[: m.start()] for x in items):  # 앞에서 이미 다 말한 것을 괄호로 또
+            return ""
         return "(" + (seps[0] if seps else "").join(dict.fromkeys(items)) + ")"
 
+    text = re.sub(r"(\d+월) (?=\1 \d)", "", text)  # 「8월 {D3.날짜}」→「8월 8월 3일」 → 「8월 3일」
     text = re.sub(r"\(([^()]*)\)", one, text)
     # 괄호에 기사 제목만 둘 이상 늘어놓은 것은 통째로 뺀다 — 출처 번호로 기사가 열린다
-    return re.sub(r" ?\(「[^()」]*」(?:, ?「[^()」]*」)+\)", "", text)
+    return re.sub(r" ?\(「[^()」]*」(?:(?:, ?| ?· ?)「[^()」]*」)+\)", "", text)
 
 
 def fill(sent: dict, by: dict[str, dict]) -> dict:
@@ -329,9 +363,15 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
     # 날짜(「10월 1일」)와 그 달(「7월」)도 사실에 있는 것과 글자 그대로 같으면 직접 써도 된다
     days = {f["slots"]["날짜"] for f in by.values() if "날짜" in f.get("slots", {})}
     months = {d.split()[0] for d in days}
+    # 기간(「최근 90일」)도 사실에 있는 글자 그대로면 직접 써도 된다
+    days |= {f["slots"]["기간"] for f in by.values() if "기간" in f.get("slots", {})}
+    # 지분 보고(I)를 근거로 든 문장은 그 사실의 빈칸 값(「8건」「1,500주」)을 글자 그대로 써도 된다 — 코드 값과 똑같을 때만
+    days |= {v for r in refs if r.startswith("I") and r in by for v in by[r]["slots"].values()}
     bare = SLOT.sub("", raw)
     for y in sorted(years | days, key=len, reverse=True):
         bare = bare.replace(y, "")
+    if any("대량보유" in f["text"] for f in by.values()):  # 「5% 이상 대량보유」는 보고 이름이지 숫자가 아니다
+        bare = re.sub(r"5\s*%", "", bare)
     for mth in months:
         bare = re.sub(rf"(?<!\d){mth}", "", bare)
     # 기사(N)만 근거인 문장은 그 기사 제목·본문에 적힌 숫자를 그대로 옮겨도 된다 (토큰 대조)
@@ -456,7 +496,7 @@ def code_headline(fs: list[dict]) -> str:
 
 def code_note(fs: list[dict]) -> dict:
     """AI 글이 검사에서 떨어졌을 때 — 사실 목록을 그대로 문장으로 (PRD §4.3)."""
-    groups = zip(TITLES, "FDN")
+    groups = zip(TITLES, "FDIN")
     secs = [{"title": t, "sentences": [{"text": f["text"] + ".", "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": f["text"] + ".", "refs": [f["id"]]} for f in fs if f["tone"] == sign]
@@ -514,19 +554,38 @@ def read_bodies(news: list[dict]) -> None:
             f["body"] = body
 
 
-def main(tickers: list[str], today: date) -> None:
+def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
+    """이번 주 노트의 사실과 달라졌나 — 재무·공시·지분 보고는 누구 종목이든, 기사는 누군가 담은 종목만 본다.
+    (담지 않은 종목은 기사 하나 바뀐 것으로 다시 쓰지 않는다 — 비용)
+    I1(최근 90일 임원 보고 집계)은 보지 않는다 — 날마다 창이 밀려 숫자가 조금씩 바뀐다(삼성전자는 90일에 800건). 월요일에 새로 센다."""
+    if old is None:
+        return True
+
+    def sig(xs):
+        return [(f["id"], f["text"]) for f in xs if (held or not f["id"].startswith("N")) and f["id"] != "I1"]
+
+    return sig(fs) != sig(old)
+
+
+def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
+    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
     print(f"공시 읽기 — 규칙 {ruled}건 · AI {ai}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]
     week = week_of(today)
-    by = {"code": 0}
+    by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
     held = {t for (t,) in con.execute("select distinct ticker from holdings")}
     for t, name in rows:
         fs = facts(con, t, today)
         if not fs:
             continue
+        if only_changed:
+            old = con.execute("select facts from notes where ticker = ? and week = ?", (t, week)).fetchone()
+            if not changed(fs, old and json.loads(old[0]), t in held):
+                by["same"] = by.get("same", 0) + 1
+                continue
         if t in held:  # ⚠️ 개발 중 개인용만 — 기사 본문 앞부분을 읽어 「요즘 기사」를 풍부하게 (저장하지 않음)
             read_bodies([f for f in fs if f["id"].startswith("N")][:READ_N])
         note, writer = write(name, fs, today)
@@ -536,7 +595,7 @@ def main(tickers: list[str], today: date) -> None:
                      writer, datetime.now().isoformat()))  # fmt: skip
         con.commit()
         by[writer] = by.get(writer, 0) + 1
-    print(f"노트 {sum(by.values())}장 {by} · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
+    print(f"노트 {sum(v for k, v in by.items() if k != 'same')}장 {by} · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 if __name__ == "__main__":

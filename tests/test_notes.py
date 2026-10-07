@@ -215,3 +215,75 @@ def test_dedupe_paren_list():
     assert notes.dedupe("(매출 97.1조원 · 영업이익 47.2조원)") == "(매출 97.1조원 · 영업이익 47.2조원)"
     assert notes.dedupe("소식이 나왔어요(「A」, 「B」). 끝") == "소식이 나왔어요. 끝"
     assert notes.dedupe("「A」라는 기사(「A」)") == "「A」라는 기사(「A」)"
+    assert notes.dedupe("8월 8월 3일에 공시가 나왔어요.") == "8월 3일에 공시가 나왔어요."
+
+
+def _insiders(con):
+    con.executemany("insert into insiders values (?, ?, ?, ?, ?, ?, ?, ?)", [
+        ("r1", "005930", "2026-09-01", "임원", "상무", 500, None, None),
+        ("r2", "005930", "2026-09-10", "임원", "부사장", -300, None, None),
+        ("r3", "005930", "2026-09-20", "임원", "전무", 1000, None, None),
+        ("r4", "005930", "2026-06-01", "임원", "상무", 9999, None, None),  # 90일 밖
+        ("r5", "005930", "2026-09-15", "5%", "국민연금공단", -240772, 7.1, 0.39),
+    ])  # fmt: skip
+
+
+def test_insider_facts_count_and_never_say_buy():
+    """임원 보고는 늘린·줄인 건수와 합계로 묶고, 「샀다·매수」라고 쓰지 않는다. tone 은 중립."""
+    con = _con()
+    _insiders(con)
+    fs = {f["id"]: f for f in notes.insider_facts(con, "005930", date(2026, 10, 7))}
+    assert fs["I1"]["text"] == "최근 90일 임원·주요주주 지분 보고 3건 — 보유 주식을 늘린 보고 2건(합계 1,500주) · 줄인 보고 1건(합계 300주)"
+    assert fs["I1"]["url"].endswith("r3")  # 가장 최근 보고로 잇는다
+    assert fs["I2"]["text"] == "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%, 직전 보고보다 보유 주식 240,772주 줄임"
+    assert fs["I2"]["slots"]["방향"] == "줄였"
+    assert all(f["tone"] == 0 and not notes.FORBIDDEN.search(f["text"]) for f in fs.values())
+    assert any(f["id"] == "I1" for f in notes.facts(con, "005930", date(2026, 10, 7)))
+
+
+def test_parse_insider_keeps_position_not_name():
+    r = {"rcept_no": "1", "rcept_dt": "2026-06-10", "repror": "홍길동", "isu_exctv_ofcps": "IT본부장",
+         "isu_main_shrholdr": "-", "sp_stock_lmp_irds_cnt": "-316"}
+    x = sources.parse_insider("임원", r, "105560")
+    assert (x.who, x.change, x.day) == ("IT본부장", -316, date(2026, 6, 10))
+    m = sources.parse_insider("5%", {"rcept_no": "2", "rcept_dt": "2026-03-11", "repror": "BlackRock",
+                                     "stkqy_irds": "1,237,684", "stkrt": "7.05", "stkrt_irds": "1.03"}, "105560")  # fmt: skip
+    assert (m.who, m.change, m.rate) == ("BlackRock", 1237684, 7.05)
+
+
+def test_changed_only_rewrites_when_facts_move():
+    fs = [{"id": "F1", "text": "a"}, {"id": "N1", "text": "기사1"}]
+    assert notes.changed(fs, None, held=False)  # 이번 주 노트가 없으면 쓴다
+    assert not notes.changed(fs, fs, held=False)
+    news = [{"id": "F1", "text": "a"}, {"id": "N1", "text": "기사2"}]
+    assert not notes.changed(news, fs, held=False)  # 아무도 안 담은 종목은 기사만 바뀐 것으로 다시 쓰지 않는다
+    assert notes.changed(news, fs, held=True)
+    assert notes.changed([{"id": "F1", "text": "a"}, {"id": "D1", "text": "새 공시"}], fs, held=False)
+
+
+def test_fill_allows_period_written_out():
+    by = {"I1": {"id": "I1", "text": "x", "tone": 0, "slots": {"기간": "최근 90일", "늘린보고": "2건"}}}
+    got = notes.fill({"text": "최근 90일 동안 늘린 보고가 {I1.늘린보고} 있었어요.", "refs": ["I1"]}, by)
+    assert got["text"] == "최근 90일 동안 늘린 보고가 2건 있었어요."
+    with pytest.raises(ValueError):
+        notes.fill({"text": "최근 30일 동안 늘린 보고가 {I1.늘린보고} 있었어요.", "refs": ["I1"]}, by)
+    by["I2"] = {"id": "I2", "text": "9월 15일 국민연금공단의 5% 이상 대량보유 보고", "tone": 0, "slots": {"날짜": "9월 15일", "누가": "국민연금공단"}}
+    assert "5% 이상" in notes.fill({"text": "{I2.누가}가 5% 이상 대량보유 보고를 했어요.", "refs": ["I2"]}, by)["text"]
+    assert notes.dedupe("8월 28일과 7월 31일에 줄였어요(8월 28일 · 7월 31일).") == "8월 28일과 7월 31일에 줄였어요."
+
+
+def test_changed_ignores_rolling_insider_count():
+    old = [{"id": "F1", "text": "a"}, {"id": "I1", "text": "최근 90일 … 806건"}]
+    assert not notes.changed([{"id": "F1", "text": "a"}, {"id": "I1", "text": "최근 90일 … 807건"}], old, held=True)
+    assert notes.changed([{"id": "F1", "text": "a"}, {"id": "I1", "text": "x"}, {"id": "I2", "text": "새 5% 보고"}], old, held=True)
+
+
+def test_fill_allows_insider_values_verbatim():
+    by = {"I1": {"id": "I1", "text": "x", "tone": 0, "slots": {"기간": "최근 90일", "늘린보고": "8건", "줄인보고": "1건"}}}
+    ok = "최근 90일 동안 보유 주식을 늘린 보고가 8건, 줄인 보고가 1건 있었어요."
+    assert notes.fill({"text": ok, "refs": ["I1"]}, by)["text"] == ok
+    with pytest.raises(ValueError):  # 사실에 없는 값은 여전히 안 된다
+        notes.fill({"text": "늘린 보고가 9건 있었어요.", "refs": ["I1"]}, by)
+    with pytest.raises(ValueError):  # I 를 근거로 들지 않은 문장에선 안 된다
+        notes.fill({"text": "늘린 보고가 8건 있었어요.", "refs": []}, by)
+    assert notes.dedupe("소식이에요(「A」 · 「B」). 끝") == "소식이에요. 끝"

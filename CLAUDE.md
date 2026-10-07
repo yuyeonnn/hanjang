@@ -3,7 +3,7 @@
 **한장(Hanjang)** — 내가 가진 주식이 지금 어떤 상황인지, 공시·재무·뉴스·수급을 **쉬운 글 한 장**으로 꿰어 보여주는 앱.
 네이버·토스는 정보를 늘어놓고, 한장은 설명한다. 약속하는 것은 **수익이 아니라 이해**다.
 
-> 지금 단계: **1단계 4주차 — 설문·메일·주간 자동 실행까지** (매주: `uv run python -m hanjang.weekly` = 받기→노트→안내 메일 · 화면: `uv run python -m hanjang.web` · 테스트 `uv run pytest`). 메일은 `.env` 의 `SMTP_HOST·SMTP_PORT·SMTP_USER·SMTP_PASSWORD·SMTP_FROM·BASE_URL` — 비어 있으면 서버 콘솔에 찍힌다. 남은 것: 배포. 구상 [docs/concept.md](docs/concept.md) · 제품 [docs/PRD.md](docs/PRD.md) · DB [docs/erd.md](docs/erd.md) · 일정 [docs/plan.md](docs/plan.md) · 샘플 [docs/sample-note.md](docs/sample-note.md) · 데이터 사용권 [docs/data-rights.md](docs/data-rights.md) · 화면 디자인 [docs/design.md](docs/design.md) (Stitch 「Warm Editorial Finance」).
+> 지금 단계: **1단계 4주차 — 설문·메일·주간 자동 실행까지** (매일 07:00: `uv run python -m hanjang.daily` = 받기→노트(월요일 전부·화~일 바뀐 종목만)→월요일만 안내 메일 · 화면: `uv run python -m hanjang.web` · 테스트 `uv run pytest`). 메일은 `.env` 의 `SMTP_HOST·SMTP_PORT·SMTP_USER·SMTP_PASSWORD·SMTP_FROM·BASE_URL` — 비어 있으면 서버 콘솔에 찍힌다. 남은 것: 배포 · KRX 시세 견적 문의([docs/krx-inquiry.md](docs/krx-inquiry.md), 사용자가 보냄). 구상 [docs/concept.md](docs/concept.md) · 제품 [docs/PRD.md](docs/PRD.md) · DB [docs/erd.md](docs/erd.md) · 일정 [docs/plan.md](docs/plan.md) · 샘플 [docs/sample-note.md](docs/sample-note.md) · 데이터 사용권 [docs/data-rights.md](docs/data-rights.md) · 화면 디자인 [docs/design.md](docs/design.md) (Stitch 「Warm Editorial Finance」).
 > **퀀트점프(`../quant-jump`, 개인용 엔진) 없이 혼자 돈다.** 데이터를 직접 받고 노트를 직접 만든다. 퀀트점프에서는 코드만 복사해 온다.
 
 ## 불변식

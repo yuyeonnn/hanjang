@@ -160,7 +160,8 @@ def cite_data(facts: list[dict]) -> dict:
         out[f["id"]] = {
             "badge": f"[{f['id']}]",
             "title": {"F": "금융감독원 전자공시시스템 (DART) · 사업보고서",
-                      "D": "금융감독원 전자공시시스템 (DART) · 공시"}.get(k, f"{f.get('slots', {}).get('매체', '')} 기사"),
+                      "D": "금융감독원 전자공시시스템 (DART) · 공시",
+                      "I": "금융감독원 전자공시시스템 (DART) · 지분 보고"}.get(k, f"{f.get('slots', {}).get('매체', '')} 기사"),
             "body": f["text"],
             "meta": f"공시접수번호: {rno[1]}" if rno else f"기사 날짜: {f.get('slots', {}).get('날짜', '')}",
             "url": safe_url(f["url"]),
@@ -206,8 +207,60 @@ def chapter(title: str, body: str, extra: str = "") -> str:
             f'<div class="font-body-reading text-body-reading text-on-surface leading-loose">{body}</div>{extra}</article>')  # fmt: skip
 
 
+def index_chart(got: dict) -> str:
+    """한국·미국 주가지수 선 그림 — 세로는 로그 눈금(같은 % 변화가 같은 높이). 한국 자료가 시작된 달부터."""
+    import math
+
+    start = got["한국"]["from"]
+    lines = {n: [(d, v) for d, v in g["series"] if d >= start] for n, g in got.items()}
+    ds = sorted({d for pts in lines.values() for d, _ in pts})
+    lo, hi = (f(math.log(v) for pts in lines.values() for _, v in pts) for f in (min, max))
+    W, H, P = 340, 180, 24
+
+    def xy(d, v):
+        return f"{P + (ds.index(d) / (len(ds) - 1)) * (W - P - 4):.1f},{H - 18 - (math.log(v) - lo) / (hi - lo) * (H - 30):.1f}"
+
+    color = {"한국": "text-primary", "미국": "text-secondary"}
+    polys = "".join(f'<polyline class="{color.get(n, "text-outline")}" fill="none" stroke="currentColor" stroke-width="1.6"{' stroke-dasharray="3 2"' if n != "한국" else ""} points="{" ".join(xy(d, v) for d, v in pts)}"/>'
+                    for n, pts in lines.items())  # fmt: skip
+    years = sorted({d[:4] for d in ds if d[:4].endswith(("0", "5")) and d[5:7] == "01"})
+    ticks = "".join(f'<text x="{xy(f"{y}-01-01", math.exp(lo)).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{y}</text>'
+                    for y in years if f"{y}-01-01" in ds and int(y) % 10 == 0)  # fmt: skip
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {color.get(n, "")} border-t-2 {"border-dashed" if n != "한국" else ""} border-current"></span>{e(n)}</span>' for n in lines)
+    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">주가지수 흐름 (로그 눈금)</figcaption>'
+            f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="한국과 미국 주가지수 흐름">{polys}{ticks}</svg>'
+            f'<div class="flex gap-3 font-label-micro text-label-micro text-on-surface-variant">{legend}</div></figure>')  # fmt: skip
+
+
+def loss_bars(got: dict) -> str:
+    """보유 기간별 「손해였던 비율」 막대 — 한국·미국 나란히."""
+    labels = [r["label"] for r in got["한국"]["rows"]]
+    color = {"한국": "bg-primary", "미국": "bg-secondary"}
+    rows = []
+    for lab in labels:
+        cells = []
+        for n, g in got.items():
+            r = next((x for x in g["rows"] if x["label"] == lab), None)
+            if r:
+                w = round(r["loss"] * 100)
+                cells.append(f'<div class="flex items-center gap-2"><span class="w-7 font-label-micro text-label-micro text-outline">{e(n)}</span>'
+                             f'<div class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><div class="{color.get(n, "bg-outline")} h-full rounded-full" style="width:{w}%"></div></div>'
+                             f'<span class="w-9 text-right font-label-micro text-label-micro text-on-surface">{w}%</span></div>')  # fmt: skip
+        rows.append(f'<div class="flex items-start gap-3 py-1.5"><span class="w-10 pt-0.5 font-label-regular text-label-regular text-on-surface font-semibold">{e(lab)}</span><div class="flex-1 flex flex-col gap-1">{"".join(cells)}</div></div>')
+    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold">이만큼 들고 있었다면 — 손해였던 비율</figcaption>'
+            '<p class="font-label-micro text-label-micro text-on-surface-variant mb-1">아무 달에나 사서 그 기간 뒤에 팔았다고 치고, 손해였던 경우를 셌어요.</p>'
+            + "".join(rows)
+            + '<p class="font-label-micro text-label-micro text-outline mt-1">자료: OECD 주가지수(월평균, 2015=100) · 한국은행 ECOS에서 받음. 배당은 빠져 있고, 하루하루 출렁임은 이보다 커요.</p></figure>')  # fmt: skip
+
+
+def redone(week: str, made: str) -> str:
+    """주 중간에 다시 쓴 노트면 「 · 10월 8일 고침」 — 월요일에 쓴 그대로면 빈 글."""
+    d = date.fromisoformat(made[:10]) if re.match(r"\d{4}-\d{2}-\d{2}", made or "") else None
+    return f" · {d.month}월 {d.day}일 고침" if d and d.isoformat() > week else ""
+
+
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
-                industry: str | None = None, initial: str = "", survey: str = "") -> str:
+                industry: str | None = None, initial: str = "", survey: str = "", made: str = "") -> str:
     facts = facts or []
     every = body["summary"] + [x for sec in body["sections"] for x in sec["sentences"]] + body.get("good", []) + body.get("concern", [])
     minutes = max(1, round(sum(len(x["text"]) for x in every) / 500))  # 한글 분당 500자쯤
@@ -218,7 +271,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             + avatar(initial) + '</div></div></header>')  # fmt: skip
     parts = [
         '<div class="flex items-center justify-between py-space-sm mb-space-xs"><button class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors py-1 group" onclick="location.href=\'/\'" type="button"><span class="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-0.5">arrow_back</span>'
-        f'<span class="font-label-regular text-label-regular text-on-surface-variant font-medium">내 종목 · {e(week)} 주 노트</span></button>'
+        f'<span class="font-label-regular text-label-regular text-on-surface-variant font-medium">내 종목 · {e(week)} 주 노트{e(redone(week, made))}</span></button>'
         '<div class="flex items-center gap-1.5 px-space-sm py-0.5 rounded-full bg-surface-container-high text-on-surface-variant"><span class="material-symbols-outlined text-[14px]">schedule</span>'
         f'<span class="font-label-micro text-label-micro">{minutes}분이면 다 읽어요</span></div></div>',
         '<header class="mb-space-lg"><div class="flex items-baseline gap-2 mb-1">'
@@ -247,6 +300,9 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
                      f'<span class="font-label-regular text-label-regular text-on-surface font-medium">최근 주요 공시 {nd}건 집계</span><span class="font-label-micro text-label-micro text-on-surface-variant">· DART 기준 자동 분류</span></div></div>'
                      f'<span class="font-label-micro text-label-micro text-secondary font-semibold">{e(right)}</span></div>')  # fmt: skip
+        elif sec["title"].startswith("임원·큰손"):
+            extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
+                     "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
         elif sec["title"].startswith("요즘 기사") and body.get("keywords"):
             extra = ('<div class="pt-space-sm pb-1 flex flex-col gap-1.5 border-t border-outline-variant/30 mt-space-xs"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
                      + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"])
@@ -459,9 +515,9 @@ class App:
                  + '<header class="px-margin pt-5 pb-2"><div class="flex items-baseline justify-between mb-1"><div class="flex items-center gap-2"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">내 종목</h1>'
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-primary">mark_email_unread</span>매주 월요일 아침, 이번 주의 한 장 노트가 도착해요.</p></header>'
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-primary">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p></header>'
                  f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
-                 '<footer class="px-margin pt-4 pb-8 flex flex-col items-center justify-center gap-2"><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트 주기: 매주 월 07:00</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
+                 '<footer class="px-margin pt-4 pb-8 flex flex-col items-center justify-center gap-2"><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 노트가 있는 종목(코스피 시총 상위)만. 업종은 DART 업종 코드에서
                  "<script>const STOCKS=" + json.dumps(stocks, ensure_ascii=False).replace("<", "\\u003c") + ";"
@@ -499,9 +555,9 @@ class App:
         return (f'<form method="post" action="/feedback" class="mb-space-xl flex flex-col gap-space-sm pt-space-lg border-t border-outline-variant/40">'
                 f'<input type="hidden" name="t" value="{e(ticker)}"><input type="hidden" name="w" value="{e(week)}">'
                 '<div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">이 노트가 도움이 됐나요?</h3></div>'
-                '<div class="flex justify-between">' + "".join(
-                    f'<label class="flex flex-col items-center gap-1 font-label-micro text-label-micro text-on-surface-variant"><input type="radio" name="h" value="{i}" required>{i}</label>'
-                    for i in range(1, 6)) + '</div><div class="flex justify-between font-label-micro text-label-micro text-outline"><span>별로예요</span><span>아주 좋아요</span></div>'
+                '<input type="range" name="h" min="1" max="5" step="1" value="3" aria-label="도움 정도 1~5" class="w-full accent-primary cursor-pointer">'
+                '<div class="flex justify-between px-1 -mt-1 font-label-micro text-label-micro text-on-surface-variant">' + "".join(f"<span>{i}</span>" for i in range(1, 6))
+                + '</div><div class="flex justify-between font-label-micro text-label-micro text-outline"><span>별로예요</span><span>아주 좋아요</span></div>'
                 + pay + '<input class="w-full font-body-compact text-body-compact bg-surface-container-low text-on-surface placeholder:text-outline rounded-lg px-4 py-3 focus:outline-none" maxlength="300" name="c" placeholder="한 줄 의견 (선택)">'
                 '<button class="w-full py-3 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">보내기</button></form>')  # fmt: skip
 
@@ -522,13 +578,13 @@ class App:
 
     def note(self, uid: int, ticker: str, thanks: bool = False):
         row = self.con.execute(
-            "select s.name, n.week, n.body, n.writer, n.facts, s.induty_code from stocks s join notes n using(ticker)"
+            "select s.name, n.week, n.body, n.writer, n.facts, s.induty_code, n.made_at from stocks s join notes n using(ticker)"
             " where s.ticker = ? order by n.week desc limit 1", (ticker,)).fetchone()  # fmt: skip
         if not row:
             return "404 Not Found", [], self.simple("없음", "이 종목은 아직 노트가 없어요. <a class='text-primary underline' href='/'>내 종목</a>")
-        name, week, body, writer, facts, ind = row
+        name, week, body, writer, facts, ind, made = row
         return "200 OK", [], render_note(name, ticker, week, json.loads(body), writer, json.loads(facts), ind,
-                                         self.initial(uid), self.survey(uid, ticker, week, thanks))  # fmt: skip
+                                         self.initial(uid), self.survey(uid, ticker, week, thanks), made)  # fmt: skip
 
     # ---- 캘린더 (시안 _4) ----
 
@@ -666,6 +722,8 @@ class App:
         end = ('<p class="font-label-micro text-label-micro text-outline text-center py-space-lg">설명을 위한 글이에요. 특정 종목이나 상품을 추천하지 않아요.</p></div></main>'
                + bottom_nav("learn"))
         a = learn.BY_SLUG.get(slug)
+        if slug == "long-short":  # 숫자를 DB 의 지수로 채운 글
+            a = learn.long_short(self.con) or a
         if slug and not a:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
@@ -674,7 +732,9 @@ class App:
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
                      f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">{self.marked(a["lead"])}</p></aside>'
-                     + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"])
+                     + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
+                     + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
+                     + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][1:])
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'

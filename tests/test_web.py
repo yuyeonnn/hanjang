@@ -110,15 +110,15 @@ def test_survey_saves_once_and_asks_pay_from_week_six():
     assert "돈을 내고도" in call(app, "/n/005930", cookie=ck)[2]
 
 
-def test_weekly_notice_only_to_users_with_new_notes(capsys):
-    from hanjang import weekly
+def test_monday_notice_only_to_users_with_new_notes(capsys):
+    from hanjang import daily
 
     app, con = _app()
     ck = _login(app)
     call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     con.execute("insert into users (email, created_at) values ('other@x.kr', '2026-10-01')")  # 종목 없음
-    assert weekly.notify(con, "2026-10-05") == 1
-    assert weekly.notify(con, "2026-10-12") == 0  # 그 주 노트가 없으면 안 보낸다
+    assert daily.notify(con, "2026-10-05") == 1
+    assert daily.notify(con, "2026-10-12") == 0  # 그 주 노트가 없으면 안 보낸다
     assert "me@x.kr · [한장] 이번 주 노트가 올라왔어요" in capsys.readouterr().err
 
 
@@ -162,7 +162,7 @@ def test_avatar_opens_profile_with_real_counts():
 
 
 def test_mail_switch_and_delete_account():
-    from hanjang import weekly
+    from hanjang import daily
 
     app, con = _app()
     ck = _login(app)
@@ -170,9 +170,9 @@ def test_mail_switch_and_delete_account():
     assert "ON</span>" in call(app, "/me", cookie=ck)[2]
     call(app, "/me/mail", "POST", "", ck)  # 끄기
     assert "OFF</span>" in call(app, "/me", cookie=ck)[2]
-    assert weekly.notify(con, "2026-10-05") == 0  # 끈 사람에겐 안내 메일이 가지 않는다
+    assert daily.notify(con, "2026-10-05") == 0  # 끈 사람에겐 안내 메일이 가지 않는다
     call(app, "/me/mail", "POST", "", ck)
-    assert weekly.notify(con, "2026-10-05") == 1
+    assert daily.notify(con, "2026-10-05") == 1
     st, h, _ = call(app, "/me/delete", "POST", "", ck)
     assert st.startswith("303") and "Max-Age=0" in h["Set-Cookie"]
     assert con.execute("select (select count(*) from users) + (select count(*) from holdings)"
@@ -185,3 +185,23 @@ def test_bottom_nav_has_profile_tab():
     body = call(app, "/me", cookie=ck)[2]
     assert 'href="/me"><span class="material-symbols-outlined text-[22px]">person</span>' in body
     assert 'aria-current=page class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-md transition-colors text-primary-container font-semibold" href="/me"' in body
+
+
+def test_long_short_numbers_from_index():
+    """보유 기간별 손해였던 비율 — 코드가 지수로 잰다. 글에 「보장 없음」이 늘 붙는다(불변식 5)."""
+    from hanjang import learn
+
+    pts = [(f"{2000 + i // 12}-{i % 12 + 1:02d}-01", v) for i, v in enumerate([100 + (i % 7) - 3 + i * 0.5 for i in range(300)])]
+    h = learn.horizon(pts)
+    one = next(r for r in h["rows"] if r["label"] == "1달")
+    assert 0 < one["loss"] < 1 and h["fall"] < 0
+    assert next(r for r in h["rows"] if r["label"] == "10년")["loss"] == 0  # 꾸준히 오른 가짜 자료
+    con = db.connect(":memory:")
+    con.executemany("insert into macro values (?, ?, ?)", [("ECOS:902Y002:KOR", d, v) for d, v in pts])
+    a = learn.long_short(con)
+    assert "보장은 없어요" in " ".join(a["body"]) and a["charts"]["한국"]["rows"]
+
+
+def test_redone_label():
+    assert web.redone("2026-10-05", "2026-10-08T07:00:00") == " · 10월 8일 고침"
+    assert web.redone("2026-10-05", "2026-10-05T07:00:00") == "" and web.redone("2026-10-05", "now") == ""

@@ -99,6 +99,21 @@ ARTICLES = [
      ],
      "points": ["숫자 하나로 좋다·나쁘다 정하지 않기", "같은 업종끼리 비교하기", "몇 년 흐름을 함께 보기"],
      "more": FINE},
+    {"slug": "insiders", "cat": "회사 읽기", "title": "임원·큰손의 지분 보고는 뭐예요?",
+     "lead": "회사 임원이나 지분을 많이 가진 곳이 주식을 늘리거나 줄이면 **DART에 보고**해야 해요.",
+     "body": [
+         "회사의 **임원과 주요주주**(10% 이상 가진 사람)는 자기 회사 주식이 늘거나 줄면 며칠 안에 보고해야 해요.",
+         "어떤 회사 주식을 **5% 넘게** 가진 곳(국민연금, 해외 운용사 등)도 보유가 1%p 넘게 바뀌면 보고해요. 「대량보유 보고」라고 불러요.",
+         "임원 보고에는 직접 산 것뿐 아니라 **회사에서 보상으로 받은 주식**도 들어가요. 그래서 「늘렸다」가 꼭 「샀다」는 뜻은 아니에요.",
+         "누가 늘리고 줄였는지는 **사실일 뿐**이에요. 그 사람의 사정(세금, 생활비, 보상)은 보고서에 다 나오지 않아요. 따라 사고팔 근거로 삼기는 어려워요.",
+     ],
+     "points": ["임원·주요주주 보고, 5% 대량보유 보고 두 가지", "「늘렸다」 ≠ 「샀다」 — 보상 주식도 포함", "이유는 보고서에 다 나오지 않아요"],
+     "more": DART},
+    {"slug": "long-short", "cat": "생각 정리", "title": "오래 들고 있으면 덜 위험할까요?",
+     "lead": "같은 시장이라도 **얼마나 오래 들고 있었는지**에 따라 손해였던 비율이 크게 달랐어요. 과거 기록을 재 봤어요.",
+     "body": ["(자료를 아직 받지 않았어요 — `python -m hanjang.collect` 뒤에 숫자가 채워져요.)"],
+     "points": ["짧게 볼수록 결과가 들쭉날쭉했어요", "길게 봐도 손해였던 때가 있었어요", "한 회사 주식은 시장 전체(지수)와 달라요"],
+     "more": FINE},
     {"slug": "diversify", "cat": "생각 정리", "title": "분산 투자는 왜 이야기할까요?",
      "lead": "한 바구니에 달걀을 다 담지 말라는 말이에요. 한 곳의 사고가 전체를 흔들지 않게요.",
      "body": [
@@ -119,6 +134,66 @@ ARTICLES = [
      "more": FINE},
 ]
 BY_SLUG = {a["slug"]: a for a in ARTICLES}
+
+# --- 「오래 들고 있으면」 글 — 숫자는 코드가 OECD 주가지수(월평균)로 잰다. 「과거에 그랬다」만 말한다 (불변식 5) ---
+HOLD = ((1, "1달"), (12, "1년"), (36, "3년"), (60, "5년"), (120, "10년"), (240, "20년"))
+
+
+def ym(d: str) -> str:
+    return f"{int(d[:4])}년 {int(d[5:7])}월"
+
+
+def horizon(points: list[tuple[str, float]]) -> dict:
+    """월별 지수 → 보유 기간별 「손해였던 비율」·가장 나빴던 때 · 가장 크게 떨어졌던 구간과 되찾은 때.
+    아무 달에나 사서 h달 뒤 판 경우를 모두 센다(겹치는 구간 포함)."""
+    d, v = [x for x, _ in points], [x for _, x in points]
+    rows = []
+    for h, label in HOLD:
+        r = [v[i + h] / v[i] - 1 for i in range(len(v) - h)]
+        if len(r) < 24:  # 경우가 너무 적으면 말하지 않는다
+            continue
+        w = min(range(len(r)), key=r.__getitem__)
+        rows.append({"label": label, "months": h, "loss": sum(x < 0 for x in r) / len(r), "worst": r[w], "worst_at": d[w], "n": len(r)})
+    peak, fall, span = 0, 0.0, None
+    for i, x in enumerate(v):
+        if x > v[peak]:
+            peak = i
+        if x / v[peak] - 1 < fall:
+            fall, span = x / v[peak] - 1, (peak, i)
+    back = next((d[j] for j in range(span[1], len(v)) if v[j] >= v[span[0]]), None) if span else None
+    return {"from": d[0], "to": d[-1], "rows": rows, "fall": fall, "peak": d[span[0]] if span else None,
+            "bottom": d[span[1]] if span else None, "back": back, "series": points}
+
+
+def pct(x: float) -> str:
+    return f"{x * 100:.0f}%"
+
+
+def long_short(con) -> dict | None:
+    """DB 의 지수로 글을 채운다. 자료가 없으면 None (고정 글이 대신 나간다)."""
+    from hanjang.sources import INDEX
+
+    got = {}
+    for sid, name in INDEX.items():
+        pts = con.execute("select date, value from macro where series_id = ? order by date", (sid,)).fetchall()
+        if len(pts) > 260:
+            got[name] = horizon(pts)
+    if "한국" not in got:
+        return None
+    k = got["한국"]
+    by = {r["label"]: r for r in k["rows"]}
+    one, ten = by["1달"], by.get("10년")
+    body = [f"한국 주가지수({ym(k['from'])}~{ym(k['to'])})를 아무 달에나 사서 **한 달만** 들고 있었다면, 손해였던 때가 **{pct(one['loss'])}**였어요. 거의 동전 던지기에 가까웠어요."]
+    if ten:
+        body.append(f"**10년**을 들고 있었다면 손해였던 때가 **{pct(ten['loss'])}**로 줄었어요. 하지만 0은 아니었어요 — "
+                    f"{ym(ten['worst_at'])}에 샀다면 10년 뒤에도 {pct(-ten['worst'])} 손해였어요.")  # fmt: skip
+    if k["peak"]:
+        back = f"그 높이를 다시 되찾은 건 {ym(k['back'])}이었어요." if k["back"] else "그 높이를 아직 되찾지 못했어요."
+        body.append(f"가장 크게 떨어졌던 때는 {ym(k['peak'])}부터 {ym(k['bottom'])}까지로, 꼭대기보다 **{pct(-k['fall'])}** 낮아졌어요. {back}")
+    body.append("짧게 사고팔수록 결과는 그때그때의 출렁임에 크게 좌우돼요. 사고팔 때마다 **수수료와 세금**도 붙어요.")
+    body.append("다만 이건 **시장 전체(지수)** 이야기예요. 한 회사 주식은 회사가 어려워지면 오래 기다려도 회복하지 못할 수 있어요. "
+                "그리고 **과거에 그랬다는 측정일 뿐, 앞으로도 같다는 보장은 없어요.**")  # fmt: skip
+    return BY_SLUG["long-short"] | {"body": body, "charts": got}
 CATS = list(dict.fromkeys(a["cat"] for a in ARTICLES))
 # 캘린더의 「주주를 위한 읽기 팁」에서 이어 줄 글 — 공시 종류별
 FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "disclosure",
