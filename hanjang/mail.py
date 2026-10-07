@@ -39,4 +39,4 @@ def weekly_mail(names: list[str]) -> tuple[str, str]:
     return ("[한장] 이번 주 노트가 올라왔어요",
             f"{head}의 이번 주 노트가 올라왔어요.\n\n{base_url()}/\n\n"
             "사라·팔아라는 의견도, 앞으로의 예측도 없어요. 회사 사정을 쉬운 글로 정리했어요.\n"
-            "메일을 그만 받고 싶으면 이 메일에 답장해 주세요.")  # fmt: skip
+            "안내 메일은 한장의 내 프로필에서 끌 수 있어요.")  # fmt: skip
