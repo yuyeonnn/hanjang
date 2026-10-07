@@ -159,3 +159,8 @@ def test_year_may_be_written_but_nothing_else():
     assert notes.fill({"text": "2025년 매출이 {F1.방향}었지만 괜찮아요.", "refs": ["F1"]}, by)["text"] == "2025년 매출이 늘었지만 괜찮아요."
     with pytest.raises(ValueError, match="빈칸으로만"):
         notes.fill({"text": "2024년 매출이 늘었어요.", "refs": ["F1"]}, by)  # 사실에 없는 연도
+
+
+def test_unsigned_width_slot_reads_naturally():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    assert notes.fill({"text": "매출이 {F1.폭} {F1.방향}어요.", "refs": ["F1"]}, by)["text"] == "매출이 10.9% 늘었어요."

@@ -191,7 +191,9 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             if fid == "F2" and cur < 0 and not way:
                 tone, way, chg = -1, "적자였", "영업 적자"
             tail = f"(전년보다 {chg})" if chg.startswith(("+", "-")) else f"({chg} · 전년 {won(prev)})" if chg else ""
-            slots = {"연도": yy, "값": won(cur)} | ({"변화": chg} if chg else {}) | ({"방향": way} if way else {})
+            # 폭 = 부호 없는 변화율 — 「매출이 {F1.폭} {F1.방향}어요」→「매출이 10.9% 늘었어요」(방향 낱말과 +가 겹치지 않게)
+            slots = ({"연도": yy, "값": won(cur)} | ({"변화": chg} if chg else {}) | ({"방향": way} if way else {})
+                     | ({"폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
             out.append({"id": fid, "text": f"{yy} {what} {won(cur)}{tail}{base}", "url": url, "tone": tone,
                         "slots": slots})  # fmt: skip
         # 은행·보험은 예금·보험금이 빚으로 잡혀 부채비율이 수백~천 % — 초보자에게 오해만 준다.
