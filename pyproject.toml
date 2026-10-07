@@ -1,0 +1,16 @@
+[project]
+name = "hanjang"
+version = "0.1.0"
+description = "내 종목을 쉬운 글 한 장으로 — 주간 노트 만들기 + 모바일 웹"
+requires-python = ">=3.13"
+dependencies = ["httpx>=0.28"]
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# 실제 API 를 부르는 테스트는 따로: pytest -m external
+addopts = "-m 'not external'"
+markers = ["external: 외부 API 호출"]
