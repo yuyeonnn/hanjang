@@ -630,6 +630,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(\d년)년", r"\1", text)
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
+    text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
     return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
 
@@ -680,6 +681,8 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         v = by[m[1]]["slots"][m[2]]
         return v + (josa(v, m[3]) if m[3] else "")
 
+    # 「관계」 빈칸은 그 자체가 판 돈·남긴 돈 이야기 — 앞에 AI 가 같은 말을 또 쓰면(「판 돈보다 남긴 돈이 더 빨리 {F8.관계}」) 그 말을 뺀다
+    raw = re.sub(r"(?:판 돈|남긴 돈|매출|영업이익)[^.{}]*?(\{F\d+\.관계\})", r"\1", raw)
     text = mend(dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었")))
     text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
     text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」

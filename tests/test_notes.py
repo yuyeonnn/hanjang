@@ -454,3 +454,11 @@ def test_relation_says_what_numbers_mean():
     assert notes.relation(110, 100, 150, 100)["관계"] == "판 돈보다 남긴 돈이 더 빨리 늘었"
     assert notes.relation(90, 100, 80, 100)["관계"] == "판 돈도 남긴 돈도 줄었"
     assert "관계" not in notes.relation(100, None, 10, None)
+
+
+def test_relation_slot_is_not_wrapped_twice():
+    by = {"F8": {"id": "F8", "text": "2026년 2분기(4~6월) 매출 1.3조원(1년 전 같은 분기보다 +30.2%)", "tone": 0,
+                 "slots": {"분기": "2026년 2분기", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}}}
+    got = notes.fill({"text": "{F8.분기}엔 판 돈보다 남긴 돈이 더 빨리 {F8.관계}어요.", "refs": ["F8"]}, by)
+    assert got["text"] == "2026년 2분기엔 판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았어요."
+    assert notes.mend("줄인 보고가 1건 있었어요(1건).") == "줄인 보고가 1건 있었어요."
