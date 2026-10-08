@@ -260,7 +260,7 @@ def test_like_toggle_views_and_date():
     call(app, "/like", "POST", "t=005930&w=2026-10-05", other)
     call(app, "/n/005930", cookie=other)
     _, _, body = call(app, "/n/005930", cookie=me)
-    assert "2026.10.06 · 읽음 2" in body and "좋아요 1개" in body and "z@b.c" not in body
+    assert "10월 6일 · 읽음 2" in body and "좋아요 1개" in body and "z@b.c" not in body
     call(app, "/like", "POST", "t=005930&w=2026-10-05", me)
     _, _, body = call(app, "/n/005930", cookie=me)
     assert "좋아요 2개" in body and 'aria-pressed="true"' in body
@@ -367,11 +367,7 @@ def test_industry_photos_served_and_used():
     assert "/static/photos/" in call(app, "/feed", cookie=ck)[2]  # 사진은 피드에만 — 노트 위는 실적 차트
 
 
-def test_note_top_chart_and_logo():
-    c = web.fin_chart([(2024, 300, 30), (2025, 330, -5)])
-    assert "최근 2년 매출·영업이익" in c and "text-tertiary" in c and "DART" in c  # 적자는 다른 색
-    assert "영업이익" in web.fin_chart([(2024, None, 8), (2025, None, 9)]) and "매출·" not in web.fin_chart([(2024, None, 8), (2025, None, 9)])
-    assert web.fin_chart([(2025, 1, 1)]) == ""  # 한 해뿐이면 그리지 않는다
+def test_note_logo_and_domain():
     assert ">삼<" in web.logo("삼성전자", None)  # 로고를 못 찾으면 첫 글자
     from hanjang import sources
     assert sources.domain("www.samsung.com/sec") == "samsung.com" and sources.domain("http://WWW.SKHYNIX.COM") == "skhynix.com"
@@ -379,14 +375,59 @@ def test_note_top_chart_and_logo():
 
 
 def test_report_blocks_compute_from_dart_numbers():
-    fin = [(2024, 300, 30, 20, 400, 100), (2025, 330, 45, 40, 400, 120)]
-    k = web.keystats(fin, [(2024, 1000, None, None), (2025, 1100, None, None)])
-    assert "2025년 결산" in k and "13.6%" in k and "30.0%" in k and "10.0%" in k and "1,100원" in k and "+10.0%" in k
-    assert "부채비율" not in web.keystats([(2025, None, 9, 5, 50, 500)], [])  # 금융회사는 부채비율을 싣지 않는다
-    t = web.trend_table(fin)
-    assert "25.0%" in t and "13.6%" in t  # 부채비율 100/400 · 영업이익률 45/330
     d = web.dividend_block([(2024, 1000, 5_000_000_000_000, 25.0), (2025, 1100, 6_000_000_000_000, 30.0)])
     assert "1,100원" in d and "30.0%" in d and "6.0조원" in d
     b = web.business_block({"what": ["반도체를 만들어요."], "segments": [{"name": "DS", "share": "39.0%"}], "risks": ["경쟁"], "year": 2025}, "123")
     assert "39.0%" in b and "rcpNo=123" in b and "2025년 사업보고서" in b
     assert "회사가 꼽은 위험" in web.risk_block({"risks": ["경쟁이 심해요"]}) and web.risk_block(None) == ""
+
+
+def test_feed_photos_never_repeat_on_one_screen():
+    p = web.Photos()
+    assert p.topic("chip") and all("chip" in x for x in p.topic("chip"))
+    picks = [p.pick("MAJOR_CONTRACT", None) for _ in range(20)] + [p.pick(None, "264") for _ in range(10)]
+    assert len(set(picks)) == len(picks)  # 같은 화면에 같은 사진은 두 번 없다
+    app, _ = _app()
+    assert call_raw(app, "/static/photos/pool/chip1.jpg")[1]["Content-Type"] == "image/jpeg"
+
+
+def test_big_holders_list_and_page():
+    app, con = _app()
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.1, 0.3, '2026-10-01', 'r1'),"
+                " ('nps', '999990', '작은회사', 'K', 5.2, -1.0, '2026-09-01', 'r2')")
+    ck = _login(app)
+    _, _, body = call(app, "/learn", cookie=ck)
+    assert "큰손 포트폴리오" in body and 'href="/learn/big/nps"' in body and "2종목" in body
+    _, _, body = call(app, "/learn/big/nps", cookie=ck)
+    assert "국민연금" in body and "지분 7.10%" in body and 'href="/n/005930"' in body and "rcpNo=r2" in body  # 우리 종목이 아니면 DART 원문으로
+    assert "따라 사고팔라는 뜻이 아니에요" in body
+    from hanjang import holders
+    assert holders.who("국민연금공단") == "nps" and holders.who("홍길동") is None
+
+
+def test_donut_by_industry():
+    d = web.donut(["반도체", "반도체", "화학", None])
+    assert "4</span>" in d and "반도체" in d and "50%" in d and "기타" in d and "25%" in d
+    assert web.donut([]) == ""
+
+    assert web.sector("264") == "전자·반도체" and web.sector("64992") == "금융" and web.sector("7150") == "지주회사" and web.sector(None) is None
+
+
+def test_demo_browse_without_email_is_read_only(monkeypatch):
+    app, con = _app()
+    monkeypatch.setattr(web, "env", lambda: {})
+    assert call(app, "/demo")[0].startswith("404")  # 꺼져 있으면 없다
+    monkeypatch.setattr(web, "env", lambda: {"DEMO": "1"})
+    s, h, _ = call(app, "/demo")
+    ck = h["Set-Cookie"].split(";")[0]
+    assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
+    assert "보기만" in call(app, "/add", "POST", "q=005930", ck)[2]  # 바꾸는 것은 막는다
+    assert "로그인 없이 둘러보기" in call(app, "/")[2]
+
+
+def test_no_news_strips_article_traces():
+    b = {"headline": "h", "summary": [{"text": "기사 얘기", "refs": ["N1"]}, {"text": "매출", "refs": ["F1"]}],
+         "sections": [{"title": "요즘 기사는요", "sentences": [{"text": "x", "refs": ["N1"]}]},
+                      {"title": "회사 사정은 어떤가요?", "sentences": [{"text": "y", "refs": ["F1", "N2"]}]}], "keywords": ["#a"]}
+    got = web.no_news(b)
+    assert [s["text"] for s in got["summary"]] == ["매출"] and len(got["sections"]) == 1 and got["keywords"] == []

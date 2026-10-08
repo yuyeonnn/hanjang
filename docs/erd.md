@@ -251,6 +251,8 @@ UNIQUE `(user_id, kind, ref, week)`. 피드 = 내가 팔로우한 사람 + 나�
 | `business` | ticker(PK) · rcept_no · body(json: what·segments·risks·year) · read_model · read_at | 사업보고서 「사업의 내용」 요약. 숫자는 원문에 글자 그대로 있어야 저장(코드 대조). 같은 해 보고서는 다시 읽지 않는다 |
 | `articles` | id · ref(UNIQUE: 공시·지분 보고 접수번호) · ticker · date · kind · body(json: title·paragraphs·links) · made_at | 피드 「최근 소식」 기사. 한 회사·같은 종류는 14일에 한 편 |
 | `prices` | ticker · date · close | ⚠️ `PRICE_DEV=1` 인 내 컴퓨터에서만 — 시세는 남에게 보일 권리가 없다(data-rights §4) |
+| `big_pairs` | inst · corp_code · stock_code · corp_name · corp_cls | 큰손 포트폴리오 — 전체 상장사 대량보유 보고(D001)에서 BIG 기관이 보고한 회사 짝 |
+| `big_holdings` | inst · stock_code · corp_name · rate(%) · rate_chg(%p) · date · rcept_no | 기관별 5% 넘게 가진 종목(가장 최근 보고). 5% 아래로 내려가면 지운다. 개인은 모으지 않는다 |
 | `stocks.homepage` | 도메인 | DART 회사 개황 — 로고(Brandfetch)를 찾는다 |
 
 ### `feedback` — 주간 설문
