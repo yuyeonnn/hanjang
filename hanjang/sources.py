@@ -299,6 +299,19 @@ class Dart:
         z = zipfile.ZipFile(io.BytesIO(raw))
         return _flat(z.read(max(z.namelist(), key=lambda n: z.getinfo(n).file_size)).decode("utf-8", "ignore"))
 
+    def ipos(self, start: date, end: date) -> "list[Ipo]":  # Ipo 는 아래에 — 서버 3.13 은 따옴표가 있어야 한다
+        """그 사이 증권신고서(지분증권)를 낸 비상장 회사(corp_cls E)의 일반공모 — 회사마다 주요정보 1콜. 철회한 회사는 뺀다."""
+        rows = self._list("list.json", bgn_de=start.strftime("%Y%m%d"), end_de=end.strftime("%Y%m%d"), corp_cls="E",
+                          pblntf_detail_ty="C001", page_count=100)["list"]  # ponytail: 100건(석 달 공모 수십 건)이 넘으면 쪽 넘기기  # fmt: skip
+        gone = {r["corp_code"] for r in rows if "철회" in r["report_nm"]}
+        corps = dict.fromkeys(r["corp_code"] for r in rows if "증권신고서" in r["report_nm"] and r["corp_code"] not in gone)
+        out = []
+        for cc in corps:
+            j = self._call("estkRs.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"), end_de=end.strftime("%Y%m%d")).json()
+            if j.get("status") == "000" and (x := parse_ipo(j)):
+                out.append(x)
+        return out
+
     def buybacks(self, ticker: str, start: date, end: date) -> dict[str, int]:
         """자기주식 취득 결정의 취득 예정 금액(보통주, 원) — {접수번호: 금액}. 주요사항보고서 전용 API."""
         cc = self.corps().get(ticker)
@@ -307,6 +320,55 @@ class Dart:
         rows = self._list("tsstkAqDecsn.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"),
                           end_de=end.strftime("%Y%m%d"))["list"]  # fmt: skip
         return {r["rcept_no"]: v for r in rows if (v := _won(r.get("aqpln_prc_ostk")))}
+
+
+# --- 공모주 — 새로 상장하려는 회사의 증권신고서(지분증권). 사실만 옮긴다 («청약할 만하다» 없음, 불변식 1) ---
+
+
+@dataclass(frozen=True)
+class Ipo:
+    rcept_no: str
+    corp_code: str
+    name: str
+    sub_start: date  # 일반 청약 첫날 · 마지막 날
+    sub_end: date
+    pay: date | None  # 납입일
+    price: int | None  # 신고서에 적힌 1주 가격 (수요예측 전이면 희망 가격의 아래 끝일 수 있다 — 화면에 「신고서 기준」으로)
+    total: int | None  # 모으는 돈 (원)
+    lead: str  # 대표 주관 증권사
+    uses: str  # 자금 쓰임 「시설자금 1,549억원 · 운영자금 …」
+
+
+def _kdate(s: str) -> date | None:
+    """「2026년 10월 07일」 → date."""
+    m = re.search(r"(20\d\d)\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일", s or "")
+    return date(int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def parse_ipo(j: dict) -> Ipo | None:
+    """estkRs.json (증권신고서 주요정보 · 지분증권) → 공모 한 건. 일반공모가 아니면(주주배정 증자 등) None."""
+    g = {x["title"]: x["list"] for x in j.get("group", [])}
+    gen, kind = (g.get("일반사항") or [{}])[-1], (g.get("증권의종류") or [{}])[-1]
+    a, b = (re.split(r"~", gen.get("sbd", "")) + [""])[:2]
+    start, end = _kdate(a), _kdate(b) or _kdate(a)
+    if "일반공모" not in kind.get("slmthn", "") or not start:
+        return None
+    lead = next((r["actnmn"] for r in g.get("인수인정보", []) if r.get("actsen") == "대표"), "")
+    uses = " · ".join(f"{r['se']} {won_short(v)}" for r in g.get("자금의사용목적", [])
+                      if (v := _won(r.get("amt"))) and "제비용" not in r.get("se", ""))  # fmt: skip
+    return Ipo(gen["rcept_no"], gen["corp_code"], gen["corp_name"].strip(), start, end, _kdate(gen.get("pymd", "")),
+               _won(kind.get("slprc")), _won(kind.get("slta")), lead, uses)
+
+
+def won_short(x: int) -> str:
+    """원 → 「1,549억원」 「2.1조원」 — notes.won 과 같은 모양 (sources 는 notes 를 부르지 않는다)."""
+    return f"{x / 10**12:,.1f}조원" if x >= 10**12 else f"{x / 10**8:,.0f}억원" if x >= 10**8 else f"{x / 10**4:,.0f}만원"
+
+
+def parse_listing_day(text: str) -> date | None:
+    """투자설명서 원문의 「상장 예정일」 · 「매매개시 예정일」 뒤 첫 날짜."""
+    m = re.search(r"(상장|매매\s*개시)\s*예정\s*일[^0-9]{0,40}(20\d\d)\s*[년.\-]\s*(\d{1,2})\s*[월.\-]\s*(\d{1,2})", text)
+    return date(int(m[2]), int(m[3]), int(m[4])) if m else None
 
 
 # 앞으로의 일정이 적힌 공시 — 거래소 서식이라 「항목 이름」 다음 줄에 날짜가 온다. 자회사 공시는 그 회사 일정이 아니라 뺀다

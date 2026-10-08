@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import html
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -1084,6 +1085,14 @@ class App:
         macro_by: dict[str, list] = {}
         for x in macro:
             macro_by.setdefault(x[0], []).append(x)
+        # 공모주 — 시장 전체(내 종목 아님). 한 달 수십 곳이라 칩은 청약 첫날·상장 예정일에만, 금리·물가 칩 뒤에
+        ipos = self.con.execute("select name, sub_start, sub_end, list_date, price, total, lead, uses, rcept_no from ipos"
+                                " where sub_start between ? and ? or list_date between ? and ? order by sub_start", (lo, hi, lo, hi)).fetchall()  # fmt: skip
+        ipo_by: dict[str, list] = {}
+        for x in ipos:
+            ipo_by.setdefault(x[1], []).append((x[0], "청약", x[8]))
+            if x[3]:
+                ipo_by.setdefault(x[3], []).append((x[0], "상장", x[8]))
         ahead: dict[str, list] = {}  # 공시에서 읽은 일정(실적 발표·주총·배당 기준일·지급일) — 테두리 칩으로 지난 공시와 구분
         for d, name, kind, what, rno in self.con.execute(
                 "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
@@ -1127,6 +1136,9 @@ class App:
                 for _, kind, nat, what in macro_by.get(iso, []) if d.month == m else []:
                     chips.append(f'<span title="{e(what)}" class="{CHIP} border border-dashed border-outline-variant text-on-surface-variant">'
                                  f"<span class='lg:hidden'>{FLAG[nat]} {e(kind)}</span><span class='hidden lg:inline'>{e(what)}</span></span>")  # fmt: skip
+                for name, what, rno in ipo_by.get(iso, []) if d.month == m else []:
+                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></a>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
                 cells.append(f'<div class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else ""}">{cell}</div>')
         items = []
@@ -1147,6 +1159,21 @@ class App:
                  f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{(dd := date.fromisoformat(d)).month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})</span> · {e(name)} <b>{e(what)}</b></span>'
                  '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold flex-shrink-0">일정</span></article></a>')
                   for d, name, _, what, rno in soon]  # fmt: skip
+        for name, a, b, listed, price, total, lead, uses, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
+            d = a if a[:7] == f"{y}-{m:02d}" else listed if listed and listed[:7] == f"{y}-{m:02d}" else None
+            if not d:
+                continue
+            da, db_ = date.fromisoformat(a), date.fromisoformat(b)
+            bits = [f"1주 {price:,}원(증권신고서 기준)" if price else "", f"모으는 돈 {sources.won_short(total)}" if total else "", f"대표 주관 {lead}" if lead else ""]
+            say = ("주식시장에 새로 들어오려는 회사가 주식을 팔아 돈을 모아요. " + " · ".join(x for x in bits if x) + "."
+                   + (f" 모은 돈은 {uses}에 쓴다고 적었어요." if uses else "")
+                   + (f" 상장 예정일은 {(dl := date.fromisoformat(listed)).month}월 {dl.day}일이에요." if listed else ""))  # fmt: skip
+            items.append((9, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
+                          f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{da.month}월 {da.day}일 ~ {db_.month}월 {db_.day}일 청약 · 시장 전체</span>'
+                          '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
+                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 공모주 청약</h3>'
+                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
+                          '<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</span></article></a>'))  # fmt: skip
         for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
             if d[:7] != f"{y}-{m:02d}":
                 continue
@@ -1666,6 +1693,6 @@ if __name__ == "__main__":
         with lock:
             return app(environ, start_response)
 
-    host, port = cfg.get("HOST", "127.0.0.1"), int(cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
+    host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
     make_server(host, port, serial, server_class=Server).serve_forever()
