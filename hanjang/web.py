@@ -263,7 +263,24 @@ def money_blocks(fin: tuple | None) -> str:
             + '<p class="mt-2 text-[11px] text-outline">연결재무제표 기준 · 자료: DART 사업보고서</p></div>')  # fmt: skip
 
 
-def dividend_block(divs: list[tuple], fin: tuple | None = None) -> str:
+def returns_html(divs: list[tuple], buys: list[tuple]) -> str:
+    """주주에게 돌려준 돈 — 최근 해 배당 총액 + 최근 1년 자사주 취득 결정 금액. 기간이 달라 더하지 않고 나란히 (사용자 10/9 검토)."""
+    rows = []
+    if divs and divs[-1][2]:
+        rows.append((f"{divs[-1][0]}년 배당", divs[-1][2], DONUT[0]))
+    if buys:
+        rows.append((f"최근 1년 자사주 사기로 한 돈 · {len(buys)}번", sum(a for _, a in buys), DONUT[3]))
+    if len(rows) < 2:
+        return ""
+    top = max(v for _, v, _ in rows)
+    bars = "".join(f'<div class="flex items-center gap-2 py-0.5"><span class="w-[46%] text-[12px] leading-4 text-on-surface-variant">{e(k)}</span>'
+                   f'<span class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><span class="block h-full rounded-full" style="width:{v / top * 100:.1f}%;background:{c}"></span></span>'
+                   f'<span class="w-16 text-right text-[12px] font-semibold text-on-surface tabular-nums">{e(notes.won(v))}</span></div>' for k, v, c in rows)  # fmt: skip
+    return ('<div class="py-2"><div class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">배당만이 아니에요 — 자사주로 돌려준 것까지</div>'
+            f'{bars}<p class="text-[11px] text-outline mt-1">자사주 금액은 회사가 「사기로 결정」한 금액이에요(실제 산 금액과 다를 수 있어요). 자료: DART 공시</p></div>')  # fmt: skip
+
+
+def dividend_block(divs: list[tuple], fin: tuple | None = None, buys: list[tuple] | None = None) -> str:
     """주주에게 돌려준 것 — 해마다 주당 현금배당금(보통주) 막대 + 번 돈을 어떻게 썼나 도넛(배당 : 회사에 남김) + 최근 배당성향."""
     divs = [r for r in divs if r[1]]
     if not divs:
@@ -285,16 +302,42 @@ def dividend_block(divs: list[tuple], fin: tuple | None = None) -> str:
     text = (f"{y}년에는 한 주에 {dps:,}원을 현금으로 나눠 줬어요" + (f"(배당 총액 {notes.won(total)})" if total else "") + "."
             + (f" 번 돈(순이익)의 {payout:.1f}%를 배당으로 쓴 셈이에요(배당성향)." if payout else ""))  # fmt: skip
     return chapter("주주에게 돌려준 것", e(text),
-                   ring_html + f'<div class="flex items-end gap-1 h-[110px] pt-2">{bars}</div>'
+                   ring_html + returns_html(divs, buys or []) + f'<div class="flex items-end gap-1 h-[110px] pt-2">{bars}</div>'
                    '<p class="font-label-micro text-label-micro text-outline">주당 현금배당금(보통주, 원) · 자료: DART 「배당에 관한 사항」</p>')  # fmt: skip
 
 
-def risk_block(biz: dict | None) -> str:
+# 위험 낱말 → 같이 볼 숫자. 앞에서부터 처음 맞는 것 하나. 값은 재무표(최근 두 해)에서 코드가 나눈다
+WATCH = ((r"가격|수급|공급|시황|수요|경기|업황|경쟁|원가|판매", "영업이익률", lambda f: f[2] / f[1] * 100 if f[1] and f[1] > 0 and f[2] is not None else None),
+         (r"부채|차입|금리|유동성|자금|이자", "부채비율", lambda f: f[5] / f[4] * 100 if f[4] and f[4] > 0 and f[5] is not None else None),
+         (r"발주|수주|투자 계획|소비량|정책|주문", "매출", None))  # fmt: skip  매출은 금액과 전년 대비 변화로
+
+
+def watch(risk: str, fins: list[tuple], used: set | None = None) -> str:
+    """fins = [(연도, 매출, 영업이익, 순이익, 자본, 부채)] 최근 해부터. used = 이미 붙인 숫자 — 같은 숫자를 위험마다 되풀이하지 않는다."""
+    used = set() if used is None else used
+    for pat, name, calc in WATCH:
+        if calc is None:  # 매출 — 금액 + 전년 대비
+            if re.search(pat, risk) and name not in used and fins and fins[0][1]:
+                used.add(name)
+                chg = f" · 전년보다 {(fins[0][1] / fins[1][1] - 1) * 100:+.1f}%" if len(fins) > 1 and fins[1][1] and fins[1][1] > 0 else ""
+                return f'<span class="block text-[12px] text-outline">살펴볼 숫자: 매출 {notes.won(fins[0][1])} ({fins[0][0]}년{chg})</span>'
+            continue
+        now = calc(fins[0]) if fins else None
+        if re.search(pat, risk) and now is not None and name not in used:
+            used.add(name)
+            was = f" · {fins[1][0]}년 {v:.1f}%" if len(fins) > 1 and (v := calc(fins[1])) is not None else ""
+            return f'<span class="block text-[12px] text-outline">살펴볼 숫자: {name} {now:.1f}% ({fins[0][0]}년{was})</span>'
+    return ""
+
+
+def risk_block(biz: dict | None, fins: list[tuple] | None = None) -> str:
     if not biz or not biz.get("risks"):
         return ""
-    items = "".join(f'<li class="flex gap-2"><span class="material-symbols-outlined text-tertiary text-[16px] mt-1">error</span><span>{e(r)}</span></li>' for r in biz["risks"])
+    used: set = set()
+    items = "".join(f'<li class="flex gap-2"><span class="material-symbols-outlined text-tertiary text-[16px] mt-1" aria-hidden="true">error</span><span>{e(r)}{watch(r, fins or [], used)}</span></li>' for r in biz["risks"])
     return chapter("회사가 꼽은 위험", f'<ul class="flex flex-col gap-1.5">{items}</ul>',
-                   '<p class="font-label-micro text-label-micro text-outline">회사가 사업보고서에 스스로 적은 위험이에요. 한장의 판단이 아니에요.</p>')  # fmt: skip
+                   '<p class="font-label-micro text-label-micro text-outline">회사가 사업보고서에 스스로 적은 위험이에요. 한장의 판단이 아니에요.'
+                   + (' 「살펴볼 숫자」는 그 위험과 관련해 이 노트에 있는 숫자예요 — 앞날을 말하는 게 아니에요.' if used else "") + '</p>')  # fmt: skip
 
 
 # 큰 업종 — 통계청 산업분류 코드 앞 두 자리로 묶는다 (도넛 조각을 열 개 안쪽으로)
@@ -439,7 +482,9 @@ TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종�
 TIP_DEFAULT = ("공시 원문은 DART에서 누구나 볼 수 있어요", "번호를 누르면 금융감독원 전자공시 원문이 열려요.")
 FACT_SHORT = {"F1": "매출", "F2": "영업이익", "F3": "부채비율", "F4": "ROE"}
 # 출처 번호는 읽기를 방해하지 않게 — 본문보다 작은 회색 위첨자 (사용자 10/7). 누르면 출처 창
-CITE = "align-super ml-0.5 text-[9px] leading-none font-normal text-outline/70 hover:text-on-surface-variant transition-colors"
+CITE = "align-super ml-0.5 text-[9px] leading-none font-normal hover:text-on-surface-variant transition-colors"
+# 출처 번호 색 — 누가 말한 것인지 (사용자 10/9 검토: 사실과 해석을 나눠 보이게). 아래 「작성 기준」에 같은 색으로 풀이
+CITE_TONE = {"F": "text-primary/70", "D": "text-secondary/80", "I": "text-secondary/80", "N": "text-outline/70"}
 
 
 def short_name(name: str) -> str:
@@ -459,7 +504,7 @@ def clean_title(title: str, code: str) -> str:
 def sentence(s: dict, seen: set | None = None) -> str:
     """문장 + 시안의 출처 단추 [F1] — 누르면 출처 창이 열린다 (모든 문장에 원문 링크, 불변식 2).
     seen = 이 노트에서 이미 보인 숫자들 — 숫자가 모두 앞에서 나온 괄호는 다시 싣지 않는다(같은 숫자 되풀이, 사용자 10/9 검토)."""
-    btns = "".join(f'<button aria-label="출처 {e(r)} 보기" class="{CITE}" onclick="toggleCitation(\'{e(r)}\')" type="button">[{e(r)}]</button>'
+    btns = "".join(f'<button aria-label="출처 {e(r)} 보기" class="{CITE} {CITE_TONE.get(r[:1], "text-outline/70")}" onclick="toggleCitation(\'{e(r)}\')" type="button">[{e(r)}]</button>'
                    for r in s["refs"])  # fmt: skip
     text = notes.mend(s["text"])
     if seen is not None:
@@ -651,10 +696,10 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
         parts.append(chapter(sec["title"], text, extra))
         if sec["title"].startswith(NEWS_TITLES):
-            parts.append(dividend_block(report.get("divs", []), report.get("fin")))
+            parts.append(dividend_block(report.get("divs", []), report.get("fin"), report.get("buys")))
     if not any(s["title"].startswith(NEWS_TITLES) for s in body["sections"]):
-        parts.append(dividend_block(report.get("divs", []), report.get("fin")))
-    parts.append(risk_block(report.get("biz")))
+        parts.append(dividend_block(report.get("divs", []), report.get("fin"), report.get("buys")))
+    parts.append(risk_block(report.get("biz"), report.get("fins")))
 
     def filled(key):  # 옛 노트의 「분류된 것 없음」 자리 채움 문장도 빈 칸으로 본다
         return [] if body.get(f"{key}_title") == "분류된 것 없음" else body.get(key) or []
@@ -684,7 +729,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                  f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
+                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지예요 — <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
                  '<div class="pt-1"><p class="font-label-regular text-label-regular text-on-surface leading-relaxed font-medium">사라·팔아라는 의견도, 목표주가도, 앞으로의 예측도 없어요. 투자 판단은 본인이 해요.</p></div></footer>')  # fmt: skip
     dialog = ('<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-end justify-center px-margin pb-6" id="citation-dialog" onclick="closeCitation(event)"><div class="bg-surface-container-lowest w-full max-w-[440px] rounded-2xl p-space-lg shadow-xl flex flex-col gap-space-sm" onclick="event.stopPropagation()"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded font-citation-ref text-citation-ref bg-primary-fixed text-on-primary-fixed font-bold" id="citation-badge"></span><span class="font-label-regular text-label-regular font-bold text-on-surface" id="citation-title"></span></div><button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container" onclick="hideCitation()" type="button"><span class="material-symbols-outlined text-[20px]">close</span></button></div><div class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed" id="citation-body"></div><div class="flex items-center justify-between pt-2"><span class="font-label-micro text-label-micro text-outline font-mono" id="citation-meta"></span><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="#" id="citation-link" rel="noopener noreferrer" target="_blank">원문 확인<span class="material-symbols-outlined text-[14px]">open_in_new</span></a></div></div></div>'
               # JSON 안의 </script> 를 막으려고 < 를 < 로
@@ -1140,9 +1185,12 @@ class App:
     def report(self, ticker: str) -> dict:
         divs = self.con.execute("select fiscal_year, dps, total, payout from dividends where ticker = ? order by fiscal_year", (ticker,)).fetchall()
         biz = self.con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
-        fin = self.con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities from financials"
-                               " where ticker = ? order by fiscal_year desc limit 1", (ticker,)).fetchone()  # fmt: skip
-        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None, "fin": fin}
+        fins = self.con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities from financials"
+                                " where ticker = ? order by fiscal_year desc limit 2", (ticker,)).fetchall()  # fmt: skip
+        fin = fins[0] if fins else None
+        buys = self.con.execute("select date, amount from disclosures where ticker = ? and code = 'BUYBACK' and amount > 0 and date >= ?",
+                                (ticker, (date.today() - timedelta(days=365)).isoformat())).fetchall()  # fmt: skip
+        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None, "fin": fin, "fins": fins, "buys": buys}
 
     # ---- 캘린더 (시안 _4) ----
 
