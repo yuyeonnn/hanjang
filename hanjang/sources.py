@@ -269,6 +269,14 @@ class Dart:
         rows += [("5%", r) for r in self._list("majorstock.json", corp_code=cc)["list"]]
         return [x for kind, r in rows if (x := parse_insider(kind, r, ticker)).day >= since]
 
+    def doc_text(self, rcept_no: str) -> str:
+        """공시 원문을 글자로 — 표는 칸마다 줄을 바꾼다(_flat). 파일이 없으면 빈 글."""
+        raw = self._call("document.xml", rcept_no=rcept_no).content
+        if raw[:2] != b"PK":
+            return ""
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        return _flat(z.read(max(z.namelist(), key=lambda n: z.getinfo(n).file_size)).decode("utf-8", "ignore"))
+
     def buybacks(self, ticker: str, start: date, end: date) -> dict[str, int]:
         """자기주식 취득 결정의 취득 예정 금액(보통주, 원) — {접수번호: 금액}. 주요사항보고서 전용 API."""
         cc = self.corps().get(ticker)
@@ -277,6 +285,45 @@ class Dart:
         rows = self._list("tsstkAqDecsn.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"),
                           end_de=end.strftime("%Y%m%d"))["list"]  # fmt: skip
         return {r["rcept_no"]: v for r in rows if (v := _won(r.get("aqpln_prc_ostk")))}
+
+
+# 앞으로의 일정이 적힌 공시 — 거래소 서식이라 「항목 이름」 다음 줄에 날짜가 온다. 자회사 공시는 그 회사 일정이 아니라 뺀다
+SCHEDULE = re.compile(r"기업설명회|주주총회소집결의|현금ㆍ현물배당결정|현금ㆍ현물배당을위한주주명부폐쇄")
+
+
+def has_schedule(title: str) -> bool:
+    t = title.replace(" ", "")
+    return bool(SCHEDULE.search(t)) and "자회사" not in t
+
+
+def parse_schedule(title: str, text: str) -> list[tuple[date, str, str]]:
+    """공시 원문 → [(날짜, 종류 EARNINGS·DIVIDEND·AGM·OTHER, 쉬운 말 한 줄)]. 날짜가 「-」면 그 일정은 없다."""
+    if not has_schedule(title):
+        return []
+    t = title.replace(" ", "")
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+    def after(label: str) -> str:
+        """그 항목 이름 바로 다음 줄 — 「-」 칸이 뒤 항목의 날짜를 빌려 오지 않게 한 줄만 본다."""
+        i = next((i for i, ln in enumerate(lines) if re.fullmatch(rf"(\d+\.\s*)?{label}", ln)), None)
+        return lines[i + 1] if i is not None and i + 1 < len(lines) else ""
+
+    def day(label: str) -> date | None:
+        m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", after(label))
+        return date(*map(int, m.groups())) if m else None
+
+    out = []
+    if "기업설명회" in t and (d := day("일시")):
+        earn = "실적" in after("개최목적")
+        out.append((d, "EARNINGS" if earn else "OTHER", "실적 발표" if earn else "기업설명회"))
+    elif "주주총회소집결의" in t and (d := day("일시")):
+        out.append((d, "AGM", "임시 주총" if "임시" in after("구분") else "정기 주총"))
+    elif "배당결정" in t:
+        out += [(d, "DIVIDEND", "배당 기준일")] if (d := day("배당기준일")) else []
+        out += [(d, "DIVIDEND", "배당금 지급")] if (d := day("배당금지급 예정일자")) else []
+    elif "주주명부폐쇄" in t and (d := day("기준일")):
+        out.append((d, "DIVIDEND", "배당 기준일"))
+    return out
 
 
 def _num(s: str | None) -> float | None:

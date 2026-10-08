@@ -28,7 +28,7 @@ def notify(con: sqlite3.Connection, week: str) -> int:
         evs = con.execute(
             "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
             " join stocks s on s.ticker = e.ticker where e.date between ? and ? order by e.date", (uid, lo, hi)).fetchall()  # fmt: skip
-        evs = [(d, n, k, t, notes.DART.format(r) if r else "", 0) for d, n, k, t, r in evs]
+        evs = [(d, n, t, "", notes.DART.format(r) if r else "", 0) for d, n, _, t, r in evs]  # 칩에는 쉬운 말(「실적 발표」)
         mail.send(email, *mail.weekly_mail(week, stocks, evs, hol))
     return len(by)
 
