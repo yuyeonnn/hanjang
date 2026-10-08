@@ -74,6 +74,12 @@ def main(today: date) -> None:
     save_financials(con, fin)
     print(f"재무 {len(fin)}행 ({today.year - 5}~{today.year - 1})")
 
+    qs = [x for y in (today.year, today.year - 1) for x in dart.quarters(tickers, y)]  # 분기 실적 — 올해 흐름
+    con.executemany("insert or replace into quarters values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(x.ticker, x.year, x.q, x.revenue, x.operating_income, x.revenue_prev, x.op_prev, x.revenue_ytd, x.op_ytd,
+                      x.revenue_ytd_prev, x.op_ytd_prev, x.rcept_no, x.basis) for x in qs])  # fmt: skip
+    print(f"분기 실적 {len(qs)}줄 ({today.year - 1}~{today.year})")
+
     lo = today - timedelta(days=DISCLOSURE_DAYS)
     ds = dart.disclosures(lo, today, set(tickers))
     save_disclosures(con, ds)

@@ -418,3 +418,19 @@ def test_cost_report_sums_by_day_and_job():
              "2026-10-07T07:01:00,writer:note,gpt-4.1,1000,500,0.700000"]
     out = cost.report(lines, date(2026, 10, 8))
     assert "오늘 $0.04" in out and "이번 달 $0.73" in out and "노트 쓰기" in out and "피드 기사" in out
+
+
+def test_quarter_industry_segment_facts():
+    con = _con()
+    con.execute("insert into quarters values ('005930', 2026, 2, 200, 50, 100, 10, 380, 90, 190, 20, 'r1', 'CFS')")
+    f8, f9 = notes.quarter_facts(con, "005930")
+    assert f8["slots"]["분기"] == "2026년 2분기" and f8["slots"]["매출방향"] == "늘었" and f8["slots"]["매출폭"] == "100.0%"
+    assert "+100.0%" in f8["text"] and "1년 전 같은 분기보다" in f8["text"]
+    assert f9["slots"]["기간"] == "2026년 1~6월" and "작년 같은 기간보다" in f9["text"]
+    seg = notes.check_segments({"unit": "백만원", "rows": [
+        {"name": "DS 부문", "revenue": "130,128,162", "op": "24,858,075", "revenue_prev": "", "op_prev": "15,094,486"},
+        {"name": "내부거래 조정", "revenue": "(30,114,556)", "op": "0", "revenue_prev": "", "op_prev": ""}]},
+        "DS 부문 | 130,128,162 | 24,858,075 | 15,094,486 | (30,114,556)", 2025)
+    assert seg["rows"] == [{"name": "DS 부문", "revenue": 130_128_162_000_000, "op": 24_858_075_000_000, "revenue_prev": None, "op_prev": 15_094_486_000_000}]
+    with pytest.raises(ValueError):  # 원문에 없는 값
+        notes.check_segments({"unit": "백만원", "rows": [{"name": "A", "revenue": "1,111", "op": "", "revenue_prev": "", "op_prev": ""}]}, "2,222", 2025)

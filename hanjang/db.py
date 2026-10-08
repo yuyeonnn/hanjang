@@ -30,6 +30,11 @@ create table if not exists insiders (
 create table if not exists dividends (
   ticker text not null references stocks, fiscal_year integer not null, dps integer, total integer, payout real,
   primary key (ticker, fiscal_year));
+create table if not exists quarters (
+  ticker text not null references stocks, year integer not null, q integer not null,
+  revenue integer, operating_income integer, revenue_prev integer, op_prev integer,
+  revenue_ytd integer, op_ytd integer, revenue_ytd_prev integer, op_ytd_prev integer,
+  rcept_no text not null, basis text, primary key (ticker, year, q));
 create table if not exists business (
   ticker text primary key references stocks, rcept_no text not null, body text not null, read_model text, read_at text);
 create table if not exists prices (
