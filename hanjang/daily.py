@@ -30,6 +30,8 @@ def notify(con: sqlite3.Connection, week: str) -> int:
             "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
             " join stocks s on s.ticker = e.ticker where e.date between ? and ? order by e.date", (uid, lo, hi)).fetchall()  # fmt: skip
         evs = [(d, n, t, "", notes.DART.format(r) if r else "", 0) for d, n, _, t, r in evs]  # 칩에는 쉬운 말(「실적 발표」)
+        evs += [(d, {"KR": "한국", "US": "미국"}[nat], kind + (" 결정" if kind == "금리" else " 발표" if kind != "선거" else ""), "", sources.MACRO_SOURCE[nat + kind][1], 0)
+                for d, kind, nat, _ in sources.macro_events(lo, hi)]  # 시장 일정 — 금리·물가·고용·선거  # fmt: skip
         mail.send(email, *mail.weekly_mail(week, stocks, evs, hol))
     return len(by)
 

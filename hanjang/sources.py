@@ -56,6 +56,27 @@ def _get(url: str, secret: str, **params) -> httpx.Response:
 
 
 UNIVERSE = ROOT / "hanjang" / "universe.txt"
+MACRO_EVENTS = ROOT / "hanjang" / "macro_events.txt"
+MACRO_RANK = {"금리": 1, "물가": 2, "선거": 3, "고용": 4}  # 캘린더 목록 정렬 — 주식과 이어지는 정도
+MACRO_EXPLAIN = {
+    ("금리", "KR"): "한국은행이 기준금리를 정하는 날이에요. 기준금리는 은행 대출·예금 이자의 기준이라, 회사가 돈을 빌리는 비용과도 이어져요.",
+    ("금리", "US"): "미국 중앙은행(연준)이 기준금리를 정해요. 발표는 한국 시간 새벽이에요. 세계 금융시장이 함께 지켜보는 발표예요.",
+    ("물가", "KR"): "지난달 물가가 얼마나 올랐는지 나오는 날이에요. 물가는 한국은행이 금리를 정할 때 가장 먼저 보는 숫자 중 하나예요.",
+    ("물가", "US"): "미국의 지난달 물가가 나와요(한국 시간 밤). 연준이 금리를 정할 때 가장 먼저 보는 숫자 중 하나예요.",
+    ("고용", "KR"): "지난달 일자리가 얼마나 늘었는지, 실업률은 어땠는지 나오는 날이에요.",
+    ("고용", "US"): "미국의 지난달 일자리 수와 실업률이 나와요(한국 시간 밤). 미국 경기를 보는 대표 숫자예요.",
+    ("선거", "US"): "미국 의회 의원을 뽑는 중간선거예요. 미국의 세금·무역 정책 방향과 이어지는 일이에요.",
+}  # fmt: skip
+MACRO_SOURCE = {"KR금리": ("한국은행", "https://www.bok.or.kr"), "US금리": ("미 연준", "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"),
+                "KR물가": ("국가데이터처", "https://mods.go.kr"), "KR고용": ("국가데이터처", "https://mods.go.kr"),
+                "US물가": ("미 노동통계국", "https://www.bls.gov/schedule/news_release/cpi.htm"),
+                "US고용": ("미 노동통계국", "https://www.bls.gov/schedule/news_release/empsit.htm"), "US선거": ("미 연방선거위원회", "https://www.fec.gov")}  # fmt: skip
+
+
+def macro_events(lo: str, hi: str) -> list[tuple[str, str, str, str]]:
+    """시장 일정 [(날짜, 종류, 나라, 이름)] — macro_events.txt (손으로 갱신). lo~hi 안의 것만, 날짜순."""
+    rows = (tuple(x.strip() for x in ln.split("|")) for ln in MACRO_EVENTS.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#"))
+    return sorted(r for r in rows if len(r) == 4 and lo <= r[0] <= hi)
 
 
 def kospi_universe() -> list[tuple[str, str]]:
