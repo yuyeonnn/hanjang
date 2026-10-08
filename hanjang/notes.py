@@ -446,6 +446,7 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
+    text = re.sub(r"(\d)(건|주|명|개|원|%)\2", r"\1\2", text)  # 빈칸 값에 단위가 있는데 AI 가 또 붙인 것 — 「765건건」 → 「765건」
     if re.search(r"(늘었|줄었|돌아섰|이어졌)(?![어고는지으다던기을거네죠습])", text) or re.search(r"(늘었|줄었)\S*\s*(늘었|줄었|증가|감소|성장)", text):
         raise ValueError(f"방향 낱말이 어색하게 이어짐: {text!r}")  # 「늘었을 때」「늘었거든요」는 괜찮다
     text = text.replace("「「", "「").replace("」」", "」")

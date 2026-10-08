@@ -325,16 +325,20 @@ def test_article_check_rules():
     from hanjang import articles
 
     fs = [{"id": "E1", "text": "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%", "url": "u", "tone": 0,
-           "slots": {"날짜": "9월 15일", "누가": "국민연금공단", "비율": "7.10%"}},
-          {"id": "F1", "text": "2025년 매출 10조원", "url": "u", "tone": 1, "slots": {"연도": "2025년", "값": "10조원"}}]  # fmt: skip
+           "doc": "보유주식 등의 수 | 12,345,678 | 보고사유 | 단순 변동"},
+          {"id": "F1", "text": "2025년 매출 10조원", "url": "u", "tone": 1}]  # fmt: skip
+    s = lambda t, r=("E1",): {"text": t, "refs": list(r)}  # noqa: E731
+    long = "국민연금공단이 이 회사 주식을 5% 넘게 가지고 있다고 다시 알렸어요. " * 26
     ok = {"title": "국민연금, 보유 주식을 늘렸어요", "paragraphs": [
-        {"text": "{E1.날짜}에 {E1.누가}가 보고했어요.", "refs": ["E1"]}, {"text": "매출은 {F1.값}이에요.", "refs": ["F1"]}]}
-    assert articles.check(ok, fs)["paragraphs"][0]["text"] == "9월 15일에 국민연금공단이 보고했어요."
-    for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}):
+        s("9월 15일에 국민연금공단이 보고했어요."), s(long), s("보유 주식은 12,345,678주예요."), s("2025년 매출은 10조원이에요.", ("F1",))]}
+    assert articles.check(ok | {"title": "국민연금, 7.10% 보유"}, fs)  # 원문에 있는 숫자는 제목에도
+    assert articles.check(ok, fs)["paragraphs"][0]["text"] == "9월 15일에 국민연금공단이 보고했어요."  # 원문(doc) 숫자는 그대로 옮겨도 된다
+    for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}, {"title": "국민연금, 99% 늘렸다"},
+                {"paragraphs": ok["paragraphs"] + [s("보유 주식이 20,000,000주예요.")]},  # 재료에 없는 숫자
+                {"paragraphs": [ok["paragraphs"][0], ok["paragraphs"][2], ok["paragraphs"][3]]}):  # 너무 짧음
         with pytest.raises(ValueError):
             articles.check(ok | bad, fs)
-
-
+    assert "1,645억" in articles.clean_doc(".x{a:b} 한화/공시 | 금액 | 164,500,200,000 ※ 관련공시 | 뒤")  # 큰 숫자 읽기
 def test_quoting_a_news_title_is_rejected():
     fs = [{"id": "N1", "text": "10월 8일 연합뉴스 소식 「삼성 실적 신기록」 — 영업이익 107조", "tone": 0, "url": "https://n",
            "slots": {"날짜": "10월 8일", "매체": "연합뉴스", "제목": "「삼성 실적 신기록」"}}]
@@ -342,3 +346,8 @@ def test_quoting_a_news_title_is_rejected():
     with pytest.raises(ValueError, match="제목 인용"):
         notes.check_note(note("「삼성 실적 신기록」이라는 보도가 있었어요."), fs)
     notes.check_note(note("영업이익이 107조라는 보도가 있었어요."), fs)
+
+
+def test_unit_after_slot_is_not_doubled():
+    by = {"I1": {"id": "I1", "text": "x", "tone": 0, "url": "u", "slots": {"늘린보고": "765건", "줄인보고": "41건"}}}
+    assert notes.fill({"text": "늘린 보고가 {I1.늘린보고}건, 줄인 보고가 {I1.줄인보고} 있었어요.", "refs": ["I1"]}, by)["text"] == "늘린 보고가 765건, 줄인 보고가 41건 있었어요."
