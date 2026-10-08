@@ -5,9 +5,10 @@
 import json
 import sqlite3
 import sys
+import traceback
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, holders, mail, notes
+from hanjang import articles, backup, collect, db, holders, mail, notes, sources
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -44,6 +45,17 @@ def main(today: date) -> None:
         print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
 
 
+def alert(err: BaseException) -> None:
+    """실패하면 운영자(보내는 Gmail 계정)에게 바로 알린다 — 서버 로그를 매일 들여다보지 않아도 되게. 메일이 안 오면 잘 돈 것."""
+    to = sources.env().get("SMTP_USER")
+    if to:
+        mail.send(to, f"[한장] 매일 실행 실패 — {type(err).__name__}", "".join(traceback.format_exception(err)))
+
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
-    main(date.today())
+    try:
+        main(date.today())
+    except Exception as err:
+        alert(err)
+        raise

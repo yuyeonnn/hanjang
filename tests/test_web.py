@@ -466,3 +466,16 @@ def test_mark_uses_group_color_not_logo():
     assert "#1428A0" in web.mark("삼성전자") and ">삼성<" in web.mark("삼성전자")
     assert ">SK<" in web.mark("SK하이닉스") and ">KB<" in web.mark("KB금융")
     assert web.mark("유한양행") == web.mark("유한양행") and ">유<" in web.mark("유한양행")  # 그 밖의 회사는 이름마다 같은 색
+
+
+def test_daily_failure_mails_the_operator(monkeypatch):
+    from hanjang import daily, sources
+
+    sent = []
+    monkeypatch.setattr(sources, "env", lambda: {"SMTP_USER": "op@x.kr"})
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text)))
+    try:
+        raise RuntimeError("database is locked")
+    except RuntimeError as err:
+        daily.alert(err)
+    assert sent[0][0] == "op@x.kr" and "RuntimeError" in sent[0][1] and "database is locked" in sent[0][2]
