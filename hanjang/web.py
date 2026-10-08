@@ -456,11 +456,40 @@ def clean_title(title: str, code: str) -> str:
     return f"{t} ({ko})" if ko and ko not in t and code != "OTHER" else t
 
 
-def sentence(s: dict) -> str:
-    """문장 + 시안의 출처 단추 [F1] — 누르면 출처 창이 열린다 (모든 문장에 원문 링크, 불변식 2)."""
+def sentence(s: dict, seen: set | None = None) -> str:
+    """문장 + 시안의 출처 단추 [F1] — 누르면 출처 창이 열린다 (모든 문장에 원문 링크, 불변식 2).
+    seen = 이 노트에서 이미 보인 숫자들 — 숫자가 모두 앞에서 나온 괄호는 다시 싣지 않는다(같은 숫자 되풀이, 사용자 10/9 검토)."""
     btns = "".join(f'<button aria-label="출처 {e(r)} 보기" class="{CITE}" onclick="toggleCitation(\'{e(r)}\')" type="button">[{e(r)}]</button>'
                    for r in s["refs"])  # fmt: skip
-    return f"{soften(s['text'])}{btns}"
+    text = notes.mend(s["text"])
+    if seen is not None:
+        def once(m):
+            nums = set(re.findall(r"\d[\d,.]*", m[1]))
+            if nums and nums <= seen and re.search(r"[원%]", m[1]):  # 금액·비율 괄호만 — 「(2021~2025년)」 같은 기간은 둔다
+                return ""
+            seen.update(nums)
+            return m[0]
+        text = re.sub(r"\(([^()]*\d[^()]*)\)", once, text)
+    return f"{soften(text)}{btns}"
+
+
+# 문단 나누기 — 근거 사실이 다루는 질문이 바뀌면 새 문단 (한 문단에 질문 하나, 사용자 10/9 검토)
+TOPIC = {"F1": "실적", "F2": "실적", "F5": "실적", "F6": "흐름", "F7": "사업", "F10": "업종", "F3": "살림", "F4": "살림",
+         "F8": "올해", "F9": "올해", "F11": "사업"}  # fmt: skip
+
+
+def paras(sents: list[dict], seen: set) -> str:
+    groups: list[list[str]] = []
+    last = None
+    for x in sents:
+        topic = next((TOPIC[r] for r in x["refs"] if r in TOPIC), last)
+        if topic != last or not groups:
+            groups.append([])
+        groups[-1].append(sentence(x, seen))
+        last = topic
+    if len(groups) == 1:
+        return " ".join(groups[0])
+    return "".join(f'<p class="{"mt-space-sm" if i else ""}">{" ".join(g)}</p>' for i, g in enumerate(groups))
 
 
 def soften(text: str) -> str:
@@ -594,16 +623,17 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 text-[12px] text-outline">{e(" · ".join(x for x in (industry_label(industry), md(made), f"읽음 {stats[0]:,}") if x))}</p></header>',
         price_chart(prices) if prices else "",
-        f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(body["headline"])}"</p></aside>',
+        f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(notes.mend(body["headline"]))}"</p></aside>',
     ]  # fmt: skip
+    seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
         parts.append('<section class="mb-space-xl pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
-                     f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s) for s in body["summary"])}</p></section>')  # fmt: skip
+                     f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s, seen) for s in body["summary"])}</p></section>')  # fmt: skip
     parts.append(business_block(report.get("biz"), report.get("rno")))
     nd = sum(f["id"][0] == "D" for f in facts)
     good_d, bad_d = sum(f["id"][0] == "D" and f["tone"] == 1 for f in facts), sum(f["id"][0] == "D" and f["tone"] == -1 for f in facts)
     for sec in body["sections"]:
-        text = " ".join(sentence(s) for s in sec["sentences"])
+        text = paras(sec["sentences"], seen)
         extra = ""
         if sec["title"].startswith("회사 사정"):
             extra = metrics(facts) + money_blocks(report.get("fin"))
@@ -636,11 +666,11 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             return (f'<div class="pl-space-md py-1 border-l-2 {bar} flex flex-col gap-1"><div class="flex items-center gap-1.5">'
                     f'<span class="px-2 py-0.5 rounded text-label-micro font-label-micro font-semibold {chip}">{label}</span>'
                     f'<span class="font-label-regular text-label-regular {ink} font-semibold">{e(title)}</span></div>'
-                    f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s) for s in items)}</p></div>')  # fmt: skip
-        parts.append('<section class="mb-space-xl flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">긍정 요인과 부정 요인</h3></div>'
-                     + side("긍정", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
-                     + side("부정", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
-                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">긍정·부정 요인은 코드가 정한 기준으로 분류했어요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
+                    f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s, seen) for s in items)}</p></div>')  # fmt: skip
+        parts.append('<section class="mb-space-xl flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">좋게 볼 점과 주의해서 볼 점</h3></div>'
+                     + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
+                     + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
+                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip

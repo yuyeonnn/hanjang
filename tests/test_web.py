@@ -152,7 +152,7 @@ def test_empty_good_or_concern_side_is_hidden():
     base = {"headline": "h", "summary": [], "sections": []}
     only_good = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "좋아요.", "refs": ["F1"]}],
                                 "concern": [], "good_title": "성장"}, "llm:x")
-    assert "긍정</span>" in only_good and "부정</span>" not in only_good
+    assert "좋게 볼 점</span>" in only_good and "주의해서 볼 점</span>" not in only_good
     old = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "없었어요.", "refs": ["F1"]}],
                           "concern": [{"text": "없었어요.", "refs": ["F1"]}], "good_title": "분류된 것 없음",
                           "concern_title": "분류된 것 없음"}, "llm:x")
@@ -548,3 +548,13 @@ def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     assert "내일 아침 7시에 첫 노트" in call(app, "/", cookie=ck)[2]
     js = call(app, "/stocks.js")[2]
     assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]
+
+
+def test_repeated_numbers_and_paragraphs():
+    seen: set = set()
+    a = web.sentence({"text": "매출이 줄었어요(9.0조원 · 7,921억원).", "refs": ["F1"]}, seen)
+    b = web.sentence({"text": "본업으로 남긴 돈도 줄었어요(9.0조원 · 7,921억원).", "refs": ["F2"]}, seen)
+    assert "9.0조원" in a and "9.0조원" not in b and b.startswith("본업으로 남긴 돈도 줄었어요.")
+    h = web.paras([{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "남겼어요.", "refs": ["F5"]},
+                   {"text": "빚이 적어요.", "refs": ["F3"]}], set())
+    assert h.count("<p") == 2  # 실적 한 문단 · 살림 한 문단
