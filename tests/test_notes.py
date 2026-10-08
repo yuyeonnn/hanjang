@@ -437,3 +437,11 @@ def test_quarter_industry_segment_facts():
     assert seg["rows"] == [{"name": "DS 부문", "revenue": 130_128_162_000_000, "op": 24_858_075_000_000, "revenue_prev": None, "op_prev": 15_094_486_000_000}]
     with pytest.raises(ValueError):  # 원문에 없는 값
         notes.check_segments({"unit": "백만원", "rows": [{"name": "A", "revenue": "1,111", "op": "", "revenue_prev": "", "op_prev": ""}]}, "2,222", 2025)
+
+
+def test_tidy_broken_joins():
+    assert notes.mend("매출은 4번째로 많았으로, 바닥이던 2021년년보다") == "매출은 4번째로 많았고, 바닥이던 2021년보다"
+    assert notes.mend("영업이익률이 2번째로 높았였어요.") == "영업이익률이 2번째로 높았어요."
+    assert notes.mend("국민연금이 주식을 줄였 보고를 했어요. 늘렸 보고했어요") == "국민연금이 주식을 줄였다는 보고를 했어요. 늘렸다고 보고했어요"
+    assert notes.mend("매출이 줄었어요(9.4% -9.4%).") == "매출이 줄었어요(-9.4%)."
+    assert notes.mend("매출이 늘었고 2025년에는") == "매출이 늘었고 2025년에는"
