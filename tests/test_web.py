@@ -51,7 +51,7 @@ def _login(app, nick="나"):
 
 def test_flow_add_open_note_and_log_view():
     app, con = _app()
-    assert "링크 받기" in call(app, "/")[2]  # 로그인 전엔 로그인 화면
+    assert "시작하기" in call(app, "/")[2]  # 로그인 전엔 로그인 화면
     ck = _login(app)
     st, h, _ = call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     assert st.startswith("303")
@@ -69,7 +69,7 @@ def test_unknown_stock_and_forged_cookie():
     ck = _login(app)
     _, h, _ = call(app, "/add", "POST", "q=" + quote("없는회사"), ck)
     assert "아직 노트가 없어요" in unquote(h["Location"])
-    assert "링크 받기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
+    assert "시작하기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
     assert web.safe_url("javascript:alert(1)") == "#"
 
 
@@ -170,7 +170,7 @@ def test_avatar_opens_profile_with_real_counts():
     st, _, body = call(app, "/me/settings", cookie=ck)
     assert st.startswith("200") and "me@x.kr" in body and "1 / 20개" in body and "탈퇴하기" in body
     assert "함께한 지" not in body and "읽은 노트" not in body and "답장" not in body
-    assert "로그인 링크 받기" in call(app, "/me")[2]  # 로그인 안 하면 로그인 화면
+    assert "시작하기" in call(app, "/me")[2]  # 로그인 안 하면 로그인 화면
 
 
 def test_mail_switch_and_delete_account():
@@ -223,9 +223,12 @@ def test_login_needs_consent_and_is_rate_limited(capsys):
     app, _ = _app()
     s, _, body = call(app, "/login", "POST", "email=a%40b.c")
     assert "동의해야" in body and "[메일" not in capsys.readouterr().err  # 동의 없이는 메일을 보내지 않는다
-    s, _, body = call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    s, h, _ = call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    assert s.startswith("303") and "s=" in h["Set-Cookie"] and "[메일" not in capsys.readouterr().err  # 처음 온 사람 — 메일 없이 바로 시작
+    ck = _login(app)  # 닉네임까지 만든 계정은 링크로만
+    s, _, body = call(app, "/login", "POST", "email=me%40x.kr&agree=1")
     assert s.startswith("200") and "[메일" in capsys.readouterr().err
-    s, _, body = call(app, "/login", "POST", "email=a%40b.c&agree=1")  # 1분 안에 또
+    s, _, body = call(app, "/login", "POST", "email=me%40x.kr&agree=1")  # 1분 안에 또
     assert s.startswith("429") and "[메일" not in capsys.readouterr().err
 
 
@@ -482,9 +485,7 @@ def test_invite_link_tags_trial_users_and_report_counts_weeks(capsys):
     app, con = _app()
     assert 'name="c" value="trial-1"' in call(app, "/?c=trial-1")[2]
     assert 'name="c"' not in call(app, "/?c=<x>")[2]  # 이상한 이름은 버린다
-    call(app, "/login", "POST", "email=a%40b.c&agree=1&c=trial-1")
-    assert "&c=trial-1" in capsys.readouterr().err  # 메일 속 링크
-    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-1")
+    call(app, "/login", "POST", "email=a%40b.c&agree=1&c=trial-1")  # 처음 — 바로 시작하며 묶인다
     call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-2")  # 처음 묶음 그대로
     assert con.execute("select cohort from users where email = 'a@b.c'").fetchone() == ("trial-1",)
 

@@ -657,16 +657,7 @@ class App:
             email = check_login(query.get("t", ""), self.secret, self.clock())
             if not email:
                 return "200 OK", [], self.simple("로그인", "링크가 만료됐거나 잘못됐어요. <a class='text-primary underline' href='/'>다시 받기</a>")
-            self.con.execute("insert or ignore into users (email, created_at) values (?, ?)",
-                             (email, datetime.now().isoformat()))  # fmt: skip
-            if COHORT.fullmatch(c := query.get("c", "")):  # 초대 링크로 온 사람 — 처음 한 번만 묶는다
-                self.con.execute("update users set cohort = ? where email = ? and cohort is null", (c, email))
-            self.con.commit()
-            (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
-            ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
-            if mail.base_url().startswith("https://"):
-                ck += "; Secure"
-            return self.see("/", ("Set-Cookie", ck))
+            return self.start(email, query.get("c", ""))
         if path == "/demo":  # 둘러보기 — 이메일 없이 공용 계정으로 (메일 보내기 전, 남에게 보여줄 때)
             return self.demo()
         if uid is None:
@@ -785,8 +776,8 @@ class App:
                  '<button aria-label="이메일 지우기" class="hidden absolute right-3 text-outline hover:text-on-surface p-1 transition-colors" id="clear-btn" onclick="clearInput()" type="button"><span class="material-symbols-outlined text-lg">cancel</span></button></div>'
                  '<label class="flex items-start gap-2 mt-3 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="agree" required type="checkbox" value="1">'
                  '<span>[필수] 이메일 수집·이용에 동의해요 — <a class="text-primary underline" href="/privacy" target="_blank">개인정보 처리방침</a></span></label>'
-                 f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">{"링크 다시 받기" if sent else "로그인 링크 받기"}</span><span class="material-symbols-outlined text-base">{"refresh" if sent else "arrow_forward"}</span></button>'
-                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">복잡한 비밀번호 설정 없이, 메일로 온 링크를 누르면 바로 연결돼요. 받는 개인정보는 이메일 하나뿐이에요.</p>'
+                 f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">{"링크 다시 받기" if sent else "시작하기"}</span><span class="material-symbols-outlined text-base">{"refresh" if sent else "arrow_forward"}</span></button>'
+                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">비밀번호 없이 바로 시작돼요. 이미 쓰던 분은 메일로 온 링크로 들어와요. 받는 개인정보는 이메일 하나뿐이에요.</p>'
                  '<a class="block text-center mt-2 font-label-regular text-label-regular text-primary underline underline-offset-2" href="/help/login">로그인 링크가 안 와요</a></form>'
                  + ('<a class="mt-3 w-full py-3 rounded-lg border border-outline-variant/70 text-on-surface font-body-reading-strong text-body-compact flex items-center justify-center gap-1" href="/demo">'
                     '<span class="material-symbols-outlined text-[18px]">visibility</span>로그인 없이 둘러보기</a>' if env().get("DEMO") == "1" else "")
@@ -817,11 +808,28 @@ class App:
             ck += "; Secure"
         return self.see("/", ("Set-Cookie", ck))
 
+    def start(self, email: str, cohort: str = ""):
+        """이 이메일로 로그인 — 계정이 없으면 만든다. 초대 링크 묶음은 처음 한 번만 붙는다."""
+        self.con.execute("insert or ignore into users (email, created_at) values (?, ?)", (email, datetime.now().isoformat()))
+        if COHORT.fullmatch(cohort):
+            self.con.execute("update users set cohort = ? where email = ? and cohort is null", (cohort, email))
+        self.con.commit()
+        (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
+        ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
+        if mail.base_url().startswith("https://"):
+            ck += "; Secure"
+        return self.see("/", ("Set-Cookie", ck))
+
     def login(self, email: str, agreed: bool = False, cohort: str = ""):
         if "@" not in email or len(email) > 200:
             return "200 OK", [], self.login_page()
         if not agreed:
-            return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 로그인 링크를 보낼 수 있어요.", cohort=cohort)
+            return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 시작할 수 있어요.", cohort=cohort)
+        # 처음 온 사람은 메일 확인 없이 바로 시작(닉네임 화면으로) — 메일함에 갔다 오는 번거로움을 없앤다 (사용자 10/8).
+        # 이미 닉네임까지 만든 계정은 링크로만 — 남의 이메일을 넣어 남의 종목을 보지 못하게. (쿠키가 90일이라 되돌아오는 일 자체가 드물다)
+        row = self.con.execute("select nickname from users where email = ?", (email,)).fetchone()
+        if not (row and row[0]):
+            return self.start(email, cohort)
         now = self.clock()
         times = [t for t in self.sent.get(email, []) if now - t < 3600]
         if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
