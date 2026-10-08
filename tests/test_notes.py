@@ -105,8 +105,9 @@ def test_slots_fill_numbers_and_direction_from_code():
     by = {f["id"]: f for f in fs}
     got = notes.fill({"text": "{F1.연도} 매출이 {F1.변화} {F1.방향}어요({F1.값}).", "refs": []}, by)
     assert got == {"text": "2025년 매출이 +10.9% 늘었어요(333.6조원).", "refs": ["F1"]}  # 근거도 저절로
-    with pytest.raises(ValueError, match="빈칸으로만"):  # AI 가 숫자를 직접 쓰면 탈락
-        notes.fill({"text": "매출이 10.9% 늘었어요.", "refs": ["F1"]}, by)
+    assert notes.fill({"text": "매출이 10.9% 늘었어요.", "refs": ["F1"]}, by)  # 근거 사실에 그대로 있는 숫자는 직접 써도 된다
+    with pytest.raises(ValueError, match="빈칸으로만"):  # 다른 사실의 숫자를 끌어오면 탈락
+        notes.fill({"text": "매출이 33.2% 늘었어요.", "refs": ["F1"]}, by)
     with pytest.raises(ValueError, match="없는 빈칸"):
         notes.fill({"text": "{F1.주가}예요.", "refs": ["F1"]}, by)
 
@@ -236,7 +237,7 @@ def test_insider_facts_count_and_never_say_buy():
     fs = {f["id"]: f for f in notes.insider_facts(con, "005930", date(2026, 10, 7))}
     assert fs["I1"]["text"] == "최근 90일 임원·주요주주 지분 보고 3건 — 보유 주식을 늘린 보고 2건(합계 1,500주) · 줄인 보고 1건(합계 300주)"
     assert fs["I1"]["url"].endswith("r3")  # 가장 최근 보고로 잇는다
-    assert fs["I2"]["text"] == "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%, 직전 보고보다 보유 주식 240,772주 줄임"
+    assert fs["I2"]["text"] == "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%, 직전 보고보다 보유 주식 24만 772주 줄임"
     assert fs["I2"]["slots"]["방향"] == "줄였"
     assert all(f["tone"] == 0 and not notes.FORBIDDEN.search(f["text"]) for f in fs.values())
     assert any(f["id"] == "I1" for f in notes.facts(con, "005930", date(2026, 10, 7)))
@@ -325,12 +326,12 @@ def test_article_check_rules():
     from hanjang import articles
 
     fs = [{"id": "E1", "text": "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%", "url": "u", "tone": 0,
-           "doc": "보유주식 등의 수 | 12,345,678 | 보고사유 | 단순 변동"},
+           "doc": "보유주식 등의 수 | 12,345,678 | 보고사유 | 단순 변동 || 큰 숫자 읽기: 12,345,678 → 1,234만 5,678"},
           {"id": "F1", "text": "2025년 매출 10조원", "url": "u", "tone": 1}]  # fmt: skip
     s = lambda t, r=("E1",): {"text": t, "refs": list(r)}  # noqa: E731
     long = "국민연금공단이 이 회사 주식을 5% 넘게 가지고 있다고 다시 알렸어요. " * 26
     ok = {"title": "국민연금, 보유 주식을 늘렸어요", "paragraphs": [
-        s("9월 15일에 국민연금공단이 보고했어요."), s(long), s("보유 주식은 12,345,678주예요."), s("2025년 매출은 10조원이에요.", ("F1",))]}
+        s("9월 15일에 국민연금공단이 보고했어요."), s(long), s("보유 주식은 1,234만 5,678주예요."), s("2025년 매출은 10조원이에요.", ("F1",))]}
     assert articles.check(ok | {"title": "국민연금, 7.10% 보유"}, fs)  # 원문에 있는 숫자는 제목에도
     assert articles.check(ok, fs)["paragraphs"][0]["text"] == "9월 15일에 국민연금공단이 보고했어요."  # 원문(doc) 숫자는 그대로 옮겨도 된다
     for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}, {"title": "국민연금, 99% 늘렸다"},
@@ -351,3 +352,59 @@ def test_quoting_a_news_title_is_rejected():
 def test_unit_after_slot_is_not_doubled():
     by = {"I1": {"id": "I1", "text": "x", "tone": 0, "url": "u", "slots": {"늘린보고": "765건", "줄인보고": "41건"}}}
     assert notes.fill({"text": "늘린 보고가 {I1.늘린보고}건, 줄인 보고가 {I1.줄인보고} 있었어요.", "refs": ["I1"]}, by)["text"] == "늘린 보고가 765건, 줄인 보고가 41건 있었어요."
+
+
+def test_story_facts_say_where_this_year_stands():
+    fin = [(2025, 300, 30, 0, 0, 0, "r", "CFS"), (2024, 250, 10, 0, 0, 0, "r", "CFS"), (2023, 200, -5, 0, 0, 0, "r", "CFS")]
+    f5, f6 = notes.story_facts(fin, "u", "2025년")
+    assert f5["slots"] == {"연도": "2025년", "비율": "10.0%", "백원당": "10원", "전년비율": "4.0%", "전년연도": "2024년"}
+    assert f6["slots"]["매출자리"] == "가장 많았" and f6["slots"]["이익바닥해"] == "2023년" and f6["slots"]["기간"] == "2023~2025년"
+
+
+def test_numbers_copied_from_cited_fact_are_ok_but_made_up_ones_are_not():
+    by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
+    f1 = by["F1"]["slots"]["값"]
+    assert notes.fill({"text": f"매출은 {f1}이었어요.", "refs": ["F1"]}, by)  # 근거 사실에 그대로 있는 숫자
+    assert notes.fill({"text": "100원어치 팔면 남는 돈이 늘었어요.", "refs": ["F1"]}, by)  # 셈의 단위
+    with pytest.raises(ValueError, match="빈칸으로만"):
+        notes.fill({"text": "매출은 999조원이었어요.", "refs": ["F1"]}, by)  # 지어낸 숫자
+
+
+def test_code_note_reads_like_sentences_and_titles_are_tidy():
+    assert notes.tidy("[기재정정]연결재무제표기준영업(잠정)실적(공정공시)") == "연결재무제표기준영업(잠정)실적"
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    text = " ".join(x["text"] for sec in notes.code_note(fs)["sections"] for x in sec["sentences"])
+    assert "무슨 일:" not in text and "[기재정정]" not in text and text.count("요.") >= 2
+
+
+def test_numbers_read_like_people_read_them():
+    assert notes.korean_num(968091) == "96만 8,091" and notes.korean_num(12345678) == "1,234만 5,678"
+    assert notes.korean_num(164500200000) == "1,645억 20만" and notes.korean_num(1234) == "1,234" and notes.korean_num(100000) == "10만"
+    assert notes.LONGNUM.search("발행가 164,500,200,000원") and not notes.LONGNUM.search("1,645억 원 · 96만 8,091주 · 8,622억원")
+
+
+def test_one_bad_sentence_is_dropped_not_the_whole_note():
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    ok = [{"text": "{F1.연도} 매출이 {F1.방향}어요.", "refs": ["F1"]}] * 4
+    j = {"headline": "많이 팔았어요.", "summary": ok, "sections": [{"title": "회사 사정은 어떤가요?", "sentences": ok + [{"text": "매출이 999조원이에요.", "refs": ["F1"]}]}],
+         "good": [{"text": f["text"], "refs": [f["id"]]} for f in fs if f["tone"] == 1][:1],
+         "concern": [{"text": f["text"], "refs": [f["id"]]} for f in fs if f["tone"] == -1][:1], "good_title": "좋은 점", "concern_title": "걱정되는 점"}
+    note = notes.fill_note(j, fs)
+    assert len(note["sections"][0]["sentences"]) == 4  # 지어낸 숫자 문장만 빠졌다
+
+
+def test_joins_read_naturally():
+    by = {"F6": {"id": "F6", "text": "최근 5년 가운데", "tone": 0, "url": "u", "slots": {"매출자리": "가장 많았", "기간": "최근 5년"}},
+          "F5": {"id": "F5", "text": "2024년 10.9%", "tone": 0, "url": "u", "slots": {"전년비율": "10.9%"}},
+          "F1": {"id": "F1", "text": "2025년 매출 10조원", "tone": 1, "url": "u", "slots": {"연도": "2025년"}}}
+    assert notes.fill({"text": "매출이 {F6.매출자리}인 해예요.", "refs": ["F6"]}, by)["text"] == "매출이 가장 많았던 해예요."
+    assert notes.fill({"text": "최근 {F6.기간} 동안이에요.", "refs": ["F6"]}, by)["text"] == "최근 5년 동안이에요."
+    assert notes.fill({"text": "전년엔 {F5.전년비율}이었으니 세졌어요.", "refs": ["F5"]}, by)["text"] == "전년엔 10.9%였으니 세졌어요."
+    assert notes.fill({"text": "매출은 최근 5년 중 가장 많았어요.", "refs": ["F1"]}, by)  # 작은 정수는 다른 사실에서 와도 된다
+
+
+def test_hidden_arithmetic_words_are_caught():
+    for t in ("빚이 자기 돈보다 두 배 넘게 많아요", "절반이 반도체예요", "3분의 1 수준이에요", "2배 늘었어요", "삼분의 일이에요"):
+        assert notes.CALC.search(t), t
+    for t in ("배당을 했어요", "배를 만드는 회사예요", "선박 2척을 수주했어요"):
+        assert not notes.CALC.search(t), t

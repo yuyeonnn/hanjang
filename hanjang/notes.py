@@ -70,6 +70,31 @@ TITLE_PLAIN = (
 )
 
 
+def korean_num(n: int) -> str:
+    """사람이 읽는 숫자 — 968091 → 「96만 8,091」 · 12345678 → 「1,234만 5,678」 · 1234 → 「1,234」. 정확한 값 그대로(반올림 없음)."""
+    sign, n = ("-" if n < 0 else ""), abs(n)
+    if n < 10_000:
+        return f"{sign}{n:,}"
+    man, rest = divmod(n, 10_000)
+    eok, man = divmod(man, 10_000)
+    parts = ([f"{eok:,}억"] if eok else []) + ([f"{man:,}만"] if man else []) + ([f"{rest:,}"] if rest else [])
+    return sign + " ".join(parts)
+
+
+# AI 가 몰래 한 셈 — 「두 배 넘게」「절반」「3분의 1」. 숫자 검사를 피해 가는 말이라 따로 막는다 (계산은 코드만, 불변식 2)
+CALC = re.compile(r"(?<![가-힣])(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|몇|수십|\d+)\s?배|절반|(\d+|[이삼사오육칠팔구십])\s?분의\s?(\d+|[일이삼사오육칠팔구])")
+
+# 자릿수가 긴 날숫자(「164,500,200,000」) — 사람이 읽기 힘들다. 글에 나오면 탈락 (사용자 10/8)
+LONGNUM = re.compile(r"(?<![\d,.])\d{1,3}(?:,\d{3}){2,}(?![\d,])")
+
+
+def tidy(title: str) -> str:
+    """공시 제목 → 사람이 읽을 이름 — 「[기재정정]」 같은 머리표, 「(공정공시)」 같은 서식 꼬리표, 띄어쓰기 없는 붙은 말을 정리."""
+    t = re.sub(r"^\s*\[[^\]]*\]\s*", "", title)
+    t = re.sub(r"\((공정공시|안내공시|자율공시|[^()]*주요경영사항|\d{4}년\s*\d분기)\)", "", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def plain(title: str) -> str:
     t = re.sub(r"[\s·ㆍ・]", "", title)
     return next((s for pat, s in TITLE_PLAIN if re.search(pat, t)), "")
@@ -251,12 +276,45 @@ def trend(cur: int, prev: int | None) -> tuple[int, str, str]:
     return -1, "적자가 이어졌", "적자 지속"
 
 
+def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
+    """「회사 사정」을 이야기로 쓰게 하는 재료 — 지표를 늘어놓지 않고 「지금 어떤 상황인지」 말하려면 필요하다 (사용자 10/8).
+    F5 = 남기는 정도(100원 팔아 본업으로 몇 원) · F6 = 몇 년 흐름 속 올해의 자리. 계산은 코드가, 말은 AI 가. tone 은 중립(좋다·나쁘다는 F1~F4 가 정한다)."""
+    out = []
+    y, rev, oi = fin[0][0], fin[0][1], fin[0][2]
+    if rev and oi is not None and rev > 0:
+        m = oi / rev * 100
+        slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": f"{round(m)}원"}
+        prev = fin[1] if len(fin) > 1 else None
+        if prev and prev[1] and prev[2] is not None and prev[1] > 0:
+            slots |= {"전년비율": f"{prev[2] / prev[1] * 100:.1f}%", "전년연도": f"{prev[0]}년"}
+        out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100원어치 팔아 본업으로 {slots['백원당']}을 남김"
+                    + (f" ({slots['전년연도']} {slots['전년비율']})" if "전년비율" in slots else ""), "url": url, "tone": 0, "slots": slots})  # fmt: skip
+    rows = [r for r in fin if r[1] is not None or r[2] is not None]
+    if len(rows) >= 3:
+        span = f"{rows[-1][0]}~{rows[0][0]}년"
+        slots = {"기간": span, "햇수": f"{len(rows)}년"}
+        for key, idx, name in (("매출", 1, "매출"), ("이익", 2, "영업이익")):
+            vals = [(r[0], r[idx]) for r in rows if r[idx] is not None]
+            if len(vals) < 3:
+                continue
+            rank = sorted((v for _, v in vals), reverse=True).index(vals[0][1]) + 1
+            low_y, low_v = min(vals, key=lambda t: t[1])
+            slots[f"{key}자리"] = "가장 많았" if rank == 1 else "가장 적었" if rank == len(vals) else f"{rank}번째로 많았"
+            if low_y != y:
+                slots |= {f"{key}바닥해": f"{low_y}년", f"{key}바닥값": won(low_v)}
+        text = f"최근 {slots['햇수']}({span}) 가운데 {yy}" + "".join(
+            f" {name}은 {slots[k + '자리']}음" + (f"(가장 적었던 해 {slots[k + '바닥해']} {slots[k + '바닥값']})" if k + "바닥해" in slots else "")
+            for k, name in (("매출", "매출"), ("이익", "영업이익")) if k + "자리" in slots)  # fmt: skip
+        out.append({"id": "F6", "text": text, "url": url, "tone": 0, "slots": slots})
+    return out
+
+
 def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
     out = []
     fin = con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities, rcept_no,"
-                      " basis from financials where ticker = ? order by fiscal_year desc limit 2", (ticker,)).fetchall()  # fmt: skip
+                      " basis from financials where ticker = ? order by fiscal_year desc limit 5", (ticker,)).fetchall()  # fmt: skip
     if fin:
         y, rev, oi, ni, eq, li, rno, basis = fin[0]
         p = fin[1] if len(fin) > 1 else (None,) * 8
@@ -286,6 +344,13 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
                         "tone": 1 if ni / eq * 100 >= ROE_GOOD else -1 if ni < 0 else 0,
                         "slots": {"연도": yy, "비율": r, "순이익": won(ni), "자기돈": won(eq)}})  # fmt: skip
+        out += story_facts(fin, url, yy)
+    biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
+    if biz and (segs := json.loads(biz[0]).get("segments")):  # 무엇으로 버나 — 사업보고서의 부문별 매출 비중 (큰 것 둘)
+        top = sorted(segs, key=lambda x: -float(x["share"].rstrip("%") or 0))[:2]
+        slots = {f"{o}부문": x["name"].split(" · ")[-1] for o, x in zip(("첫", "둘째"), top)} | {f"{o}비중": x["share"] for o, x in zip(("첫", "둘째"), top)}
+        out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": DART.format(biz[1]),
+                    "tone": 0, "slots": slots})  # fmt: skip
     evs = con.execute("select rcept_no, date, title, code, direction from disclosures"
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
@@ -295,8 +360,8 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         tone = {1: " — 주주에게 반가운 쪽으로 분류", -1: " — 주주에게 걸리는 쪽으로 분류"}.get(dr, "")
         day = f"{d.month}월 {d.day}일"
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
-        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{what}{tone}", "url": DART.format(rno),
-                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
+        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": DART.format(rno),
+                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"}})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
                        " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터
@@ -325,7 +390,7 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
         slots, parts = {"기간": span, "건수": f"{len(ex)}건"}, []
         for key, word, side in (("늘린", "늘린", [r for r in ex if r[4] > 0]), ("줄인", "줄인", [r for r in ex if r[4] < 0])):
             if side:
-                n, total = f"{len(side)}건", f"{abs(sum(r[4] for r in side)):,}주"
+                n, total = f"{len(side)}건", f"{korean_num(abs(sum(r[4] for r in side)))}주"
                 slots |= {f"{key}보고": n, f"{key}주식": total}
                 parts.append(f"{word} 보고 {n}(합계 {total})")
         out.append({"id": "I1", "text": f"{span} 임원·주요주주 지분 보고 {len(ex)}건 — 보유 주식을 " + " · ".join(parts),
@@ -333,10 +398,10 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
     for k, (rno, d, _, who, chg, rate) in enumerate([r for r in rows if r[2] == "5%"][:2], len(out) + 1):
         d = date.fromisoformat(d)
         day = f"{d.month}월 {d.day}일"
-        way = f", 직전 보고보다 보유 주식 {abs(chg):,}주 {'늘림' if chg > 0 else '줄임'}" if chg else ""
+        way = f", 직전 보고보다 보유 주식 {korean_num(abs(chg))}주 {'늘림' if chg > 0 else '줄임'}" if chg else ""
         slots = {"날짜": day, "누가": who} | ({"비율": f"{rate:.2f}%"} if rate is not None else {})
         if chg:
-            slots |= {"주식": f"{abs(chg):,}주", "방향": "늘렸" if chg > 0 else "줄였"}
+            slots |= {"주식": f"{korean_num(abs(chg))}주", "방향": "늘렸" if chg > 0 else "줄였"}
         out.append({"id": f"I{k}", "text": f"{day} {who}의 5% 이상 대량보유 보고 — 보유 비율 {rate:.2f}%{way}" if rate is not None
                     else f"{day} {who}의 5% 이상 대량보유 보고{way}", "url": DART.format(rno), "tone": 0, "slots": slots})  # fmt: skip
     return out
@@ -406,7 +471,7 @@ def dedupe(text: str) -> str:
 
 def fill(sent: dict, by: dict[str, dict]) -> dict:
     """AI 문장의 빈칸을 코드 값으로 채운다. 쓴 빈칸의 사실은 근거(refs)에 저절로 들어간다.
-    검사: ① 빈칸 밖에 숫자 금지 ② 없는 빈칸 금지 ③ 빈칸 없이 쓴 방향 낱말이 사실과 반대면 탈락."""
+    검사: ① 빈칸 밖 숫자는 근거 사실에 글자 그대로 있을 때만 ② 없는 빈칸 금지 ③ 빈칸 없이 쓴 방향 낱말이 사실과 반대면 탈락."""
     raw, refs = sent["text"], list(dict.fromkeys(sent["refs"]))
     # 연도(「2025년」)만은 직접 써도 된다 — 사실의 연도와 글자 그대로 같을 때만. 다른 숫자는 전부 빈칸으로
     years = {f["slots"]["연도"] for f in by.values() if "연도" in f.get("slots", {})}
@@ -424,9 +489,14 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         bare = re.sub(r"5\s*%", "", bare)
     for mth in months:
         bare = re.sub(rf"(?<!\d){mth}", "", bare)
-    # 소식(N)을 근거에 둔 문장은 그 소식의 제목·요약문에 적힌 숫자를 그대로 옮겨도 된다 (토큰 대조) — 공시(D)와 함께 묶어도
-    src = set().union(*(numbers(by[r]["text"]) for r in refs if r.startswith("N") and r in by)) if refs else set()
-    if src and numbers(bare) <= src:
+    bare = re.sub(r"100원(어치|당)?", "", bare)  # 「100원어치 팔아 13원 남겨요」 — 셈의 단위지 사실 숫자가 아니다
+    # 근거로 든 사실(refs·쓴 빈칸)에 글자 그대로 적힌 숫자는 빈칸 없이 옮겨도 된다 (토큰 대조) — 빈칸만 고집하면
+    # 맞는 숫자도 버려져 AI 글 대신 사실 목록이 나간다 (사용자 10/8: 「무슨 일: …」은 글이 아니다)
+    cited = set(refs) | {fid for fid, _ in SLOT.findall(raw)}
+    src = set().union(*(numbers(by[r]["text"]) for r in cited if r in by)) if cited else set()
+    # 기간·횟수 같은 작은 정수(「최근 5년」「3건」)는 어느 사실에 있든 된다 — 큰 금액·비율은 근거 사실에 있어야만
+    small = {t for f in by.values() for t in numbers(f["text"]) if t.isdigit() and int(t) < 100}
+    if numbers(bare) <= src | small:
         bare = re.sub(r"\d", "", bare)
     if re.search(r"\d", bare):
         raise ValueError(f"숫자는 빈칸으로만: {raw!r}")
@@ -446,7 +516,11 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
-    text = re.sub(r"(\d)(건|주|명|개|원|%)\2", r"\1\2", text)  # 빈칸 값에 단위가 있는데 AI 가 또 붙인 것 — 「765건건」 → 「765건」
+    text = re.sub(r"(\d)(건|주|명|개|원|%)\2", r"\1\2", text)
+    # 빈칸을 끼우며 생기는 어색한 이음 — 「가장 많았인」「최근 최근 90일」「10.9%이었으니」
+    text = re.sub(r"(았|었)인(?=\s)", r"\1던", text)
+    text = re.sub(r"(최근|약|총) \1(?=\s)", r"\1", text)
+    text = re.sub(r"%이(었|에요)", lambda m: "%" + {"었": "였", "에요": "예요"}[m[1]], text)  # 빈칸 값에 단위가 있는데 AI 가 또 붙인 것 — 「765건건」 → 「765건」
     if re.search(r"(늘었|줄었|돌아섰|이어졌)(?![어고는지으다던기을거네죠습])", text) or re.search(r"(늘었|줄었)\S*\s*(늘었|줄었|증가|감소|성장)", text):
         raise ValueError(f"방향 낱말이 어색하게 이어짐: {text!r}")  # 「늘었을 때」「늘었거든요」는 괜찮다
     text = text.replace("「「", "「").replace("」」", "」")
@@ -462,10 +536,6 @@ def check_note(note: dict, fs: list[dict]) -> dict:
     """빈칸을 채운 글 전체 검사 — 하나라도 어기면 ValueError (글째 버린다).
     ① 문장마다 있는 사실 id ② 사실에 없는 숫자 금지(빈칸을 채운 뒤에도 한 번 더) ③ 금지어 ④ 예측 말투
     ⑤ 좋게 본 것은 +1 사실만, 걱정되는 것은 −1 사실만 근거로 — 그런 사실이 있는데 비워 두면 탈락."""
-    ids = {f["id"] for f in fs}
-    allowed = set().union(*(numbers(f["text"] + " " + f.get("body", "")) for f in fs)) if fs else set()
-    quoted = [f["text"] for f in fs]
-    n_titles = [t.strip("「」") for f in fs if f["id"].startswith("N") and (t := f.get("slots", {}).get("제목"))]
     for key, sign in (("good", 1), ("concern", -1)):
         want = {f["id"] for f in fs if f["tone"] == sign}
         got = note.get(key) or []
@@ -477,20 +547,33 @@ def check_note(note: dict, fs: list[dict]) -> dict:
              + (note.get("good") or []) + (note.get("concern") or []))  # fmt: skip
     if not isinstance(note["headline"], str) or not sents:
         raise ValueError("빈 노트")
-    for s in [{"text": note["headline"], "refs": list(ids)}] + sents:
-        text, refs = s["text"], s["refs"]
-        if not isinstance(text, str) or not refs or not set(refs) <= ids:
-            raise ValueError(f"근거 없는 문장: {text!r}")
-        if bad := numbers(text) - allowed:
-            raise ValueError(f"사실에 없는 숫자 {bad}: {text!r}")
-        if any(f"「{t}」" in text for t in n_titles):  # 소식 제목을 따옴표로 베껴 넣은 문장 — 제목 대신 그 일을 말해야 한다
-            raise ValueError(f"소식 제목 인용: {text!r}")
-        bare = re.sub(r"「([^」]*)」", lambda m: "" if any(m[1] in q for q in quoted) else m[0], text)
-        if FORBIDDEN.search(bare):
-            raise ValueError(f"금지어: {text!r}")
-        if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
-            raise ValueError(f"예측 말투: {text!r}")
+    for s in [{"text": note["headline"], "refs": [f["id"] for f in fs]}] + sents:
+        check_sentence(s, fs)
     return note
+
+
+def check_sentence(s: dict, fs: list[dict]) -> None:
+    """문장 하나 — ① 사실 id 근거 ② 사실에 없는 숫자 금지 ③ 읽기 힘든 긴 숫자 금지 ④ 소식 제목 인용 ⑤ 금지어 ⑥ 예측 말투. 어기면 ValueError."""
+    ids = {f["id"] for f in fs}
+    text, refs = s["text"], s["refs"]
+    if not isinstance(text, str) or not refs or not set(refs) <= ids:
+        raise ValueError(f"근거 없는 문장: {text!r}")
+    allowed = set().union(*(numbers(f["text"] + " " + f.get("body", "")) for f in fs))
+    if bad := numbers(text) - allowed:
+        raise ValueError(f"사실에 없는 숫자 {bad}: {text!r}")
+    if LONGNUM.search(text):
+        raise ValueError(f"읽기 힘든 숫자: {text!r}")
+    if CALC.search(text):
+        raise ValueError(f"AI 가 한 셈: {text!r}")
+    n_titles = [t.strip("「」") for f in fs if f["id"].startswith("N") and (t := f.get("slots", {}).get("제목"))]
+    if any(f"「{t}」" in text for t in n_titles):  # 소식 제목을 따옴표로 베껴 넣은 문장 — 제목 대신 그 일을 말해야 한다
+        raise ValueError(f"소식 제목 인용: {text!r}")
+    quoted = [f["text"] for f in fs]
+    bare = re.sub(r"「([^」]*)」", lambda m: "" if any(m[1] in q for q in quoted) else m[0], text)
+    if FORBIDDEN.search(bare):
+        raise ValueError(f"금지어: {text!r}")
+    if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
+        raise ValueError(f"예측 말투: {text!r}")
 
 
 def short_title(t: str, what: str) -> str:
@@ -504,13 +587,32 @@ def short_title(t: str, what: str) -> str:
 def fill_note(j: dict, fs: list[dict]) -> dict:
     """AI 응답(빈칸 글) → 채운 노트 → 검사. 빈칸은 good/concern 칸 검사보다 먼저 채운다(근거가 늘 수 있다)."""
     by = {f["id"]: f for f in fs}
-    head = fill({"text": j["headline"], "refs": []}, by)["text"]
-    note = {"headline": head,
-            "summary": [fill(s, by) for s in j["summary"]],
-            "sections": [{"title": sec["title"], "sentences": [fill(s, by) for s in sec["sentences"]]}
-                         for sec in j["sections"] if sec["sentences"]],
-            "good": [fill(s, by) for s in j["good"]],
-            "concern": [fill(s, by) for s in j["concern"]]}  # fmt: skip
+    total, dropped = 0, []
+
+    def keep(xs):
+        """틀린 문장만 빼고 나머지는 살린다 — 한 문장 때문에 글 전체가 사실 목록으로 바뀌지 않게 (사용자 10/8)."""
+        nonlocal total
+        out = []
+        for x in xs:
+            total += 1
+            try:
+                y = fill(x, by)
+                check_sentence(y, fs)
+                out.append(y)
+            except ValueError as err:
+                dropped.append(str(err))
+        return out
+
+    try:
+        head = fill({"text": j["headline"], "refs": []}, by)["text"]
+        check_sentence({"text": head, "refs": list(by)}, fs)
+    except ValueError:
+        head = code_headline(fs)
+    note = {"headline": head, "summary": keep(j["summary"]),
+            "sections": [{"title": sec["title"], "sentences": got} for sec in j["sections"] if (got := keep(sec["sentences"]))],
+            "good": keep(j["good"]), "concern": keep(j["concern"])}  # fmt: skip
+    if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
+        raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
     if note["good"]:
         note["good_title"] = short_title(j["good_title"], "긍정")
     if note["concern"]:
@@ -550,12 +652,42 @@ def code_headline(fs: list[dict]) -> str:
     return fs[0]["text"] + "."
 
 
+def say(f: dict) -> str:
+    """사실 하나 → 사람이 읽을 해요체 한 문장 (코드 대체 글용). 숫자는 사실의 빈칸 값 그대로."""
+    s, i = f.get("slots", {}), f["id"]
+    if i in ("F1", "F2") and "값" in s:
+        what = "매출" if i == "F1" else "영업이익"
+        if "방향" in s and "폭" in s:
+            return f"{s['연도']} {what}은 {s['값']}으로, 전년보다 {s['폭']} {s['방향']}어요."
+        return f"{s['연도']} {what}은 {s['값']}이었어요."
+    if i == "F3" and "비율" in s:
+        return f"{s['연도']} 말 빚은 {s['빚']}, 자기 돈은 {s['자기돈']}이에요(부채비율 {s['비율']})."
+    if i == "F4" and "비율" in s:
+        return f"자기 돈으로 얼마나 벌었는지 보는 ROE는 {s['비율']}였어요({s['연도']} 순이익 {s['순이익']})."
+    if i == "F5":
+        return f"100원어치 팔면 본업으로 {s['백원당']}을 남긴 셈이에요(영업이익률 {s['비율']})."
+    if i == "F7" and "첫부문" in s:
+        return f"돈은 주로 {s['첫부문']}에서 벌어요(매출의 {s['첫비중']})."
+    if i[0] == "D" and "날짜" in s:
+        what = re.search(r"무슨 일: ([^—]+?)(?: — |$)", f["text"])
+        return f"{s['날짜']}에는 {what[1].rstrip('.')}." if what else f"{s['날짜']}에 {s['종류']} 공시가 나왔어요."
+    if i[0] == "N" and "매체" in s:
+        return f"{s['날짜']}에는 {s['매체']}가 {s['제목']} 소식을 전했어요."
+    return f["text"].rstrip(".") + "."
+
+
 def code_note(fs: list[dict]) -> dict:
-    """AI 글이 검사에서 떨어졌을 때 — 사실 목록을 그대로 문장으로 (PRD §4.3)."""
-    groups = zip(TITLES, ("F", ("D", "N"), "I"))
-    secs = [{"title": t, "sentences": [{"text": f["text"] + ".", "refs": [f["id"]]}
-                                       for f in fs if f["id"].startswith(p)]} for t, p in groups]  # fmt: skip
-    side = {k: [{"text": f["text"] + ".", "refs": [f["id"]]} for f in fs if f["tone"] == sign]
+    """AI 글이 검사에서 떨어졌을 때 — 사실마다 해요체 한 문장으로 (PRD §4.3). 같은 날 같은 뜻의 공시는 한 번만."""
+    seen: set[str] = set()
+
+    def keep(f):
+        t = say(f)
+        return not (t in seen or seen.add(t))
+
+    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7"), ("D", "N"), "I"))
+    secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
+                                       for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
+    side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]
             for k, sign in (("good", 1), ("concern", -1))}  # fmt: skip
     return {"headline": code_headline(fs), "summary": [],
             "sections": [s for s in secs if s["sentences"]], **side}
