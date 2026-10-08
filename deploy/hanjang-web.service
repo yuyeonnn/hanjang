@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 User=hanjang
 WorkingDirectory=/srv/hanjang
-Environment=TZ=Asia/Seoul
+Environment=TZ=Asia/Seoul PYTHONUNBUFFERED=1
 ExecStart=/home/hanjang/.local/bin/uv run --frozen python -m hanjang.web
 Restart=always
 RestartSec=5

@@ -4,7 +4,7 @@
 # 도메인이 없으면 IP 로 된 무료 주소: 34-64-1-2.sslip.io
 set -eu
 DOMAIN="$1"
-REPO=https://github.com/yuyeonnn/hanjang.git
+REPO=git@github.com:yuyeonnn/hanjang.git
 UV=/home/hanjang/.local/bin/uv
 
 # 80·443 을 이미 다른 프로그램(caddy 말고)이 쓰면 멈춘다 — 기존 서비스를 건드리지 않으려고
@@ -13,6 +13,13 @@ if ss -ltnp | grep -E ':(80|443)\b' | grep -vq caddy; then
 fi
 if ss -ltn | grep -q ':8000\b' && ! systemctl is-active -q hanjang-web; then
 	echo "8000 을 다른 프로그램이 쓰고 있어요"; exit 1
+fi
+
+command -v git >/dev/null || { apt-get update && apt-get install -y git curl; }
+# 메모리 1GB 서버 — 설치·노트 만들 때 모자라지 않게 스왑 1GB
+if ! swapon --show | grep -q .; then
+	fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+	echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
 id hanjang >/dev/null 2>&1 || adduser --disabled-password --gecos "" hanjang
