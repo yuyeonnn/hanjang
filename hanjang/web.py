@@ -650,9 +650,12 @@ class App:
         return "303 See Other", [("Location", to), *headers], ""
 
     def log(self, uid: int, page_: str, ticker: str | None = None) -> None:
-        self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
-                         (uid, page_, ticker, datetime.now().isoformat()))  # fmt: skip
-        self.con.commit()
+        try:
+            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
+                             (uid, page_, ticker, datetime.now().isoformat()))  # fmt: skip
+            self.con.commit()
+        except sqlite3.OperationalError:  # DB 가 잠깐 잠겨도 화면은 보여 준다 — 기록 한 줄을 잃는 쪽이 낫다
+            self.con.rollback()
 
     def initial(self, uid: int) -> str:
         """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 이메일 첫 글자."""

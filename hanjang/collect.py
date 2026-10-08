@@ -64,6 +64,8 @@ def save_news(con: sqlite3.Connection, picked: list[tuple[str, str]], today: dat
 
 def main(today: date) -> None:
     con = db.connect()
+    # 문장마다 바로 저장 — 받기는 몇 분 걸려서, 끝에 한 번 저장하면 그동안 화면이 DB 에 못 써서 오류가 난다 (2026-10-08 사이트 500)
+    con.isolation_level = None
     dart = sources.Dart()
     picked = sources.kospi_universe()
     tickers = [t for t, _ in picked]
