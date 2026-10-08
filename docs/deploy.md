@@ -64,6 +64,7 @@ sudo systemctl restart hanjang-web
 |---|---|
 | 화면 서버 로그 (로그인 링크 요청 등) | `journalctl -u hanjang-web -f` |
 | 매일 실행 결과 (노트 몇 장 · 비용) | `journalctl -u hanjang-daily -n 50` |
+| AI 비용 (오늘 · 이번 달 · 한 달 예상 · 일감별) | `cd /srv/hanjang && sudo -u hanjang /home/hanjang/.local/bin/uv run python -m hanjang.cost` |
 | 시험 판정 숫자 (주차별 재방문 · 돈 내고도 보겠다) | `cd /srv/hanjang && sudo -u hanjang /home/hanjang/.local/bin/uv run python -m hanjang.trial trial-1` |
 | 백업 (최근 14일) | `ls /srv/hanjang/data/backup` |
 | 백업에서 되돌리기 | `sudo systemctl stop hanjang-web && cp data/backup/hanjang-YYYYMMDD.db data/hanjang.db && sudo systemctl start hanjang-web` |
