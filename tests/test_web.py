@@ -479,3 +479,32 @@ def test_daily_failure_mails_the_operator(monkeypatch):
     except RuntimeError as err:
         daily.alert(err)
     assert sent[0][0] == "op@x.kr" and "RuntimeError" in sent[0][1] and "database is locked" in sent[0][2]
+
+
+def test_invite_link_tags_trial_users_and_report_counts_weeks(capsys):
+    """초대 링크 /?c=trial-1 → 로그인 링크에 묶음이 따라가 가입 때 cohort 가 된다. 판정은 자기 종목 노트를 연 사람만 센다."""
+    from datetime import date
+
+    from hanjang import trial
+
+    app, con = _app()
+    assert 'name="c" value="trial-1"' in call(app, "/?c=trial-1")[2]
+    assert 'name="c"' not in call(app, "/?c=<x>")[2]  # 이상한 이름은 버린다
+    call(app, "/login", "POST", "email=a%40b.c&agree=1&c=trial-1")
+    assert "&c=trial-1" in capsys.readouterr().err  # 메일 속 링크
+    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-1")
+    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-2")  # 처음 묶음 그대로
+    assert con.execute("select cohort from users where email = 'a@b.c'").fetchone() == ("trial-1",)
+
+    con.execute("update users set created_at = '2026-11-17T09:00' where email = 'a@b.c'")
+    (u,) = con.execute("select id from users where email = 'a@b.c'").fetchone()
+    con.execute("insert into holdings values (?, '005930', '2026-11-17')", (u,))
+    con.executemany("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
+                    [(u, "note", "005930", "2026-11-18T10:00"), (u, "note", "005930", "2026-11-19T10:00"),
+                     (u, "cards", None, "2026-11-25T10:00")])  # 2주째는 카드만 — 안 센다  # fmt: skip
+    con.execute("insert into feedback (user_id, ticker, week, helpful, would_pay, at) values (?, '005930', '2026-12-22', 4, 3000, '2026-12-23')", (u,))
+    people, pay, rows = trial.weekly(con, "trial-1", date(2026, 12, 7))
+    assert (people, pay) == (1, 1) and [n for _, _, n in rows] == [1, 0, 0, 0]  # 11/16 주부터 4주째(12/7~)까지
+    assert trial.verdict(people, pay, rows).startswith("접음")  # 3주째 0명
+    assert trial.verdict(20, 5, [(6, date(2026, 12, 22), 11)]).startswith("계속")
+    assert trial.verdict(20, 4, [(6, date(2026, 12, 22), 11)]).startswith("그 사이")
