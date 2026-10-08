@@ -81,6 +81,14 @@ def main(today: date) -> None:
                     [(x.rcept_no, x.ticker, x.day.isoformat(), x.kind, x.who, x.change, x.rate, x.rate_chg)
                      for x in ins])  # fmt: skip
     print(f"  지분 보고 {len(ins)}건 (임원·주요주주 · 5% 대량보유)")
+    # 앞으로의 일정 (실적 발표·주총·배당 기준일·지급일) — 공시 원문을 한 번 열어 날짜를 읽는다
+    # ponytail: 날짜가 없거나 같은 날 같은 일정이 이미 있는 공시는 매일 다시 연다(하루 수십 콜). 많아지면 「읽음」 칸을 둔다
+    todo = [(r, t, title) for r, t, title in con.execute(
+        "select rcept_no, ticker, title from disclosures where date >= ? and rcept_no not in"
+        " (select rcept_no from events where rcept_no is not null)", (lo.isoformat(),)) if sources.has_schedule(title)]  # fmt: skip
+    evs = [(t, d.isoformat(), kind, what, r) for r, t, title in todo for d, kind, what in sources.parse_schedule(title, dart.doc_text(r))]
+    con.executemany("insert or replace into events values (?, ?, ?, ?, ?)", evs)
+    print(f"  일정 {len(evs)}건 (공시 {len(todo)}건에서)")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
 
     for sid, name in sources.MACRO.items():

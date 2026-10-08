@@ -94,6 +94,9 @@ def test_calendar_month_grid_marks_red_days_and_events():
     assert "삼성 자사주</a>" in html_ and "오늘</span>" in html_
     assert "자기주식취득결정 (자사주 매입)" in html_ and "이번 달 주목할 공시 1건" in html_
     assert "2026년 10월" in app.calendar(uid, "nonsense", today=date(2026, 10, 7))  # 이상한 값은 이번 달
+    con.execute("insert into events values ('005930', '2026-10-29', 'EARNINGS', '실적 발표', '20261007000002')")
+    soon = app.calendar(uid, "2026-10", today=date(2026, 10, 7))
+    assert "삼성 실적</a>" in soon and "삼성전자 <b>실적 발표</b>" in soon  # 앞으로의 일정 — 테두리 칩 · 이 달의 일정 목록
 
 
 def test_survey_saves_once_and_asks_pay_from_week_six():
