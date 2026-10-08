@@ -87,7 +87,7 @@ def schema(fs: list[dict]) -> dict:
 
 def write(con: sqlite3.Connection, ev: dict, today: date) -> dict | None:
     name = con.execute("select name from stocks where ticker = ?", (ev["ticker"],)).fetchone()[0]
-    ctx = [f for f in notes.facts(con, ev["ticker"], today, news=False) if f["id"][0] == "F"]
+    ctx = [f for f in notes.facts(con, ev["ticker"], today) if f["id"][0] == "F"]
     fs = [ev["fact"], *ctx]
     payload = {"today": today.isoformat(), "name": name,
                "facts": [{"id": f["id"], "text": f["text"], "slots": [f"{{{f['id']}.{k}}}" for k in f["slots"]]} for f in fs]}  # fmt: skip
