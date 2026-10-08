@@ -126,7 +126,7 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
-TITLES = ("회사 사정은 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
+TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
 
@@ -203,6 +203,50 @@ def read_business(con: sqlite3.Connection, today: date, tickers: list[str] | Non
     return n
 
 
+SEGMENT_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["unit", "rows"],
+                  "properties": {"unit": {"type": "string"}, "rows": {"type": "array", "items": {
+                      "type": "object", "additionalProperties": False, "required": ["name", "revenue", "op", "revenue_prev", "op_prev"],
+                      "properties": {k: {"type": "string"} for k in ("name", "revenue", "op", "revenue_prev", "op_prev")}}}}}  # fmt: skip
+
+
+def check_segments(j: dict, source: str, year: int) -> dict:
+    """옮겨 적은 부문 숫자 검사 — 원문에 글자 그대로 있어야 한다. 코드가 원 단위로 바꾼다(괄호는 음수)."""
+    if j["unit"] not in UNITS:
+        raise ValueError(f"단위 {j['unit']!r}")
+    have = numbers(source)
+
+    def num(s):
+        s = s.strip()
+        if not s or s in ("-", "—"):
+            return None
+        if not re.fullmatch(r"\(?-?[\d,]+\)?", s) or numbers(s) - have:
+            raise ValueError(f"원문에 없는 값 {s!r}")
+        v = int(re.sub(r"[^\d]", "", s)) * UNITS[j["unit"]]
+        return -v if s.startswith(("(", "-")) else v
+
+    rows = [{"name": r["name"].strip(), "revenue": num(r["revenue"]), "op": num(r["op"]),
+             "revenue_prev": num(r["revenue_prev"]), "op_prev": num(r["op_prev"])}
+            for r in j["rows"][:6] if not re.search(r"합계|소계|조정|내부거래|기타", r["name"])]  # fmt: skip
+    return {"year": year, "rows": rows}
+
+
+def read_segments(con: sqlite3.Connection, today: date) -> int:
+    """사업보고서의 「영업부문 정보」 표를 한 번 읽어 business.body["seg"] 에 둔다 — 같은 해는 다시 안 읽는다."""
+    year, n, dart = today.year - 1, 0, sources.Dart()
+    for t, body in con.execute("select ticker, body from business").fetchall():
+        b = json.loads(body)
+        if (b.get("seg") or {}).get("year") == year or b.get("year") != year:
+            continue
+        rno, text = dart.business_text(t, year)
+        src = (text or {}).get("segment", "")
+        got = llm.ask("reader", "segments", {"원문": src}, lambda j: check_segments(j, src, year), SEGMENT_SCHEMA, prompt_file="segments") if src else None
+        b["seg"] = got or {"year": year, "rows": []}  # 못 읽어도 표시 — 매일 다시 내려받지 않게
+        con.execute("update business set body = ? where ticker = ?", (json.dumps(b, ensure_ascii=False), t))
+        con.commit()
+        n += bool(got and got["rows"])
+    return n
+
+
 def read_disclosures(con: sqlite3.Connection, batch: int = 100) -> tuple[int, int]:
     """(규칙으로 확정, AI 로 분류). 규칙은 이미 AI 가 읽은 공시에도 다시 덮어쓴다 — 규칙이 늘면 과거 공시도 고쳐진다.
     AI 가 빠뜨린 공시는 비워 두고 다음 실행에서 다시 묻는다."""
@@ -258,7 +302,7 @@ def won(x: int) -> str:
 
 
 def pct(x: float) -> str:
-    return f"{x * 100:+.1f}%"
+    return f"{x * 100:+,.1f}%"  # 「+1,813.8%」 — 큰 변화도 읽히게
 
 
 def trend(cur: int, prev: int | None) -> tuple[int, str, str]:
@@ -309,6 +353,85 @@ def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
     return out
 
 
+QLABEL = {1: ("1분기", "1~3월"), 2: ("2분기", "4~6월"), 3: ("3분기", "7~9월")}
+UNITS = {"원": 1, "천원": 1_000, "백만원": 1_000_000, "억원": 100_000_000}
+
+
+def _change(what: str, cur: int | None, prev: int | None, than: str) -> str | None:
+    if cur is None:
+        return None
+    _, _, chg = trend(cur, prev)
+    return f"{what} {won(cur)}" + (f"({than}보다 {chg})" if chg.startswith(("+", "-")) else f"({chg})" if chg else "")
+
+
+def _slots(key: str, cur: int | None, prev: int | None) -> dict:
+    """「{F8.매출}」「{F8.매출폭}」「{F8.매출방향}어요」 — 노트의 F1·F2 와 같은 빈칸 모양."""
+    if cur is None:
+        return {}
+    _, way, chg = trend(cur, prev)
+    return ({key: won(cur)} | ({f"{key}방향": way} if way else {})
+            | ({f"{key}폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
+
+
+def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
+    """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가."""
+    row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
+                      " rcept_no from quarters where ticker = ? order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    if not row:
+        return []
+    y, q, rev, op, rp, opp, ry, oy, ryp, oyp, rno = row
+    (name, months), url, out = QLABEL[q], DART.format(rno), []
+    if parts := [x for x in (_change("매출", rev, rp, "1년 전 같은 분기"), _change("영업이익", op, opp, "1년 전 같은 분기")) if x]:
+        out.append({"id": "F8", "text": f"{y}년 {name}({months}) " + " · ".join(parts), "url": url, "tone": 0,
+                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp)})  # fmt: skip
+    if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
+        out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
+                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp)})  # fmt: skip
+    return out
+
+
+def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
+    """F10 = 같은 업종 회사들 가운데 자리 — 영업이익률(금융사는 ROE). 셋 이상 모일 때만. 순위·평균은 코드가 센다."""
+    rows = con.execute(
+        "select s.ticker, s.name, s.induty_code, f.fiscal_year, f.revenue, f.operating_income, f.net_income, f.equity, f.rcept_no"
+        " from stocks s join financials f on f.ticker = s.ticker and f.fiscal_year = (select max(fiscal_year) from financials g where g.ticker = s.ticker)"
+        " where s.active = 1").fetchall()  # fmt: skip
+    me = next((r for r in rows if r[0] == ticker), None)
+    label = me and sources.industry_label(me[2])
+    if not label:
+        return []
+    # 매출이 없는 금융사는 금융사끼리만 — 「지주회사」로 묶인 KB금융과 SK 는 견줄 수 없다
+    peers = [r for r in rows if sources.industry_label(r[2]) == label and r[3] == me[3] and (r[4] is None) == (me[4] is None)]
+    label = "금융지주" if label == "지주회사" and me[4] is None else label
+    margin = all(r[4] for r in peers)  # 매출이 다 있으면 영업이익률, 아니면(금융) ROE
+    ok = (lambda r: r[4] and r[5] is not None) if margin else (lambda r: r[6] is not None and r[7] and r[7] > 0)
+    val = {r[0]: (r[5] / r[4] * 100 if margin else r[6] / r[7] * 100) for r in peers if ok(r)}
+    if len(val) < 3 or ticker not in val:
+        return []
+    order = sorted(val, key=lambda t: -val[t])
+    k, n, what = order.index(ticker) + 1, len(val), "영업이익률" if margin else "ROE"
+    place = "가장 높았" if k == 1 else "가장 낮았" if k == n else f"{k}번째로 높았"
+    avg = sum(val.values()) / n
+    others = "·".join(r[1] for r in peers if r[0] != ticker and r[0] in val)
+    return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {me[3]}년 {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 평균 {avg:.1f}% (함께 본 회사: {others})",
+             "url": DART.format(me[8]), "tone": 0,
+             "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "평균": f"{avg:.1f}%"}}]  # fmt: skip
+
+
+def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
+    """F11 = 사업부별 영업이익 — 사업보고서 「영업부문 정보」에서 옮겨 적은 값(원 단위로 코드가 바꿔 둔 것). 큰 것 셋."""
+    biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
+    seg = biz and json.loads(biz[0]).get("seg")
+    rows = [r for r in (seg or {}).get("rows", []) if r.get("op") is not None]
+    if len(rows) < 2:
+        return []
+    rows = sorted(rows, key=lambda r: -abs(r["op"]))[:3]
+    parts = [f"{r['name']} {won(r['op'])}" + (f"(전년보다 {c})" if (c := trend(r["op"], r.get("op_prev"))[2]).startswith(("+", "-")) else f"({c})" if c else "")
+             for r in rows]  # fmt: skip
+    return [{"id": "F11", "text": f"{seg['year']}년 사업부별 영업이익 — " + " · ".join(parts), "url": DART.format(biz[1]), "tone": 0,
+             "slots": {"연도": f"{seg['year']}년", "첫부문": rows[0]["name"]}}]  # fmt: skip
+
+
 def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
@@ -351,6 +474,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         slots = {f"{o}부문": x["name"].split(" · ")[-1] for o, x in zip(("첫", "둘째"), top)} | {f"{o}비중": x["share"] for o, x in zip(("첫", "둘째"), top)}
         out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": DART.format(biz[1]),
                     "tone": 0, "slots": slots})  # fmt: skip
+    out += quarter_facts(con, ticker) + industry_fact(con, ticker) + segment_fact(con, ticker)
     evs = con.execute("select rcept_no, date, title, code, direction from disclosures"
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
@@ -516,7 +640,8 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
-    text = re.sub(r"(\d)(건|주|명|개|원|%)\2", r"\1\2", text)
+    text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
+    text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」
     # 빈칸을 끼우며 생기는 어색한 이음 — 「가장 많았인」「최근 최근 90일」「10.9%이었으니」
     text = re.sub(r"(았|었)인(?=\s)", r"\1던", text)
     text = re.sub(r"(최근|약|총) \1(?=\s)", r"\1", text)
@@ -684,7 +809,7 @@ def code_note(fs: list[dict]) -> dict:
         t = say(f)
         return not (t in seen or seen.add(t))
 
-    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7"), ("D", "N"), "I"))
+    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10"), ("F8", "F9", "F11"), ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]
@@ -742,7 +867,7 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
     """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
-    print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건")
+    print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건 · 사업부별 실적 {read_segments(con, today)}곳")
     print(f"공시 읽기 — 규칙 {ruled}건 · AI {ai}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]

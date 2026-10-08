@@ -208,6 +208,17 @@ class Dart:
                                bsns_year=str(year), reprt_code="11011")["list"]  # fmt: skip
         return parse_financials(rows, year)
 
+    def quarters(self, tickers: list[str], year: int) -> list[Quarter]:
+        """그해 1분기·반기·3분기 보고서의 매출·영업이익 — 100개씩 1콜 × 보고서 셋. 아직 안 나온 보고서는 빈 목록."""
+        corps = self.corps()
+        codes = [corps[t] for t in tickers if t in corps]
+        out: list[Quarter] = []
+        for q, code in QUARTER_REPORTS.items():
+            for i in range(0, len(codes), 100):
+                rows = self._list("fnlttMultiAcnt.json", corp_code=",".join(codes[i : i + 100]), bsns_year=str(year), reprt_code=code)["list"]
+                out += parse_quarters(rows, year, q)
+        return out
+
     def company(self, ticker: str) -> tuple[str | None, str | None]:
         """회사 개황 — (업종 코드(통계청 한국표준산업분류 「264」「64992」), 홈페이지 도메인 「samsung.com」)."""
         cc = self.corps().get(ticker)
@@ -330,8 +341,10 @@ def parse_report(xml: str) -> dict[str, str]:
         b = re.search(end, xml[a.end():])
         return _flat(xml[a.start(): a.end() + (b.start() if b else 400_000)])[:n]
 
+    seg = re.search(r">\s*\d+\.\s*(영업부문|부문별\s*보고|부문\s*정보)[^<]{0,20}<", xml)  # 연결재무제표 주석의 첫 「영업부문」 — 부문별 매출·영업이익 표
     return {"overview": cut(r"<TITLE[^>]*>\s*1\.\s*사업의\s*개요", r"<TITLE[^>]*>\s*3\.", 7000),
-            "etc": cut(r"<TITLE[^>]*>\s*7\.\s*기타\s*참고\s*사항", r"<TITLE[^>]*>\s*III\.", 12000)}  # fmt: skip
+            "etc": cut(r"<TITLE[^>]*>\s*7\.\s*기타\s*참고\s*사항", r"<TITLE[^>]*>\s*III\.", 12000),
+            "segment": _flat(xml[seg.start(): seg.start() + 80_000])[:7000] if seg else ""}  # fmt: skip
 
 
 def parse_dividends(rows: list[dict], year: int) -> list[tuple[int, int | None, int | None, float | None]]:
@@ -376,6 +389,46 @@ def parse_disclosures(rows: list[dict]) -> list[Disclosure]:
         for r in rows
         if re.fullmatch(r"\d{6}", r.get("stock_code") or "")
     ]
+
+
+QUARTER_REPORTS = {1: "11013", 2: "11012", 3: "11014"}  # 1분기 · 반기 · 3분기 보고서
+
+
+@dataclass(frozen=True)
+class Quarter:
+    """분기 보고서 한 장 — 그 분기 3개월(q) · 올해 누적(ytd) · 1년 전 같은 때(prev). 원 단위."""
+    ticker: str
+    year: int
+    q: int
+    revenue: int | None
+    operating_income: int | None
+    revenue_prev: int | None
+    op_prev: int | None
+    revenue_ytd: int | None
+    op_ytd: int | None
+    revenue_ytd_prev: int | None
+    op_ytd_prev: int | None
+    rcept_no: str
+    basis: str
+
+
+def parse_quarters(rows: list[dict], year: int, q: int) -> list[Quarter]:
+    """다중회사 주요계정(분기·반기 보고서) → 회사마다 한 줄. 연결이 있으면 연결. 손익은 「thstrm」= 그 분기 3개월, 「_add」= 누적."""
+    by: dict[tuple, dict] = {}
+    for r in rows:
+        col = {"매출액": "rev", "영업이익": "op", "영업이익(손실)": "op"}.get(r["account_nm"].replace(" ", ""))
+        if col and r.get("stock_code") and r.get("sj_div", "IS") in ("IS", "CIS"):
+            v = by.setdefault((r["stock_code"], r["fs_div"]), {"_r": r})
+            v[col] = (_won(r.get("thstrm_amount")), _won(r.get("frmtrm_amount")),
+                      _won(r.get("thstrm_add_amount")) or _won(r.get("thstrm_amount")),
+                      _won(r.get("frmtrm_add_amount")) or _won(r.get("frmtrm_amount")))  # fmt: skip
+    out = []
+    for (tkr, fs), v in by.items():
+        if fs == "OFS" and (tkr, "CFS") in by:
+            continue
+        rev, op = v.get("rev", (None,) * 4), v.get("op", (None,) * 4)
+        out.append(Quarter(tkr, year, q, rev[0], op[0], rev[1], op[1], rev[2], op[2], rev[3], op[3], v["_r"]["rcept_no"], fs))
+    return out
 
 
 def parse_financials(rows: list[dict], year: int) -> list[Financial]:
