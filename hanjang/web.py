@@ -222,11 +222,60 @@ def business_block(biz: dict | None, rno: str | None) -> str:
                    + f'<p class="font-label-micro text-label-micro text-outline">회사가 낸 {biz.get("year", "")}년 사업보고서를 요약했어요 · {link}</p>')  # fmt: skip
 
 
-def dividend_block(divs: list[tuple]) -> str:
-    """주주에게 돌려준 것 — 해마다 주당 현금배당금(보통주) 막대 + 최근 배당성향."""
+def ring(parts: list[tuple[float, str]], size: str = "w-20 h-20") -> str:
+    """둘레 100 짜리 원 — (비율%, 색) 조각들을 이어 그린다. donut() 과 같은 수법."""
+    acc, out = 0.0, []
+    for pct, col in parts:
+        out.append(f'<circle cx="21" cy="21" r="15.915" fill="none" stroke="{col}" stroke-width="7" '
+                   f'stroke-dasharray="{pct:.2f} {100 - pct:.2f}" stroke-dashoffset="{25 - acc:.2f}"/>')  # fmt: skip
+        acc += pct
+    return f'<svg viewBox="0 0 42 42" class="{size} shrink-0">{"".join(out)}</svg>'
+
+
+def money_blocks(fin: tuple | None) -> str:
+    """회사 사정 아래 그림 둘 — ① 100원 팔면 얼마 남나(매출→영업이익→순이익) ② 빚과 내 돈(부채 : 자본).
+    증권사 보고서의 손익·재무상태표를 그대로 옮기지 않고 질문 하나에 그림 하나 (사용자 10/9). 매출이 없는 금융사는 ①②를 그리지 않는다
+    (예금이 빚으로 잡혀 부채비율이 뜻이 없다)."""
+    if not fin:
+        return ""
+    y, rev, oi, ni, eq, li = fin
+    out = []
+    if rev and rev > 0 and oi is not None and ni is not None:
+        rows = [("매출 — 판 돈", rev, "bg-primary"), ("영업이익 — 본업으로 남긴 돈", oi, "bg-secondary"), ("순이익 — 세금·이자까지 내고 남은 돈", ni, "bg-secondary/60")]
+        bars = "".join(
+            f'<div class="flex items-center gap-2 py-0.5"><span class="w-[52%] text-[12px] leading-4 text-on-surface-variant">{e(k)}</span>'
+            f'<span class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><span class="block h-full {col} rounded-full" style="width:{max(min(v / rev * 100, 100), 0):.1f}%"></span></span>'
+            f'<span class="w-11 text-right text-[12px] font-semibold tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{"적자" if v < 0 else f"{v / rev * 100:.0f}원"}</span></div>'
+            for k, v, col in rows)  # fmt: skip
+        out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold">{y}년, 100원 팔면 얼마 남았나</div>{bars}')
+        if eq and eq > 0 and li is not None:
+            ratio = li / eq * 100
+            a, b = eq / (eq + li) * 100, li / (eq + li) * 100
+            out.append(f'<div class="mt-space-sm font-label-regular text-label-regular text-on-surface font-semibold">빚과 내 돈 — 부채비율 {ratio:,.0f}%</div>'
+                       '<div class="mt-1 h-3 w-full rounded-full overflow-hidden flex">'
+                       f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full bg-tertiary-fixed" style="width:{b:.1f}%"></span></div>'
+                       f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
+                       f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. 업종마다 보통 수준이 달라요.</p>')  # fmt: skip
+    if not out:
+        return ""
+    return ('<div class="py-space-md my-space-xs border-b border-outline-variant/30">' + "".join(out)
+            + '<p class="mt-2 text-[11px] text-outline">연결재무제표 기준 · 자료: DART 사업보고서</p></div>')  # fmt: skip
+
+
+def dividend_block(divs: list[tuple], fin: tuple | None = None) -> str:
+    """주주에게 돌려준 것 — 해마다 주당 현금배당금(보통주) 막대 + 번 돈을 어떻게 썼나 도넛(배당 : 회사에 남김) + 최근 배당성향."""
     divs = [r for r in divs if r[1]]
     if not divs:
         return ""
+    ring_html = ""
+    if fin and fin[0] == divs[-1][0] and fin[3] and fin[3] > 0 and divs[-1][2]:
+        ni, tot = fin[3], divs[-1][2]
+        p = min(tot / ni * 100, 100)
+        ring_html = (f'<div class="flex items-center gap-3 py-2"><div class="relative">{ring([(p, DONUT[0]), (100 - p, DONUT[6])], "w-[72px] h-[72px]")}'
+                     f'<div class="absolute inset-0 flex items-center justify-center text-[12px] font-bold text-on-surface">{p:.0f}%</div></div>'
+                     f'<ul class="text-[12px] text-on-surface"><li class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:{DONUT[0]}"></span>배당으로 나눠 줌 {notes.won(tot)}</li>'
+                     f'<li class="flex items-center gap-1.5 mt-1"><span class="w-2.5 h-2.5 rounded-sm" style="background:{DONUT[6]}"></span>회사에 남김 {notes.won(max(ni - tot, 0))}</li>'
+                     f'<li class="text-[11px] text-outline mt-1">{fin[0]}년 순이익 {notes.won(ni)} 가운데</li></ul></div>')  # fmt: skip
     top = max(r[1] for r in divs)
     bars = "".join(f'<div class="flex-1 flex flex-col items-center gap-1"><span class="text-[10px] text-on-surface-variant tabular-nums">{r[1]:,}</span>'
                    f'<span class="w-full max-w-[28px] rounded-t bg-secondary/80" style="height:{max(r[1] / top * 72, 2):.0f}px"></span>'
@@ -235,7 +284,7 @@ def dividend_block(divs: list[tuple]) -> str:
     text = (f"{y}년에는 한 주에 {dps:,}원을 현금으로 나눠 줬어요" + (f"(배당 총액 {notes.won(total)})" if total else "") + "."
             + (f" 번 돈(순이익)의 {payout:.1f}%를 배당으로 쓴 셈이에요(배당성향)." if payout else ""))  # fmt: skip
     return chapter("주주에게 돌려준 것", e(text),
-                   f'<div class="flex items-end gap-1 h-[110px] pt-2">{bars}</div>'
+                   ring_html + f'<div class="flex items-end gap-1 h-[110px] pt-2">{bars}</div>'
                    '<p class="font-label-micro text-label-micro text-outline">주당 현금배당금(보통주, 원) · 자료: DART 「배당에 관한 사항」</p>')  # fmt: skip
 
 
@@ -410,7 +459,14 @@ def sentence(s: dict) -> str:
     """문장 + 시안의 출처 단추 [F1] — 누르면 출처 창이 열린다 (모든 문장에 원문 링크, 불변식 2)."""
     btns = "".join(f'<button aria-label="출처 {e(r)} 보기" class="{CITE}" onclick="toggleCitation(\'{e(r)}\')" type="button">[{e(r)}]</button>'
                    for r in s["refs"])  # fmt: skip
-    return f"{e(s['text'])}{btns}"
+    return f"{soften(s['text'])}{btns}"
+
+
+def soften(text: str) -> str:
+    """괄호 속 숫자 보조 설명은 작고 회색으로 — 「(9.0조원 · 7,921억원)(영업이익률 8.8%)」 처럼 본문을 끊지 않게 (사용자 10/9).
+    붙어 있는 괄호 둘은 하나로 잇는다. 글은 바꾸지 않는다(숫자·출처 그대로)."""
+    text = re.sub(r"\)\s*\(", " · ", e(text))
+    return re.sub(r"\(([^()]*)\)", r'<span class="text-[12px] text-outline">(\1)</span>', text)
 
 
 def cite_data(facts: list[dict]) -> dict:
@@ -549,7 +605,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         text = " ".join(sentence(s) for s in sec["sentences"])
         extra = ""
         if sec["title"].startswith("회사 사정"):
-            extra = metrics(facts)
+            extra = metrics(facts) + money_blocks(report.get("fin"))
         elif sec["title"].startswith(NEWS_TITLES):  # 「이번 주 소식」(공시+소식) · 옛 노트의 「요즘 무슨 일이 있었나요?」
             right = (f"반가운 쪽 {good_d}" + (f" · 걸리는 쪽 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
@@ -564,9 +620,9 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
         parts.append(chapter(sec["title"], text, extra))
         if sec["title"].startswith(NEWS_TITLES):
-            parts.append(dividend_block(report.get("divs", [])))
+            parts.append(dividend_block(report.get("divs", []), report.get("fin")))
     if not any(s["title"].startswith(NEWS_TITLES) for s in body["sections"]):
-        parts.append(dividend_block(report.get("divs", [])))
+        parts.append(dividend_block(report.get("divs", []), report.get("fin")))
     parts.append(risk_block(report.get("biz")))
 
     def filled(key):  # 옛 노트의 「분류된 것 없음」 자리 채움 문장도 빈 칸으로 본다
@@ -1043,7 +1099,9 @@ class App:
     def report(self, ticker: str) -> dict:
         divs = self.con.execute("select fiscal_year, dps, total, payout from dividends where ticker = ? order by fiscal_year", (ticker,)).fetchall()
         biz = self.con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
-        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None}
+        fin = self.con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities from financials"
+                               " where ticker = ? order by fiscal_year desc limit 1", (ticker,)).fetchone()  # fmt: skip
+        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None, "fin": fin}
 
     # ---- 캘린더 (시안 _4) ----
 
