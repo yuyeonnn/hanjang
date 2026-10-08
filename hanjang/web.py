@@ -21,6 +21,7 @@ from hanjang import db, holders, learn, llm, mail, notes, policy, sources
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
+COHORT = re.compile(r"[a-z0-9-]{1,20}")  # 시험 묶음 이름 — 초대 링크 /?c=trial-1 (python -m hanjang.trial 이 센다)
 NICK = re.compile(r"[가-힣A-Za-z0-9_]{2,20}")  # 남에게 보이는 이름 — 이메일은 절대 보이지 않는다
 BIO_MAX = 150
 BODY_MAX = 6_000_000  # 요청 본문 상한 — 캡처 사진(브라우저에서 줄여 보낸다)도 이 안에
@@ -662,7 +663,7 @@ class App:
 
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
-            return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1")
+            return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1", form.get("c", ""))
         if path.startswith("/static/photos/") and re.fullmatch(r"(pool/)?[a-z]+\d*\.jpg", path[15:]) and (STATIC / "photos" / path[15:]).exists():
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
         if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
@@ -673,6 +674,8 @@ class App:
                 return "200 OK", [], self.simple("로그인", "링크가 만료됐거나 잘못됐어요. <a class='text-primary underline' href='/'>다시 받기</a>")
             self.con.execute("insert or ignore into users (email, created_at) values (?, ?)",
                              (email, datetime.now().isoformat()))  # fmt: skip
+            if COHORT.fullmatch(c := query.get("c", "")):  # 초대 링크로 온 사람 — 처음 한 번만 묶는다
+                self.con.execute("update users set cohort = ? where email = ? and cohort is null", (c, email))
             self.con.commit()
             (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
             ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
@@ -682,7 +685,7 @@ class App:
         if path == "/demo":  # 둘러보기 — 이메일 없이 공용 계정으로 (메일 보내기 전, 남에게 보여줄 때)
             return self.demo()
         if uid is None:
-            return "200 OK", [], self.login_page()
+            return "200 OK", [], self.login_page(cohort=query.get("c", ""))
         if method == "POST" and self.is_demo(uid):  # 둘러보기는 보기만 — 여럿이 같이 쓰는 계정이라 바꾸지 않는다
             return "200 OK", [], self.simple("둘러보기", "둘러보기에서는 보기만 할 수 있어요. 직접 쓰려면 로그인해 주세요. "
                                              "<a class='text-primary underline' href='javascript:history.back()'>돌아가기</a>")
@@ -779,19 +782,20 @@ class App:
 
     # ---- 로그인 (시안 _2) ----
 
-    def login_page(self, sent: str | None = None, error: str = "") -> str:
+    def login_page(self, sent: str | None = None, error: str = "", cohort: str = "") -> str:
+        hidden = f'<input type="hidden" name="c" value="{cohort}">' if COHORT.fullmatch(cohort) else ""
         box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
             '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
             f'<span class="font-body-reading-strong text-body-compact text-on-surface truncate" id="target-email-preview">{e(sent)}</span></div>'
             '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 안전한 접속 링크를 전송했습니다. 15분 이내에 메일함 속 링크를 눌러 주세요.</p><div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 도착하지 않았나요? 스팸함을 확인하시거나 잠시 후 재전송해 보세요.</p>'
-            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1"><button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
+            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
                  '<h1 class="font-headline-sm text-headline-sm text-on-surface mt-4 max-w-[280px] leading-relaxed">내 주식이 지금 어떤 상황인지,<br>쉬운 글 한 장으로.</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-2 max-w-[300px]">숫자 뒤에 숨겨진 회사의 진짜 이야기와 사업 흐름을 담백하게 정리해 드립니다.</p></div>'
-                 '<div class="w-full rounded-xl flex flex-col relative overflow-hidden px-1.5"><form class="flex flex-col w-full relative z-10" id="magic-link-form" method="post" action="/login">'
-                 '<div class="flex items-center justify-between mb-2"><label class="font-label-regular text-label-regular text-on-surface flex items-center gap-1.5" for="email-input"><span class="material-symbols-outlined text-primary text-base">mail</span>이메일 주소</label><span class="font-label-micro text-label-micro text-outline">비밀번호 없는 간편 시작</span></div>'
+                 '<div class="w-full rounded-xl flex flex-col relative overflow-hidden px-1.5"><form class="flex flex-col w-full relative z-10" id="magic-link-form" method="post" action="/login">' + hidden
+                 + '<div class="flex items-center justify-between mb-2"><label class="font-label-regular text-label-regular text-on-surface flex items-center gap-1.5" for="email-input"><span class="material-symbols-outlined text-primary text-base">mail</span>이메일 주소</label><span class="font-label-micro text-label-micro text-outline">비밀번호 없는 간편 시작</span></div>'
                  '<div class="relative flex items-center w-full"><input class="w-full font-body-reading text-body-reading bg-surface-container-low text-on-surface placeholder:text-outline rounded-lg px-4 py-3.5 focus:outline-none focus:bg-surface-container-lowest transition-all" id="email-input" name="email" placeholder="name@example.com" required="" type="email">'
                  '<button aria-label="이메일 지우기" class="hidden absolute right-3 text-outline hover:text-on-surface p-1 transition-colors" id="clear-btn" onclick="clearInput()" type="button"><span class="material-symbols-outlined text-lg">cancel</span></button></div>'
                  '<label class="flex items-start gap-2 mt-3 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="agree" required type="checkbox" value="1">'
@@ -828,19 +832,19 @@ class App:
             ck += "; Secure"
         return self.see("/", ("Set-Cookie", ck))
 
-    def login(self, email: str, agreed: bool = False):
+    def login(self, email: str, agreed: bool = False, cohort: str = ""):
         if "@" not in email or len(email) > 200:
             return "200 OK", [], self.login_page()
         if not agreed:
-            return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 로그인 링크를 보낼 수 있어요.")
+            return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 로그인 링크를 보낼 수 있어요.", cohort=cohort)
         now = self.clock()
         times = [t for t in self.sent.get(email, []) if now - t < 3600]
         if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
-            return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.")
+            return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
         self.sent[email] = times + [now]
-        link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, self.clock()))}"
+        link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, self.clock()))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
         mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
-        return "200 OK", [], self.login_page(email)
+        return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def match(self, q: str) -> str | None:
         """이름·코드 → 종목 코드. 띄어쓰기·대소문자는 무시한다(「삼성 SDI」→ 삼성SDI)."""
