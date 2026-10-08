@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, mail, notes
+from hanjang import articles, backup, collect, db, holders, mail, notes
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -39,6 +39,7 @@ def main(today: date) -> None:
     collect.main(today)
     notes.main([], today, only_changed=not monday)
     articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
+    holders.main(today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
     if monday:
         print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
 
