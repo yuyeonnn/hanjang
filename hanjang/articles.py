@@ -61,8 +61,13 @@ def clean_doc(raw: str, n: int = 3000) -> str:
     AI 가 「약 1,645억」처럼 쓰고 싶을 때 계산하지 않고 이 모양을 그대로 옮기게(숫자 대조에 들어간다)."""
     body = re.sub(r"^.*\}\s*", "", raw, flags=re.S).split("※ 관련공시")[0]
     body = re.sub(r"\s*\n\s*", " | ", body).strip(" |")[:n]
-    big = dict.fromkeys(m for m in re.findall(r"\d{1,3}(?:,\d{3}){2,}", body) if int(m.replace(",", "")) >= 10**8)
-    return body + (" || 큰 숫자 읽기: " + " · ".join(f"{m} → {notes.won(int(m.replace(',', ''))).removesuffix('원')}" for m in big) if big else "")
+    big = dict.fromkeys(m for m in re.findall(r"\d{1,3}(?:,\d{3})+", body) if int(m.replace(",", "")) >= 10_000)
+
+    def read(m):  # 1억 넘으면 금액 모양(「1,645억」)과 정확한 값, 그 아래는 「96만 8,091」
+        n = int(m.replace(",", ""))
+        return f"{notes.won(n).removesuffix('원')}(정확히 {notes.korean_num(n)})" if n >= 10**8 else notes.korean_num(n)
+
+    return body + (" || 큰 숫자 읽기: " + " · ".join(f"{m} → {read(m)}" for m in big) if big else "")
 
 
 def materials(con: sqlite3.Connection, ev: dict, today: date, doc: str) -> list[dict]:
@@ -108,6 +113,10 @@ def check(j: dict, fs: list[dict]) -> dict:
         src = set().union(*(notes.numbers(by[r]["text"] + " " + by[r].get("doc", "")) for r in refs)) | e1 | years
         if bad := notes.numbers(text) - src:
             raise ValueError(f"재료에 없는 숫자 {bad}: {text!r}")
+        if notes.LONGNUM.search(text):
+            raise ValueError(f"읽기 힘든 숫자: {text!r}")
+        if notes.CALC.search(text):
+            raise ValueError(f"AI 가 한 셈: {text!r}")
         if notes.FORBIDDEN.search(text) or GUESS.search(text) or (notes.PREDICT.search(text) and not all(r[0] == "N" for r in refs)):
             raise ValueError(f"금지어·예측·짐작: {text!r}")
         if holder and BUYSELL.search(text):
