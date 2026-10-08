@@ -219,17 +219,17 @@ def test_redone_label():
     assert web.redone("2026-10-05", "2026-10-05T07:00:00") == "" and web.redone("2026-10-05", "now") == ""
 
 
-def test_login_needs_consent_and_is_rate_limited(capsys):
+def test_login_needs_consent_then_goes_straight_in(capsys):
     app, _ = _app()
     s, _, body = call(app, "/login", "POST", "email=a%40b.c")
-    assert "동의해야" in body and "[메일" not in capsys.readouterr().err  # 동의 없이는 메일을 보내지 않는다
+    assert "동의해야" in body  # 동의 없이는 안 된다
     s, h, _ = call(app, "/login", "POST", "email=a%40b.c&agree=1")
-    assert s.startswith("303") and "s=" in h["Set-Cookie"] and "[메일" not in capsys.readouterr().err  # 처음 온 사람 — 메일 없이 바로 시작
-    ck = _login(app)  # 닉네임까지 만든 계정은 링크로만
-    s, _, body = call(app, "/login", "POST", "email=me%40x.kr&agree=1")
-    assert s.startswith("200") and "[메일" in capsys.readouterr().err
-    s, _, body = call(app, "/login", "POST", "email=me%40x.kr&agree=1")  # 1분 안에 또
-    assert s.startswith("429") and "[메일" not in capsys.readouterr().err
+    assert s.startswith("303") and "s=" in h["Set-Cookie"] and "[메일" not in capsys.readouterr().err  # 처음 — 메일 없이 바로
+    assert "닉네임" in call(app, "/", cookie=h["Set-Cookie"].split(";")[0])[2]
+    _login(app)  # 닉네임까지 만든 계정도
+    s, h, _ = call(app, "/login", "POST", "email=me%40x.kr&agree=1")
+    assert s.startswith("303") and "[메일" not in capsys.readouterr().err  # 바로 내 종목으로
+    assert "내 종목" in call(app, "/", cookie=h["Set-Cookie"].split(";")[0])[2]
 
 
 def test_public_pages_and_security_headers():
@@ -359,13 +359,6 @@ def test_nickname_is_asked_at_signup_and_unique():
     assert call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[1]["Location"] == "/"
     assert "닉네임을 정해 주세요" not in call(app, "/", cookie=ck)[2]
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=", ck)[1]["Location"]  # 비울 수 없다
-
-
-def test_login_help_page_is_public():
-    app, _ = _app()
-    assert 'href="/help/login"' in call(app, "/")[2]
-    s, _, body = call(app, "/help/login")
-    assert s.startswith("200") and "15분" in body and "비밀번호가 없어요" in body
 
 
 def test_industry_photos_served_and_used():
