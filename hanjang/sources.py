@@ -20,8 +20,10 @@ CACHE = ROOT / "data" / "cache"
 
 
 def env() -> dict[str, str]:
-    """`.env` 한 파일 — KEY=VALUE 줄만."""
+    """`.env` 한 파일 — KEY=VALUE 줄만. 없으면 빈 것."""
     f = ROOT / ".env"
+    if not f.exists():
+        return {}
     pairs = (ln.split("=", 1) for ln in f.read_text(encoding="utf-8").splitlines() if "=" in ln)
     return {k.strip(): v.strip() for k, v in pairs}
 
