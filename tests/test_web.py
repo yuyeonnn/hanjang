@@ -5,7 +5,7 @@ from datetime import date
 import json
 from urllib.parse import quote, unquote
 
-from hanjang import collect, db, notes, web
+from hanjang import collect, db, mail, notes, web
 
 SECRET = "test-secret"
 
@@ -123,6 +123,10 @@ def test_monday_notice_only_to_users_with_new_notes(capsys):
     assert daily.notify(con, "2026-10-05") == 1
     assert daily.notify(con, "2026-10-12") == 0  # 그 주 노트가 없으면 안 보낸다
     assert "me@x.kr · [한장] 이번 주 노트가 올라왔어요" in capsys.readouterr().err
+    body = {"headline": "h<b>", "summary": [{"text": "문장.", "refs": ["F1"]}]}
+    _, _, html = mail.weekly_mail("2026-10-05", [{"ticker": "005930", "name": "삼성전자", "body": body, "facts": [{"id": "F1", "url": "https://dart/x"}]}],
+                                  [("2026-10-07", "삼성전자", "배당", "", "https://dart/y", 0)], [("2026-10-09", "한글날")])  # fmt: skip
+    assert 'href="https://dart/x"' in html and "h&lt;b&gt;" in html and "한글날" in html and "문장." in html and "dart/y" in html
 
 
 def test_learn_tab_lists_and_opens_articles():
@@ -391,3 +395,24 @@ def test_report_blocks_compute_from_dart_numbers():
     b = web.business_block({"what": ["반도체를 만들어요."], "segments": [{"name": "DS", "share": "39.0%"}], "risks": ["경쟁"], "year": 2025}, "123")
     assert "39.0%" in b and "rcpNo=123" in b and "2025년 사업보고서" in b
     assert "회사가 꼽은 위험" in web.risk_block({"risks": ["경쟁이 심해요"]}) and web.risk_block(None) == ""
+
+
+def test_weekly_mail_carries_wave_images(monkeypatch):
+    """본문이 부르는 물결 그림(cid)이 메일에 붙어 간다 — 안 붙으면 메일 앱에 깨진 그림이 보인다."""
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): ...
+        def __enter__(self): return self
+        def __exit__(self, *a): ...
+        def starttls(self): ...
+        def login(self, *a): ...
+        def send_message(self, m): sent.append(m)
+
+    monkeypatch.setattr(mail, "env", lambda: {"SMTP_HOST": "x", "SMTP_FROM": "a@b.c", "SMTP_USER": "u", "SMTP_PASSWORD": "p"})
+    monkeypatch.setattr(mail.smtplib, "SMTP", FakeSMTP)
+    body = {"headline": "h", "summary": [{"text": "문장.", "refs": []}]}
+    assert mail.send("me@x.kr", *mail.weekly_mail("2026-10-05", [{"ticker": "005930", "name": "삼성전자", "body": body, "facts": []}]))
+    cids = {p["Content-ID"] for p in sent[0].walk() if p.get_content_type() == "image/png"}
+    assert cids == {f"<{mail._cid(c, d)}>" for c, d in mail.WAVES}  # 본문이 부르는 물결 그림 셋
+    assert mail.wave_png(mail.GREEN).startswith(b"\x89PNG")
