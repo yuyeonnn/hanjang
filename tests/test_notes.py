@@ -408,3 +408,13 @@ def test_hidden_arithmetic_words_are_caught():
         assert notes.CALC.search(t), t
     for t in ("배당을 했어요", "배를 만드는 회사예요", "선박 2척을 수주했어요"):
         assert not notes.CALC.search(t), t
+
+
+def test_cost_report_sums_by_day_and_job():
+    from hanjang import cost
+
+    lines = ["2026-10-08T07:01:00,writer:note,gpt-4.1,1000,500,0.020000",
+             "2026-10-08T07:02:00,article:article,gpt-4.1,1000,500,0.015000",
+             "2026-10-07T07:01:00,writer:note,gpt-4.1,1000,500,0.700000"]
+    out = cost.report(lines, date(2026, 10, 8))
+    assert "오늘 $0.04" in out and "이번 달 $0.73" in out and "노트 쓰기" in out and "피드 기사" in out

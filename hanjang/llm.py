@@ -3,20 +3,22 @@
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 import httpx
 
-from hanjang.sources import env
+from hanjang.sources import ROOT, env
 
 MODELS = {"reader": "gpt-4.1-mini", "writer": "gpt-4.1"}  # 읽기는 싼 모델, 글은 좋은 모델
 PRICE = {"gpt-4.1-mini": (0.40, 1.60), "gpt-4.1": (2.00, 8.00)}  # USD / 1M 토큰 (입력, 출력)
 PROMPTS = Path(__file__).parent / "prompts"
 spent = {"usd": 0.0, "calls": 0}  # 이번 실행 비용 — 끝에 찍는다
+LOG = ROOT / "data" / "llm_cost.csv"  # 부를 때마다 한 줄 — 시각,일,모델,입력토큰,출력토큰,USD (python -m hanjang.cost 가 센다)
 CAP_USD = 6.0  # 한 번 실행 상한 — 월요일 노트 100장(약 $2) + 뉴닉식 기사 30편(약 $1.5). ponytail: 실측 뒤 조정
 
 
-def _openai(model: str, system: str, user: str | list, schema: dict | None = None) -> str:
+def _openai(model: str, system: str, user: str | list, schema: dict | None = None, label: str = "") -> str:
     for wait in (10, 30, 60, None):
         r = httpx.post(
             "https://api.openai.com/v1/chat/completions",
@@ -38,8 +40,16 @@ def _openai(model: str, system: str, user: str | list, schema: dict | None = Non
         raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text[:200]}")
     j = r.json()
     pin, pout = PRICE[model]
-    spent["usd"] += (j["usage"]["prompt_tokens"] * pin + j["usage"]["completion_tokens"] * pout) / 1e6
+    tin, tout = j["usage"]["prompt_tokens"], j["usage"]["completion_tokens"]
+    usd = (tin * pin + tout * pout) / 1e6
+    spent["usd"] += usd
     spent["calls"] += 1
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat(timespec='seconds')},{label},{model},{tin},{tout},{usd:.6f}\n")
+    except OSError:  # 기록을 못 남겨도 글쓰기는 계속
+        pass
     return j["choices"][0]["message"]["content"]
 
 
@@ -55,7 +65,7 @@ def ask(prompt: str, task: str, payload, check, schema: dict | None = None, imag
         if spent["usd"] >= CAP_USD:
             raise RuntimeError(f"실행 비용 상한 ${CAP_USD} 도달")
         try:
-            return check(json.loads(_openai(MODELS[prompt], system, user, schema)))
+            return check(json.loads(_openai(MODELS[prompt], system, user, schema, f"{prompt_file or prompt}:{task}")))
         except (ValueError, KeyError, TypeError):
             continue
     return None
