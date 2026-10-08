@@ -201,23 +201,33 @@ class Dart:
             self._corps = parse_corps(f.read_text(encoding="utf-8"))
         return self._corps
 
-    def disclosures(self, start: date, end: date, tickers: set[str]) -> list[Disclosure]:
-        """유가증권 전체를 90일씩 받아 우리 종목만 남긴다 (corp_code 없이 부르면 3개월 제한)."""
+    def _pages(self, start: date, end: date, **params) -> list[dict]:
+        """공시 목록 — 코스피(Y)·코스닥(K) 전체를 90일씩, 끝 쪽까지 (corp_code 없이 부르면 3개월 제한)."""
         out, lo = [], start
         while lo <= end:
             hi = min(end, lo + timedelta(days=89))
-            for form in self.FORMS:
+            for cls in ("Y", "K"):
                 page = 1
                 while True:
-                    j = self._list("list.json", bgn_de=lo.strftime("%Y%m%d"),
-                                   end_de=hi.strftime("%Y%m%d"), corp_cls="Y", pblntf_ty=form,
-                                   last_reprt_at="Y", page_no=page, page_count=100)  # 정정공시는 최종본만  # fmt: skip
-                    out += [d for d in parse_disclosures(j["list"]) if d.ticker in tickers]
+                    j = self._list("list.json", bgn_de=lo.strftime("%Y%m%d"), end_de=hi.strftime("%Y%m%d"),
+                                   corp_cls=cls, page_no=page, page_count=100, **params)  # fmt: skip
+                    out += j["list"]
                     if page >= j["total_page"]:
                         break
                     page += 1
             lo = hi + timedelta(days=1)
         return out
+
+    def disclosures(self, start: date, end: date, tickers: set[str]) -> list[Disclosure]:
+        """우리 종목 공시만 남긴다. 정정공시는 최종본만."""
+        return [d for form in self.FORMS for d in parse_disclosures(self._pages(start, end, pblntf_ty=form, last_reprt_at="Y"))
+                if d.ticker in tickers]  # fmt: skip
+
+    def listed(self, today: date) -> list[tuple[str, str]]:
+        """지금 상장된 코스피·코스닥 회사 [(종목코드, 이름)] — 최근 반년 안에 정기보고서(사업·반기·분기)를 낸 회사.
+        DART 회사 목록(corpCode)에는 상장 폐지된 회사도 종목코드를 단 채 남아 있다. 시세 API 는 쓰지 않는다 (data-rights §4)."""
+        rows = self._pages(today - timedelta(days=180), today, pblntf_ty="A")
+        return list({r["stock_code"]: r["corp_name"].strip() for r in rows if re.fullmatch(r"\d{6}", r.get("stock_code") or "")}.items())
 
     def financials(self, tickers: list[str], year: int) -> list[Financial]:
         """다중회사 주요계정(사업보고서) — 100개씩 1콜. 연결이 있으면 연결, 없으면 별도."""

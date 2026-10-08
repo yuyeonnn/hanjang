@@ -68,7 +68,7 @@ def test_unknown_stock_and_forged_cookie():
     app, con = _app()
     ck = _login(app)
     _, h, _ = call(app, "/add", "POST", "q=" + quote("없는회사"), ck)
-    assert "아직 노트가 없어요" in unquote(h["Location"])
+    assert "상장사에서 찾지 못했어요" in unquote(h["Location"])
     assert "시작하기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
     assert web.safe_url("javascript:alert(1)") == "#"
 
@@ -516,3 +516,16 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
     assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>")  # 내 종목 공시가 시장 일정보다 위
     assert "line-clamp-2" not in html_  # 칸 안 칩은 한 줄
     assert sources.macro_events("2026-11-01", "2026-11-30")[0] == ("2026-11-03", "물가", "KR", "한국 소비자물가 발표")
+
+
+def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
+    """코스닥 등 노트가 아직 없는 상장사도 담긴다 — 카드는 「내일 아침」, 검색 목록(/stocks.js)엔 상장사 전체."""
+    app, con = _app()
+    collect.save_universe(con, [("005930", "삼성전자")], {}, [("247540", "에코프로비엠"), ("005930", "삼성전자")])
+    assert dict(con.execute("select ticker, active from stocks")) == {"005930": 1, "247540": 0}
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("에코프로 비엠"), ck)
+    assert con.execute("select ticker from holdings order by ticker").fetchall()[-1] == ("247540",)
+    assert "내일 아침 7시에 첫 노트" in call(app, "/", cookie=ck)[2]
+    js = call(app, "/stocks.js")[2]
+    assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]

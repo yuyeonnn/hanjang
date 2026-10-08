@@ -10,8 +10,12 @@ DISCLOSURE_DAYS = 90
 MACRO_DAYS = 400  # 민감도(250거래일)에 넉넉히 — 쓰는 건 시세를 산 뒤
 
 
-def save_universe(con: sqlite3.Connection, picked: list[tuple[str, str]], corps: dict[str, str]):
-    """새로 고른 종목만 active. 빠진 종목은 지우지 않고 active=0 (ERD stocks)."""
+def save_universe(con: sqlite3.Connection, picked: list[tuple[str, str]], corps: dict[str, str],
+                  listed: list[tuple[str, str]] = ()):
+    """새로 고른 종목만 active. 빠진 종목은 지우지 않고 active=0 (ERD stocks).
+    listed = 상장 회사 전체 — 검색·담기용으로 active=0 으로 넣어 둔다. 누가 담으면 다음 받기부터 active."""
+    con.executemany("insert into stocks (ticker, name, corp_code, active) values (?, ?, ?, 0) on conflict(ticker) do update set"
+                    " name = excluded.name, corp_code = excluded.corp_code", [(t, n, corps.get(t)) for t, n in listed])  # fmt: skip
     con.execute("update stocks set active = 0")
     con.executemany(
         "insert into stocks (ticker, name, corp_code, active) values (?, ?, ?, 1) on conflict(ticker) do update set"
@@ -67,10 +71,16 @@ def main(today: date) -> None:
     # 문장마다 바로 저장 — 받기는 몇 분 걸려서, 끝에 한 번 저장하면 그동안 화면이 DB 에 못 써서 오류가 난다 (2026-10-08 사이트 500)
     con.isolation_level = None
     dart = sources.Dart()
+    # 노트를 쓰는 종목 = universe.txt(코스피 큰 회사 100곳) + 누군가 담은 종목(코스닥 포함). 나머지 상장사는 검색에만
+    listed = dart.listed(today)
     picked = sources.kospi_universe()
+    held = {t for (t,) in con.execute("select distinct ticker from holdings")} - {t for t, _ in picked}
+    names = dict(con.execute("select ticker, name from stocks")) | dict(listed)  # 막 상장해 정기보고서가 아직 없는 회사도 담겼으면 쓴다
+    extra = [(t, names[t]) for t in sorted(held) if t in names]
+    picked += extra
     tickers = [t for t, _ in picked]
-    save_universe(con, picked, dart.corps())
-    print(f"종목 {len(tickers)}개 (universe.txt)")
+    save_universe(con, picked, dart.corps(), listed)
+    print(f"종목 {len(tickers)}개 (universe.txt + 담은 종목 {len(extra)}개) · 상장사 {len(listed)}곳")
 
     fin = [f for y in range(today.year - 1, today.year - 6, -1) for f in dart.financials(tickers, y)]  # 5년 — 노트 위 차트
     save_financials(con, fin)
