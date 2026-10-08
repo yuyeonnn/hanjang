@@ -610,6 +610,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(\d년)년", r"\1", text)
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
+    text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
     return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
 
 
