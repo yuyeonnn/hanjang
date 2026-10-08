@@ -1456,6 +1456,11 @@ class App:
 
     # ---- 큰손 포트폴리오 (읽기 팁 맨 아래) — 기관이 5% 넘게 가진 종목, 전체 상장사 ----
 
+    # 기관 홈페이지 — 로고(Brandfetch)를 찾는 열쇠. 없으면 색 동그라미 (국민연금은 흰 로고라 뺌, 계열사는 그룹 로고가 또렷함)
+    BIG_HOME = {"blackrock": "blackrock.com", "capital": "capitalgroup.com", "samsungam": "samsung.com",
+                "miraeam": "miraeasset.com", "shinhanam": "shinhangroup.com", "kbam": "kbfg.com",
+                "kitm": "kitmc.com", "align": "alignpartners.co.kr", "silchester": "silchester.com", "pzena": "pzena.com"}  # fmt: skip
+
     def big_list(self) -> str:
         counts = dict(self.con.execute("select inst, count(*) from big_holdings group by inst").fetchall())
         rows = [(k, v) for k, v in holders.BIG.items() if counts.get(k)]
@@ -1463,7 +1468,7 @@ class App:
             return ""
         rows.sort(key=lambda kv: -counts[kv[0]])
         items = "".join(
-            f'<a href="/learn/big/{k}" class="py-3.5 flex items-center gap-space-md">{self.face(name, "w-10 h-10")}'
+            f'<a href="/learn/big/{k}" class="py-3.5 flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(k), "w-10 h-10")}'
             f'<span class="flex flex-col min-w-0 flex-1"><span class="font-body-reading-strong text-body-compact text-on-surface">{e(name)}</span>'
             f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(intro)}</span></span>'
             f'<span class="text-[12px] text-outline shrink-0">{counts[k]:,}종목</span></a>' for k, (name, _, intro) in rows)  # fmt: skip
@@ -1493,7 +1498,7 @@ class App:
                     f'<span class="text-[11px] text-outline shrink-0">{e(d[2:].replace("-", "."))}</span></a>')  # fmt: skip
 
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{self.face(name, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳</span></div></header>'
                 f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
                 + donut([sector(x) for x in inds])
