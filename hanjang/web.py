@@ -425,7 +425,7 @@ EVENT_EXPLAIN = {
 }
 EVENT_SHORT = {"BUYBACK": "자사주", "DIVIDEND": "배당", "EARNINGS": "실적", "MAJOR_CONTRACT": "계약",
                "RIGHTS_ISSUE": "증자", "BONUS_ISSUE": "무상증자", "CB_BW": "전환사채", "LAWSUIT": "소송",
-               "MA": "합병·인수", "HOLDER_CHANGE": "대주주", "CLINICAL": "임상", "TRADING_HALT": "거래정지",
+               "MA": "합병·인수", "HOLDER_CHANGE": "대주주", "CLINICAL": "임상", "TRADING_HALT": "거래정지·관리",
                "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
 TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종류에 맞춰
     "BUYBACK": ("자사주 취득 공시는 소각 여부까지 함께 확인해요", "사둔 주식을 없애야(소각) 시중에 도는 주식 수가 실제로 줄어요."),
@@ -729,6 +729,8 @@ class App:
             return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1", form.get("c", ""))
         if path.startswith("/static/photos/") and re.fullmatch(r"(pool/)?[a-z]+\d*\.jpg", path[15:]) and (STATIC / "photos" / path[15:]).exists():
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
+        if path == "/stocks.js":  # 검색 자동완성 — 상장사 이름·코드는 공개 정보라 로그인 없이
+            return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "public, max-age=86400")], self.stocks_js()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
         if path in ("/privacy", "/method"):  # 로그인 없이 열린다
@@ -905,11 +907,20 @@ class App:
         # ponytail: 남의 이메일을 알면 그 계정으로 들어갈 수 있다. 지인 20명 시험이라 감수 — 공개 출시 전에 비밀번호나 카카오 로그인으로 (plan.md)
         return self.start(email, cohort)
 
+    def stocks_v(self) -> str:
+        return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
+
+    def stocks_js(self) -> str:
+        """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만)."""
+        rows = [{"t": t, "n": n, "l": industry_label(c) or ""} for t, n, c in
+                self.con.execute("select ticker, name, induty_code from stocks order by active desc, name")]  # fmt: skip
+        return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
+
     def match(self, q: str) -> str | None:
         """이름·코드 → 종목 코드. 띄어쓰기·대소문자는 무시한다(「삼성 SDI」→ 삼성SDI)."""
         key = re.sub(r"\s+", "", q).upper()
-        row = self.con.execute("select ticker from stocks where active = 1 and (ticker = ? or upper(replace(name, ' ', '')) = ?)",
-                               (key, key)).fetchone()  # fmt: skip
+        row = self.con.execute("select ticker from stocks where ticker = ? or upper(replace(name, ' ', '')) = ? order by active desc",
+                               (key, key)).fetchone()  # 상장사 전체 (코스닥 포함) — 노트가 없던 종목은 다음 아침에 생긴다  # fmt: skip
         return row[0] if row else None
 
     def add_many(self, uid: int, names: list[str]) -> tuple[list[str], list[str], bool]:
@@ -933,7 +944,7 @@ class App:
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
         parts = [f"{len(added)}종목을 담았어요 ({', '.join(added[:5])}{' 외' if len(added) > 5 else ''})."] if added else []
         if unknown:
-            parts.append(f"「{', '.join(unknown[:5])}」은(는) 아직 노트가 없어요 — 코스피 큰 회사 100곳부터 시작했어요.")
+            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요 — 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
         if full:
             parts.append(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요.")
         return " ".join(parts) or "담을 종목을 찾지 못했어요."
@@ -980,12 +991,10 @@ class App:
             " left join notes n on n.ticker = s.ticker and n.week ="
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
-        stocks = [{"t": t, "n": n, "l": industry_label(c) or ""}
-                  for t, n, c in self.con.execute("select ticker, name, induty_code from stocks where active = 1 order by name")]  # fmt: skip
         out = []
         for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or "이번 주 노트를 준비 중이에요."
+            head = b.get("headline") or "새로 담은 종목이에요 — 내일 아침 7시에 첫 노트가 나와요."
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
@@ -1015,8 +1024,9 @@ class App:
                  f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
                  '<footer class="mt-auto px-margin pt-16 pb-6 flex flex-col items-center justify-center gap-1.5 opacity-80"><p class="font-label-micro text-label-micro text-outline text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[13px]">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
-                 # 자동완성 — 노트가 있는 종목(코스피 시총 상위)만. 업종은 DART 업종 코드에서
-                 "<script>const STOCKS=" + json.dumps(stocks, ensure_ascii=False).replace("<", "\\u003c") + ";"
+                 # 자동완성 — 상장사 전체는 /stocks.js 로 따로 (하루 캐시, 100KB 남짓)
+                 f'<script src="/stocks.js?v={self.stocks_v()}"></script><script>'
+                 "const STOCKS=window.STOCKS||[];"
                  "const inp=document.getElementById('stock-search-input'),fly=document.getElementById('search-flyout'),res=document.getElementById('search-results');"
                  "function esc(s){return s.replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
                  "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const hit=STOCKS.filter(s=>s.n.includes(q)||s.t.startsWith(q)).slice(0,6);"
