@@ -208,7 +208,7 @@ class Dart:
                                bsns_year=str(year), reprt_code="11011")["list"]  # fmt: skip
         return parse_financials(rows, year)
 
-    def quarters(self, tickers: list[str], year: int) -> list[Quarter]:
+    def quarters(self, tickers: list[str], year: int) -> "list[Quarter]":  # Quarter 는 아래에 — 서버 파이썬 3.13 은 따옴표가 있어야 한다
         """그해 1분기·반기·3분기 보고서의 매출·영업이익 — 100개씩 1콜 × 보고서 셋. 아직 안 나온 보고서는 빈 목록."""
         corps = self.corps()
         codes = [corps[t] for t in tickers if t in corps]
