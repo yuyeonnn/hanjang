@@ -1039,7 +1039,7 @@ class App:
 
     def calendar(self, uid: int, month: str | None, today: date | None = None) -> str:
         """④ 캘린더 — 한 달 달력. 주말·공휴일은 빨간 숫자, 칸 안에 내 종목의 공시.
-        ponytail: 앞으로의 일정(실적 발표일·배당 기준일)은 공시 본문을 읽어야 나온다 — 지금은 지난 공시만."""
+        앞으로의 일정(events — 공시 원문에서 읽은 실적 발표·주총·배당)은 테두리 칩으로 따로 보인다."""
         today = today or date.today()
         y, m = (int(x) for x in month.split("-")) if month and re.fullmatch(r"\d{4}-\d{2}", month) else (today.year, today.month)
         y, m = (y, m) if 1 <= m <= 12 and 2000 <= y <= 2100 else (today.year, today.month)

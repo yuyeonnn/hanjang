@@ -25,7 +25,7 @@ def notify(con: sqlite3.Connection, week: str) -> int:
     lo, hi = week, (date.fromisoformat(week) + timedelta(days=6)).isoformat()
     hol = con.execute("select date, name from holidays where date between ? and ? order by date", (lo, hi)).fetchall()
     for (uid, email), stocks in by.items():
-        # ponytail: events(앞으로의 회사 일정)는 아직 채우는 곳이 없다 — 공시 본문에서 뽑기 시작하면 여기로 저절로 들어온다
+        # events = 공시 원문에서 읽은 앞으로의 일정 (collect — 실적 발표·주총·배당 기준일·지급일)
         evs = con.execute(
             "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
             " join stocks s on s.ticker = e.ticker where e.date between ? and ? order by e.date", (uid, lo, hi)).fetchall()  # fmt: skip
