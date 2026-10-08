@@ -94,7 +94,7 @@ def main(today: date) -> None:
     picked = sources.kospi_universe()
     held = {t for (t,) in con.execute("select distinct ticker from holdings")} - {t for t, _ in picked}
     names = dict(con.execute("select ticker, name from stocks")) | dict(listed)  # 막 상장해 정기보고서가 아직 없는 회사도 담겼으면 쓴다
-    extra = [(t, names[t]) for t in sorted(held) if t in names]
+    extra = [(t, names[t]) for t in sorted(held) if t in names and not t.startswith("ETF")]  # ETF 는 etf.py 가 따로
     picked += extra
     tickers = [t for t, _ in picked]
     save_universe(con, picked, dart.corps(), listed)
