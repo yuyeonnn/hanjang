@@ -558,3 +558,17 @@ def test_repeated_numbers_and_paragraphs():
     h = web.paras([{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "남겼어요.", "refs": ["F5"]},
                    {"text": "빚이 적어요.", "refs": ["F3"]}], set())
     assert h.count("<p") == 2  # 실적 한 문단 · 살림 한 문단
+
+
+def test_returns_watch_and_cite_tone():
+    d = web.dividend_block([(2025, 100, 10**12, 25.0)], None, [("2026-08-01", 3 * 10**12)])
+    assert "자사주 사기로 한 돈 · 1번" in d and "3.0조원" in d and "2025년 배당" in d
+    assert "자사주" not in web.dividend_block([(2025, 100, 10**12, 25.0)], None, [])
+    fins = [(2025, 1000, 88, 50, 400, 503), (2024, 1000, 97, 50, 400, 400)]
+    h = web.risk_block({"risks": ["수급 불균형에 따른 가격 변동 위험", "차입금 금리 위험", "환율 위험"]}, fins)
+    assert "영업이익률 8.8% (2025년 · 2024년 9.7%)" in h and "부채비율 125.8%" in h and h.count("살펴볼 숫자:") == 2
+    assert web.risk_block({"risks": ["가격 위험", "수요 위험"]}, fins).count("살펴볼 숫자:") == 1  # 같은 숫자는 한 번만
+    h = web.risk_block({"risks": ["발주 계획에 따라 달라짐"]}, fins)
+    assert "매출 1,000원 (2025년 · 전년보다 +0.0%)" in h and "「살펴볼 숫자」는" in h
+    assert "「살펴볼 숫자」는" not in web.risk_block({"risks": ["환율 위험"]}, fins)
+    assert "text-outline/70" in web.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in web.sentence({"text": "재무", "refs": ["F1"]})
