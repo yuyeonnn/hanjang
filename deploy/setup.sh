@@ -4,7 +4,7 @@
 # 도메인이 없으면 IP 로 된 무료 주소: 34-64-1-2.sslip.io
 set -eu
 DOMAIN="$1"
-REPO=https://github.com/yuyeonnn/hanjang.git
+REPO=git@github.com:yuyeonnn/hanjang.git
 UV=/home/hanjang/.local/bin/uv
 
 # 80·443 을 이미 다른 프로그램(caddy 말고)이 쓰면 멈춘다 — 기존 서비스를 건드리지 않으려고
