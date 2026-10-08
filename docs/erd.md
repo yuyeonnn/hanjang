@@ -243,6 +243,16 @@ PK `(follower_id, followee_id)`. 다시 누르면 지운다.
 
 UNIQUE `(user_id, kind, ref, week)`. 피드 = 내가 팔로우한 사람 + 나의 리그램, 최근 50개. 탈퇴하면 팔로우(양쪽)·리그램을 함께 지운다.
 
+### 보고서·피드 재료 (2026-10-08)
+
+| 표 | 칸 | 비고 |
+|---|---|---|
+| `dividends` | ticker · fiscal_year · dps(주당 현금배당금, 보통주) · total(원) · payout(%) | DART 「배당에 관한 사항」 — 해마다 3년치씩 두 번 = 6년 |
+| `business` | ticker(PK) · rcept_no · body(json: what·segments·risks·year) · read_model · read_at | 사업보고서 「사업의 내용」 요약. 숫자는 원문에 글자 그대로 있어야 저장(코드 대조). 같은 해 보고서는 다시 읽지 않는다 |
+| `articles` | id · ref(UNIQUE: 공시·지분 보고 접수번호) · ticker · date · kind · body(json: title·paragraphs·links) · made_at | 피드 「최근 소식」 기사. 한 회사·같은 종류는 14일에 한 편 |
+| `prices` | ticker · date · close | ⚠️ `PRICE_DEV=1` 인 내 컴퓨터에서만 — 시세는 남에게 보일 권리가 없다(data-rights §4) |
+| `stocks.homepage` | 도메인 | DART 회사 개황 — 로고(Brandfetch)를 찾는다 |
+
 ### `feedback` — 주간 설문
 
 | 컬럼 | 타입 | 비고 |

@@ -347,3 +347,46 @@ def test_nickname_is_asked_at_signup_and_unique():
     assert call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[1]["Location"] == "/"
     assert "닉네임을 정해 주세요" not in call(app, "/", cookie=ck)[2]
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=", ck)[1]["Location"]  # 비울 수 없다
+
+
+def test_login_help_page_is_public():
+    app, _ = _app()
+    assert 'href="/help/login"' in call(app, "/")[2]
+    s, _, body = call(app, "/help/login")
+    assert s.startswith("200") and "15분" in body and "비밀번호가 없어요" in body
+
+
+def test_industry_photos_served_and_used():
+    app, con = _app()
+    s, h, body = call_raw(app, "/static/photos/semiconductor.jpg")  # 로그인 없이
+    assert s.startswith("200") and h["Content-Type"] == "image/jpeg" and body[:3] == b"\xff\xd8\xff"
+    assert call_raw(app, "/static/photos/../db.jpg")[1]["Content-Type"].startswith("text/html")  # 다른 파일은 못 꺼낸다(로그인 화면이 나온다)
+    assert web.photo_for(None) == "/static/photos/seoul.jpg"
+    assert all((web.STATIC / "photos" / f"{k}.jpg").exists() for k in set(web.PHOTO.values()) | {"seoul"})
+    ck = _login(app)
+    assert "/static/photos/" in call(app, "/feed", cookie=ck)[2]  # 사진은 피드에만 — 노트 위는 실적 차트
+
+
+def test_note_top_chart_and_logo():
+    c = web.fin_chart([(2024, 300, 30), (2025, 330, -5)])
+    assert "최근 2년 매출·영업이익" in c and "text-tertiary" in c and "DART" in c  # 적자는 다른 색
+    assert "영업이익" in web.fin_chart([(2024, None, 8), (2025, None, 9)]) and "매출·" not in web.fin_chart([(2024, None, 8), (2025, None, 9)])
+    assert web.fin_chart([(2025, 1, 1)]) == ""  # 한 해뿐이면 그리지 않는다
+    assert ">삼<" in web.logo("삼성전자", None)  # 로고를 못 찾으면 첫 글자
+    from hanjang import sources
+    assert sources.domain("www.samsung.com/sec") == "samsung.com" and sources.domain("http://WWW.SKHYNIX.COM") == "skhynix.com"
+    assert sources.domain("-") is None
+
+
+def test_report_blocks_compute_from_dart_numbers():
+    fin = [(2024, 300, 30, 20, 400, 100), (2025, 330, 45, 40, 400, 120)]
+    k = web.keystats(fin, [(2024, 1000, None, None), (2025, 1100, None, None)])
+    assert "2025년 결산" in k and "13.6%" in k and "30.0%" in k and "10.0%" in k and "1,100원" in k and "+10.0%" in k
+    assert "부채비율" not in web.keystats([(2025, None, 9, 5, 50, 500)], [])  # 금융회사는 부채비율을 싣지 않는다
+    t = web.trend_table(fin)
+    assert "25.0%" in t and "13.6%" in t  # 부채비율 100/400 · 영업이익률 45/330
+    d = web.dividend_block([(2024, 1000, 5_000_000_000_000, 25.0), (2025, 1100, 6_000_000_000_000, 30.0)])
+    assert "1,100원" in d and "30.0%" in d and "6.0조원" in d
+    b = web.business_block({"what": ["반도체를 만들어요."], "segments": [{"name": "DS", "share": "39.0%"}], "risks": ["경쟁"], "year": 2025}, "123")
+    assert "39.0%" in b and "rcpNo=123" in b and "2025년 사업보고서" in b
+    assert "회사가 꼽은 위험" in web.risk_block({"risks": ["경쟁이 심해요"]}) and web.risk_block(None) == ""

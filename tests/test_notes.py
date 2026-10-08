@@ -287,3 +287,48 @@ def test_fill_allows_insider_values_verbatim():
     with pytest.raises(ValueError):  # I 를 근거로 들지 않은 문장에선 안 된다
         notes.fill({"text": "늘린 보고가 8건 있었어요.", "refs": []}, by)
     assert notes.dedupe("소식이에요(「A」 · 「B」). 끝") == "소식이에요. 끝"
+
+
+def test_business_summary_numbers_must_be_in_source():
+    src = "2025년 매출은 DX 부문이 56.3%, DS 부문이 39.0%입니다. 반도체 가격 변동이 위험합니다."
+    ok = notes.check_business({"what": ["TV와 반도체를 팔아요."], "risks": ["회사는 반도체 가격 변동을 위험으로 꼽아요."],
+                               "segments": [{"name": "DX 부문", "share": "56.3%"}, {"name": "은행", "share": "약 585조원"}]}, src)  # fmt: skip
+    assert ok["segments"] == [{"name": "DX 부문", "share": "56.3%"}]  # % 가 아닌 줄은 버린다
+    with pytest.raises(ValueError):  # 원문에 없는 숫자
+        notes.check_business({"what": ["매출이 70% 늘었어요."], "risks": [], "segments": []}, src)
+    with pytest.raises(ValueError):  # 예측 말투
+        notes.check_business({"what": ["앞으로 오를 것 같아요."], "risks": [], "segments": []}, src)
+
+
+def test_parse_report_skips_table_of_contents_and_dividends():
+    xml = ('<TD>1. 사업의 개요</TD><TD>목차</TD>'
+           '<TITLE ATOC="Y">1. 사업의 개요</TITLE><P>반도체를 만들어요.</P><TITLE ATOC="Y">3. 원재료</TITLE>'
+           '<TITLE ATOC="Y">7. 기타 참고사항</TITLE><P>경쟁이 심해요.</P><TITLE ATOC="Y">III. 재무에 관한 사항</TITLE>')  # fmt: skip
+    r = sources.parse_report(xml)
+    assert "반도체를 만들어요" in r["overview"] and "목차" not in r["overview"] and "경쟁이 심해요" in r["etc"]
+    rows = [{"se": "주당 현금배당금(원)", "stock_knd": "보통주", "thstrm": "1,668", "frmtrm": "1,446", "lwfr": "-"},
+            {"se": "현금배당금총액(백만원)", "thstrm": "11,107,906", "frmtrm": "9,810,767", "lwfr": "-"},
+            {"se": "(연결)현금배당성향(%)", "thstrm": "25.10", "frmtrm": "29.20", "lwfr": "-"}]  # fmt: skip
+    assert sources.parse_dividends(rows, 2025) == [(2025, 1668, 11107906000000, 25.1), (2024, 1446, 9810767000000, 29.2)]
+
+
+def test_josa_ro_and_broken_direction_rejected():
+    assert notes.josa("1.5조원", "로") == "으로" and notes.josa("서울", "로") == "로" and notes.josa("3.5%", "로") == "로"
+    by = {"F1": {"id": "F1", "text": "x", "tone": 1, "slots": {"값": "1.5조원", "폭": "3.5%", "방향": "늘었"}}}
+    assert notes.fill({"text": "매출은 {F1.값}로 {F1.폭} {F1.방향}어요.", "refs": ["F1"]}, by)["text"] == "매출은 1.5조원으로 3.5% 늘었어요."
+    with pytest.raises(ValueError):
+        notes.fill({"text": "매출이 {F1.폭}{F1.방향} 늘었고", "refs": ["F1"]}, by)
+
+
+def test_article_check_rules():
+    from hanjang import articles
+
+    fs = [{"id": "E1", "text": "9월 15일 국민연금공단의 5% 이상 대량보유 보고 — 보유 비율 7.10%", "url": "u", "tone": 0,
+           "slots": {"날짜": "9월 15일", "누가": "국민연금공단", "비율": "7.10%"}},
+          {"id": "F1", "text": "2025년 매출 10조원", "url": "u", "tone": 1, "slots": {"연도": "2025년", "값": "10조원"}}]  # fmt: skip
+    ok = {"title": "국민연금, 보유 주식을 늘렸어요", "paragraphs": [
+        {"text": "{E1.날짜}에 {E1.누가}가 보고했어요.", "refs": ["E1"]}, {"text": "매출은 {F1.값}이에요.", "refs": ["F1"]}]}
+    assert articles.check(ok, fs)["paragraphs"][0]["text"] == "9월 15일에 국민연금공단이 보고했어요."
+    for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}):
+        with pytest.raises(ValueError):
+            articles.check(ok | bad, fs)

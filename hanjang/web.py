@@ -14,9 +14,10 @@ import sqlite3
 import sys
 import time
 from datetime import date, datetime
+from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, learn, llm, mail, notes, policy
+from hanjang import db, learn, llm, mail, notes, policy, sources
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
@@ -71,6 +72,221 @@ def avatar(initial: str) -> str:
     inside = (f'<img alt="" class="w-full h-full object-cover" src="{e(initial)}">' if initial.startswith("/p/") else e(initial.upper()))
     return (f'<a href="/me" aria-label="내 프로필" class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high flex items-center justify-center '
             f'text-on-surface-variant font-label-regular text-label-regular hover:bg-surface-container-highest transition-colors">{inside}</a>')  # fmt: skip
+
+
+# 업종 → 분위기 사진 (Unsplash 무료 라이선스, hanjang/static/photos/SOURCES.md). 회사 사진이 아니라 주제 사진이다
+STATIC = Path(__file__).parent / "static"
+PHOTO = {"반도체": "semiconductor", "전자부품": "electronics", "전자·통신장비": "electronics", "통신": "telecom",
+         "은행": "bank", "금융서비스": "bank", "증권": "securities", "보험": "insurance", "지주회사": "holding",
+         "제약·바이오": "bio", "연구개발": "bio", "화학": "chemical", "석유정제": "chemical",
+         "2차전지": "battery", "전지": "battery", "자동차": "auto", "타이어·고무": "auto",
+         "조선": "shipbuilding", "해운": "shipping", "무역·도매": "shipping", "물류": "logistics",
+         "건설": "construction", "엔지니어링": "construction", "기계": "construction",
+         "전기장비": "power", "전선·케이블": "power", "전력·가스": "power",
+         "항공우주": "aero", "방위산업": "aero", "항공": "aero", "철강·금속": "steel",
+         "인터넷 플랫폼": "internet", "소프트웨어": "internet", "IT 서비스": "internet", "게임": "game",
+         "화장품": "cosmetics", "식료품": "food", "엔터테인먼트": "entertainment", "철도차량": "rail"}  # fmt: skip
+
+
+KIND_PHOTO = {"LAWSUIT": "lawsuit", "DIVIDEND": "dividend", "BUYBACK": "dividend", "MAJOR_CONTRACT": "contract"}
+
+
+def photo_for(induty_code: str | None, name: str = "") -> str:
+    label = industry_label(induty_code) or ""
+    key = "bank" if label == "지주회사" and "금융" in name else PHOTO.get(label, "seoul")  # 금융지주는 은행 사진
+    return f"/static/photos/{key}.jpg"
+
+
+def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
+    """뉴닉식 한 줄 — 왼쪽 사진, 오른쪽 제목 · 두 줄 요약 · 출처와 날짜. 글씨는 작게, 줄 사이는 넉넉히 (사용자 10/8)."""
+    return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-3.5 items-start">'
+            f'<img alt="" loading="lazy" class="w-[36%] max-w-[148px] aspect-[4/3] object-cover rounded-lg shrink-0 bg-surface-container" src="{e(img)}">'
+            '<span class="min-w-0 flex flex-col gap-1 pt-0.5">'
+            f'<span class="text-[15px] leading-[21px] font-semibold tracking-tight text-on-surface line-clamp-2">{e(title)}</span>'
+            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(excerpt)}</span>'
+            f'<span class="mt-0.5 text-[11px] leading-4 text-outline"><b class="text-on-surface-variant font-medium">{e(source)}</b>  {e(day)}</span>'
+            "</span></a></article>")  # fmt: skip
+
+
+def gist(body: dict) -> str:
+    """요약 한 줄 — 한 장 요약의 첫 문장, 없으면 첫 절의 첫 문장."""
+    first = body.get("summary") or next((s["sentences"] for s in body.get("sections", []) if s["sentences"]), [])
+    return first[0]["text"] if first else ""
+
+
+def logo(name: str, homepage: str | None, size: str = "w-9 h-9") -> str:
+    """회사 로고 동그라미 — Brandfetch Logo API(무료·출처 표시 의무 없음, .env BRANDFETCH_CLIENT_ID).
+    키나 도메인이 없거나 로고를 못 찾으면 첫 글자 동그라미. 로고는 「이 회사」를 알려주는 데만 쓴다(상표적 사용 아님)."""
+    letter = (f'<span class="{size} shrink-0 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center '
+              f'font-label-regular text-label-regular font-semibold">{e(name[:1])}</span>')  # fmt: skip
+    key = env().get("BRANDFETCH_CLIENT_ID", "")
+    if not (key and homepage):
+        return letter
+    src = f"https://cdn.brandfetch.io/{quote(homepage)}/w/96/h/96/fallback/404?c={quote(key)}"
+    return (f'<span class="{size} shrink-0 rounded-full overflow-hidden bg-surface-container-lowest border border-outline-variant/40 flex items-center justify-center">'
+            f'<img alt="{e(name)} 로고" class="w-full h-full object-contain" loading="lazy" src="{e(src)}" '
+            f'onerror="this.parentNode.outerHTML={e(json.dumps(letter))}"></span>')  # fmt: skip
+
+
+DART_VIEW = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={}"
+
+
+def _ratio(a, b) -> float | None:
+    return a / b * 100 if a is not None and b else None
+
+
+def _pct(x: float | None) -> str:
+    return "—" if x is None else f"{x:.1f}%"
+
+
+def keystats(fin: list[tuple], divs: list[tuple]) -> str:
+    """한눈에 보기 — 최근 결산 핵심 숫자 6칸과 전년 대비. fin = [(연도, 매출, 영업이익, 순이익, 자본, 부채)] 오래된 것부터."""
+    if not fin:
+        return ""
+    y, rev, oi, ni, eq, li = fin[-1]
+    p = fin[-2] if len(fin) > 1 else (None,) * 6
+    d = {r[0]: r[1] for r in divs}
+
+    def chg(cur, prev):
+        if cur is None or prev in (None, 0) or cur <= 0 or prev <= 0:
+            return ""
+        x = (cur - prev) / prev * 100
+        return f'<span class="{"text-secondary" if x >= 0 else "text-tertiary"}">{x:+.1f}%</span>'
+
+    cells = [("매출", notes.won(rev) if rev is not None else None, chg(rev, p[1])),
+             ("영업이익", notes.won(oi) if oi is not None else None, chg(oi, p[2])),
+             ("영업이익률", _pct(_ratio(oi, rev)) if rev else None, ""),
+             ("부채비율", _pct(_ratio(li, eq)) if rev else None, ""),  # 금융회사는 싣지 않는다 (계산 방법)
+             ("ROE", _pct(_ratio(ni, eq)), ""),
+             ("주당 배당금", f"{d[y]:,}원" if d.get(y) else None, chg(d.get(y), d.get(y - 1)))]  # fmt: skip
+    cells = [c for c in cells if c[1]]
+    return ('<section class="mb-space-xl rounded-xl border border-outline-variant/50 overflow-hidden">'
+            f'<div class="px-space-md py-2 bg-surface-container-low flex justify-between items-center"><span class="font-label-regular text-label-regular text-on-surface font-semibold">한눈에 보기 · {y}년 결산</span>'
+            '<span class="font-label-micro text-label-micro text-outline">전년 대비</span></div>'
+            '<div class="grid grid-cols-3">' + "".join(
+                f'<div class="px-space-md py-3 border-t border-outline-variant/40 {"border-l" if i % 3 else ""}"><div class="font-label-micro text-label-micro text-on-surface-variant">{e(k)}</div>'
+                f'<div class="text-[15px] leading-5 font-semibold text-on-surface mt-0.5">{e(v)}</div><div class="font-label-micro text-label-micro">{c}</div></div>'
+                for i, (k, v, c) in enumerate(cells)) + "</div></section>")  # fmt: skip
+
+
+def trend_table(fin: list[tuple]) -> str:
+    """5년 흐름 — 영업이익률 · 부채비율 · ROE (금융회사는 영업이익률·부채비율 없음)."""
+    if len(fin) < 2:
+        return ""
+    fin_co = all(r[1] is None for r in fin)
+    rows = ([] if fin_co else [("영업이익률", [_ratio(r[2], r[1]) for r in fin]), ("부채비율", [_ratio(r[5], r[4]) for r in fin])]) + [
+        ("ROE", [_ratio(r[3], r[4]) for r in fin])]
+    head = "".join(f'<th class="px-1 py-1.5 font-medium text-right">{r[0]}</th>' for r in fin)
+    body = "".join(f'<tr class="border-t border-outline-variant/30"><th class="py-1.5 text-left font-medium text-on-surface-variant">{k}</th>'
+                   + "".join(f'<td class="px-1 py-1.5 text-right {"text-tertiary" if v is not None and v < 0 else "text-on-surface"}">{_pct(v)}</td>' for v in vs) + "</tr>"
+                   for k, vs in rows)  # fmt: skip
+    return ('<div class="mt-space-sm overflow-x-auto"><table class="w-full text-[12px] tabular-nums"><thead class="text-outline"><tr><th></th>' + head + "</tr></thead>"
+            f'<tbody>{body}</tbody></table><p class="mt-1 text-right font-label-micro text-label-micro text-outline">자료: DART 사업보고서 · 계산: 한장</p></div>')  # fmt: skip
+
+
+def business_block(biz: dict | None, rno: str | None) -> str:
+    """무엇으로 돈을 버나요? — 회사 사업보고서 「사업의 내용」을 AI 가 요약(숫자는 원문 그대로인지 코드가 대조) + 부문별 매출 비중 막대."""
+    if not biz:
+        return ""
+    segs = "".join(
+        f'<div class="flex items-center gap-2 py-1"><span class="w-[44%] text-[12px] leading-4 text-on-surface-variant">{e(s["name"])}</span>'
+        f'<span class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><span class="block h-full bg-primary rounded-full" style="width:{min(float(s["share"][:-1]), 100):.1f}%"></span></span>'
+        f'<span class="w-12 text-right text-[12px] font-semibold text-on-surface tabular-nums">{e(s["share"])}</span></div>' for s in biz.get("segments", []))  # fmt: skip
+    link = f'<a class="text-outline underline" href="{DART_VIEW.format(rno)}" target="_blank" rel="noopener">사업보고서 원문</a>' if rno else ""
+    return chapter("무엇으로 돈을 버나요?", " ".join(e(x) for x in biz["what"]),
+                   (f'<div class="mt-space-xs"><div class="font-label-micro text-label-micro text-outline mb-1">부문별 매출 비중</div>{segs}</div>' if segs else "")
+                   + f'<p class="font-label-micro text-label-micro text-outline">회사가 낸 {biz.get("year", "")}년 사업보고서를 요약했어요 · {link}</p>')  # fmt: skip
+
+
+def dividend_block(divs: list[tuple]) -> str:
+    """주주에게 돌려준 것 — 해마다 주당 현금배당금(보통주) 막대 + 최근 배당성향."""
+    divs = [r for r in divs if r[1]]
+    if not divs:
+        return ""
+    top = max(r[1] for r in divs)
+    bars = "".join(f'<div class="flex-1 flex flex-col items-center gap-1"><span class="text-[10px] text-on-surface-variant tabular-nums">{r[1]:,}</span>'
+                   f'<span class="w-full max-w-[28px] rounded-t bg-secondary/80" style="height:{max(r[1] / top * 72, 2):.0f}px"></span>'
+                   f'<span class="text-[10px] text-outline">{r[0]}</span></div>' for r in divs)  # fmt: skip
+    y, dps, total, payout = divs[-1]
+    text = (f"{y}년에는 한 주에 {dps:,}원을 현금으로 나눠 줬어요" + (f"(배당 총액 {notes.won(total)})" if total else "") + "."
+            + (f" 번 돈(순이익)의 {payout:.1f}%를 배당으로 쓴 셈이에요(배당성향)." if payout else ""))  # fmt: skip
+    return chapter("주주에게 돌려준 것", e(text),
+                   f'<div class="flex items-end gap-1 h-[110px] pt-2">{bars}</div>'
+                   '<p class="font-label-micro text-label-micro text-outline">주당 현금배당금(보통주, 원) · 자료: DART 「배당에 관한 사항」</p>')  # fmt: skip
+
+
+def risk_block(biz: dict | None) -> str:
+    if not biz or not biz.get("risks"):
+        return ""
+    items = "".join(f'<li class="flex gap-2"><span class="material-symbols-outlined text-tertiary text-[16px] mt-1">error</span><span>{e(r)}</span></li>' for r in biz["risks"])
+    return chapter("회사가 꼽은 위험", f'<ul class="flex flex-col gap-1.5">{items}</ul>',
+                   '<p class="font-label-micro text-label-micro text-outline">회사가 사업보고서에 스스로 적은 위험이에요. 한장의 판단이 아니에요.</p>')  # fmt: skip
+
+
+def price_chart(points: list[tuple[str, int]]) -> str:
+    """토스처럼 — 종가 선 · 기간 안 최고·최저 · 1주/3달/1년. 올랐으면 빨강, 내렸으면 파랑(국내 관례).
+    ⚠️ 개발 중 개인용만(PRICE_DEV) — 남에게 보이는 서버엔 그리지 않는다."""
+    if len(points) < 5:
+        return ""
+    data = json.dumps([[d, v] for d, v in points])
+    last, prev = points[-1][1], points[-2][1]
+    diff = last - prev
+    tone = "text-[#e0464c]" if diff > 0 else "text-[#3182f6]" if diff < 0 else "text-on-surface-variant"
+    btn = "px-3 py-1 rounded-lg font-label-regular text-label-regular text-on-surface-variant"
+    return ('<figure class="mb-space-lg">'
+            f'<div class="flex items-baseline gap-2"><span class="font-headline-lg text-headline-lg text-on-surface">{last:,}원</span>'
+            f'<span class="font-label-regular text-label-regular {tone}">어제보다 {diff:+,}원 ({diff / prev * 100:+.1f}%)</span></div>'
+            '<svg id="pc" viewBox="0 0 340 170" class="w-full h-auto mt-2" role="img" aria-label="주가 흐름"></svg>'
+            '<div class="flex justify-around mt-1">' + "".join(f'<button type="button" class="{btn}" data-d="{d}">{t}</button>' for d, t in ((7, "1주"), (91, "3달"), (365, "1년")))
+            + '</div><p class="mt-1 font-label-micro text-label-micro text-tertiary">⚠️ 개발용 — 주가는 개인용으로만 받은 것이라 남에게 보여주면 안 돼요. 하루 늦은 종가예요.</p></figure>'
+            "<script>(()=>{const P=" + data + ";const svg=document.getElementById('pc');"
+            "function draw(days){const end=new Date(P[P.length-1][0]);const from=new Date(end-days*864e5);const p=P.filter(x=>new Date(x[0])>=from);"
+            "const v=p.map(x=>x[1]);const hi=Math.max(...v),lo=Math.min(...v);const W=340,H=170,T=22,B=22,span=(hi-lo)||1;"
+            "const X=i=>8+i*(W-16)/Math.max(p.length-1,1),Y=y=>T+(hi-y)/span*(H-T-B);"
+            "const up=v[v.length-1]>=v[0],c=up?'#e0464c':'#3182f6';const hiI=v.indexOf(hi),loI=v.indexOf(lo);"
+            "const lbl=(i,y,t,dy)=>{const x=Math.min(Math.max(X(i),48),W-48);return `<text x='${x}' y='${Y(y)+dy}' text-anchor='middle' font-size='11' fill='${c}'>${t} ${y.toLocaleString()}원</text>`};"
+            "svg.innerHTML=`<polyline fill='none' stroke='${c}' stroke-width='2' stroke-linejoin='round' points='${p.map((x,i)=>X(i)+','+Y(x[1])).join(' ')}'/>`"
+            "+`<circle cx='${X(hiI)}' cy='${Y(hi)}' r='2.5' fill='${c}'/>`+`<circle cx='${X(loI)}' cy='${Y(lo)}' r='2.5' fill='${c}'/>`"
+            "+lbl(hiI,hi,'최고',-8)+lbl(loI,lo,'최저',16);"
+            "document.querySelectorAll('[data-d]').forEach(b=>b.classList.toggle('bg-surface-container-high',+b.dataset.d===days));}"
+            "document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>draw(+b.dataset.d));draw(91);})();</script>")  # fmt: skip
+
+
+def fin_chart(rows: list[tuple[int, int | None, int | None]]) -> str:
+    """노트 맨 위 — 최근 5년 매출(옅은 막대)·영업이익(진한 막대). 숫자는 DART 사업보고서 그대로(코드가 단위만 바꾼다).
+    금융회사는 매출이 없어 영업이익만. 적자는 0선 아래로. 주가 차트는 시세 계약 전까지 없다(data-rights §4)."""
+    rows = [r for r in rows if r[1] is not None or r[2] is not None]
+    if len(rows) < 2:
+        return ""
+    vals = [v for _, a, b in rows for v in (a, b) if v is not None]
+    hi, lo = max(max(vals), 0), min(min(vals), 0)
+    W, H, top, bottom = 340, 150, 18, 22
+    span = (hi - lo) or 1
+    zero = top + (hi / span) * (H - top - bottom)
+    step = W / len(rows)
+    has_rev = any(a is not None for _, a, _ in rows)
+    bw = 16 if has_rev else 24
+    parts = [f'<line x1="0" x2="{W}" y1="{zero:.1f}" y2="{zero:.1f}" stroke="currentColor" class="text-outline-variant" stroke-width="0.5"/>']
+    for i, (y, rev, oi) in enumerate(rows):
+        cx = step * i + step / 2
+        bars = ([(rev, "text-primary-fixed-dim", cx - bw - 1)] if has_rev else []) + [(oi, "text-primary", cx + 1 if has_rev else cx - bw / 2)]
+        for v, cls, x in bars:
+            if v is None:
+                continue
+            h = abs(v) / span * (H - top - bottom)
+            yy = zero - h if v >= 0 else zero
+            parts.append(f'<rect x="{x:.1f}" y="{yy:.1f}" width="{bw}" height="{max(h, 1):.1f}" rx="2" fill="currentColor" class="{"text-tertiary" if v < 0 else cls}"/>')
+        top_v = rev if has_rev and rev is not None else oi
+        label_y = zero - abs(top_v) / span * (H - top - bottom) - 5 if top_v and top_v > 0 else zero - 5
+        parts.append(f'<text x="{cx:.1f}" y="{label_y:.1f}" text-anchor="middle" font-size="9" fill="currentColor" class="text-on-surface-variant">{e(notes.won(top_v))}</text>' if top_v is not None else "")
+        parts.append(f'<text x="{cx:.1f}" y="{H - 6}" text-anchor="middle" font-size="10" fill="currentColor" class="text-outline">{y}</text>')
+    key = ('<span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-primary-fixed-dim"></span>매출</span>' if has_rev else "")
+    key += '<span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-primary"></span>영업이익</span>'
+    return ('<figure class="mb-space-lg rounded-xl bg-surface-container-low px-space-md pt-space-sm pb-1">'
+            '<figcaption class="flex items-center justify-between mb-1"><span class="font-label-regular text-label-regular text-on-surface font-semibold">'
+            f'최근 {len(rows)}년 {"매출·" if has_rev else ""}영업이익</span><span class="flex gap-2 font-label-micro text-label-micro text-on-surface-variant">{key}</span></figcaption>'
+            f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="최근 {len(rows)}년 실적">{"".join(parts)}</svg>'
+            '<p class="text-right font-label-micro text-label-micro text-outline pb-1">자료: DART 사업보고서</p></figure>')  # fmt: skip
 
 
 def photo_url(uid: int, at: str | None) -> str | None:
@@ -274,8 +490,11 @@ def redone(week: str, made: str) -> str:
 
 
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
-                industry: str | None = None, initial: str = "", survey: str = "", made: str = "",
-                stats: tuple[int, int, bool] = (0, 0, False), regram: str = "") -> str:
+                industry: str | None = None, initial: str = "", survey: str = "", made: str = "", homepage: str | None = None,
+                stats: tuple[int, int, bool] = (0, 0, False), regram: str = "", fin: list | None = None,
+                prices: list | None = None, report: dict | None = None) -> str:
+    """report = {"fin": [(연도, 매출, 영업이익, 순이익, 자본, 부채)], "divs": [(연도, 주당배당, 총액, 배당성향)], "biz": 요약, "rno": 사업보고서}."""
+    report = report or {}
     """stats = (이 주 노트를 연 횟수, 좋아요 수, 내가 눌렀나)."""
     facts = facts or []
     every = body["summary"] + [x for sec in body["sections"] for x in sec["sentences"]] + body.get("good", []) + body.get("concern", [])
@@ -287,25 +506,28 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     parts = [
         '<div class="flex items-center justify-between py-space-sm mb-space-xs"><button class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors py-1 group" onclick="location.href=\'/\'" type="button"><span class="material-symbols-outlined text-[18px] transition-transform group-hover:-translate-x-0.5">arrow_back</span>'
         f'<span class="font-label-regular text-label-regular text-on-surface-variant font-medium">내 종목 · {e(week)} 주 노트{e(redone(week, made))}</span></button></div>',
-        '<header class="mb-space-lg"><div class="flex items-baseline gap-2 mb-1">'
+        f'<header class="mb-space-lg"><div class="flex items-center gap-2.5 mb-1">{logo(name, homepage, "w-10 h-10")}'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2>'
         f'<span class="font-label-micro text-label-micro text-outline tracking-wider uppercase font-mono">{e(ticker)}</span></div>'
         f'<div class="flex items-center gap-space-sm text-on-surface-variant font-label-regular text-label-regular">{tag_html}'
         '<span class="w-1 h-1 rounded-full bg-outline-variant"></span><span class="text-secondary font-medium">연간 결산 분석</span></div>'
         + (f'<p class="mt-1 font-label-regular text-label-regular text-outline">{e(made[:10].replace("-", "."))} · 읽음 {stats[0]:,}</p>' if re.match(r"\d{4}-\d{2}-\d{2}", made) else "")
         + '</header>',
+        (price_chart(prices) if prices else fin_chart(fin or [])),
         f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(body["headline"])}"</p></aside>',
     ]  # fmt: skip
     if body.get("summary"):
         parts.append('<section class="mb-space-xl pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
                      f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s) for s in body["summary"])}</p></section>')  # fmt: skip
+    parts.append(keystats(report.get("fin", []), report.get("divs", [])))
+    parts.append(business_block(report.get("biz"), report.get("rno")))
     nd = sum(f["id"][0] == "D" for f in facts)
     good_d, bad_d = sum(f["id"][0] == "D" and f["tone"] == 1 for f in facts), sum(f["id"][0] == "D" and f["tone"] == -1 for f in facts)
     for sec in body["sections"]:
         text = " ".join(sentence(s) for s in sec["sentences"])
         extra = ""
         if sec["title"].startswith("회사 사정"):
-            extra = metrics(facts) + glossary(used)
+            extra = (fin_chart([r[:3] for r in report.get("fin", [])]) if prices else "") + trend_table(report.get("fin", [])) + glossary(used)
         elif sec["title"].startswith("요즘 무슨"):
             right = (f"반가운 쪽 {good_d}" + (f" · 걸리는 쪽 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
@@ -321,6 +543,12 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         if sec["title"].startswith("요즘 기사"):
             extra += '<p class="font-label-micro text-label-micro text-tertiary">⚠️ 개발용 — 기사 제목은 개인용으로만 모은 것이라 남에게 보여주면 안 돼요.</p>'
         parts.append(chapter(sec["title"], text, extra))
+        if sec["title"].startswith("요즘 무슨"):
+            parts.append(dividend_block(report.get("divs", [])))
+    if not any(s["title"].startswith("요즘 무슨") for s in body["sections"]):
+        parts.append(dividend_block(report.get("divs", [])))
+    parts.append(risk_block(report.get("biz")))
+
     def filled(key):  # 옛 노트의 「분류된 것 없음」 자리 채움 문장도 빈 칸으로 본다
         return [] if body.get(f"{key}_title") == "분류된 것 없음" else body.get(key) or []
 
@@ -417,7 +645,9 @@ class App:
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
             return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1")
-        if path in ("/privacy", "/method"):  # 로그인 없이 열린다
+        if path.startswith("/static/photos/") and re.fullmatch(r"[a-z]+\.jpg", path[15:]) and (STATIC / "photos" / path[15:]).exists():
+            return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
+        if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
             email = check_login(query.get("t", ""), self.secret, self.clock())
@@ -468,6 +698,9 @@ class App:
             ticker = path[3:]
             self.log(uid, "note", ticker)
             return self.note(uid, ticker, query.get("thanks") == "1")
+        if path.startswith("/a/") and path[3:].isdigit():
+            self.log(uid, "article", path[3:])
+            return self.article(uid, int(path[3:]))
         if path == "/feed":
             self.log(uid, "feed")
             return "200 OK", [], self.feed(uid, query.get("q", "").strip())
@@ -541,7 +774,8 @@ class App:
                  '<label class="flex items-start gap-2 mt-3 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="agree" required type="checkbox" value="1">'
                  '<span>[필수] 이메일 수집·이용에 동의해요 — <a class="text-primary underline" href="/privacy" target="_blank">개인정보 처리방침</a></span></label>'
                  f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">{"링크 다시 받기" if sent else "로그인 링크 받기"}</span><span class="material-symbols-outlined text-base">{"refresh" if sent else "arrow_forward"}</span></button>'
-                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">복잡한 비밀번호 설정 없이, 메일로 온 링크를 누르면 바로 연결돼요. 받는 개인정보는 이메일 하나뿐이에요.</p></form>'
+                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">복잡한 비밀번호 설정 없이, 메일로 온 링크를 누르면 바로 연결돼요. 받는 개인정보는 이메일 하나뿐이에요.</p>'
+                 '<a class="block text-center mt-2 font-label-regular text-label-regular text-primary underline underline-offset-2" href="/help/login">로그인 링크가 안 와요</a></form>'
                  + box + '</div>'
                  '<div class="mt-8 flex flex-col gap-4"><div class="grid grid-cols-2 gap-4 pt-2 border-t border-outline-variant/30"><div class="flex flex-col gap-1"><div class="flex items-center gap-1.5 text-primary"><span class="material-symbols-outlined text-base">description</span><span class="font-body-reading-strong text-label-regular">공시 기반 해설</span></div><p class="font-label-micro text-label-micro text-on-surface-variant leading-relaxed">어려운 DART 공시와 분기 보고서를 일상 언어로 풀어냅니다.</p></div><div class="flex flex-col gap-1"><div class="flex items-center gap-1.5 text-secondary"><span class="material-symbols-outlined text-base">spa</span><span class="font-body-reading-strong text-label-regular">소음 없는 담백함</span></div><p class="font-label-micro text-label-micro text-on-surface-variant leading-relaxed">빨강·파랑 시세창 대신 기업 본질을 천천히 읽는 시간.</p></div></div>'
                  '<div class="text-center px-4 mt-4"><div class="inline-flex items-center justify-center gap-2 mb-2"><span class="w-4 h-[1px] bg-outline-variant"></span><span class="font-citation-ref text-citation-ref text-outline">한장의 약속</span><span class="w-4 h-[1px] bg-outline-variant"></span></div><p class="font-label-regular text-label-regular text-outline leading-relaxed">이해를 위한 서비스예요. 수익률을 장담하거나 종목을 추천하지 않아요.</p></div></div></div>'
@@ -635,18 +869,18 @@ class App:
     def cards(self, uid: int, msg: str | None, sort: str | None = None) -> str:
         order = "s.name" if sort == "name" else "h.added_at"
         rows = self.con.execute(
-            "select s.ticker, s.name, n.week, n.body, n.facts from holdings h join stocks s using(ticker)"
+            "select s.ticker, s.name, n.week, n.body, n.facts, s.homepage from holdings h join stocks s using(ticker)"
             " left join notes n on n.ticker = s.ticker and n.week ="
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
         stocks = [{"t": t, "n": n, "l": industry_label(c) or ""}
                   for t, n, c in self.con.execute("select ticker, name, induty_code from stocks where active = 1 order by name")]  # fmt: skip
         out = []
-        for t, name, week, body, facts in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
+        for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             head = json.loads(body)["headline"] if body else "이번 주 노트를 준비 중이에요."
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
-                       f'<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e(t)}</span><span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
+                       f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e(t)}</span><span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
                        f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p></a>'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
@@ -667,9 +901,9 @@ class App:
                  + '<header class="px-margin pt-5 pb-2"><div class="flex items-baseline justify-between mb-1"><div class="flex items-center gap-2"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">내 종목</h1>'
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant flex items-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-primary">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p></header>'
+                 '</header>'
                  f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
-                 '<footer class="px-margin pt-4 pb-8 flex flex-col items-center justify-center gap-2"><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
+                 '<footer class="px-margin pt-4 pb-8 flex flex-col items-center justify-center gap-2"><p class="font-label-regular text-label-regular text-on-surface-variant text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-primary">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 노트가 있는 종목(코스피 시총 상위)만. 업종은 DART 업종 코드에서
                  "<script>const STOCKS=" + json.dumps(stocks, ensure_ascii=False).replace("<", "\\u003c") + ";"
@@ -738,17 +972,28 @@ class App:
 
     def note(self, uid: int, ticker: str, thanks: bool = False):
         row = self.con.execute(
-            "select s.name, n.week, n.body, n.writer, n.facts, s.induty_code, n.made_at from stocks s join notes n using(ticker)"
+            "select s.name, n.week, n.body, n.writer, n.facts, s.induty_code, n.made_at, s.homepage from stocks s join notes n using(ticker)"
             " where s.ticker = ? order by n.week desc limit 1", (ticker,)).fetchone()  # fmt: skip
         if not row:
             return "404 Not Found", [], self.simple("없음", "이 종목은 아직 노트가 없어요. <a class='text-primary underline' href='/'>내 종목</a>")
-        name, week, body, writer, facts, ind, made = row
+        name, week, body, writer, facts, ind, made, home = row
         (views,) = self.con.execute("select count(*) from views where page = 'note' and ticker = ? and at >= ?", (ticker, week)).fetchone()
         (likes,) = self.con.execute("select count(*) from likes where ticker = ? and week = ?", (ticker, week)).fetchone()
         liked = bool(self.con.execute("select 1 from likes where user_id = ? and ticker = ? and week = ?", (uid, ticker, week)).fetchone())
         return "200 OK", [], render_note(name, ticker, week, json.loads(body), writer, json.loads(facts), ind,
-                                         self.initial(uid), self.survey(uid, ticker, week, thanks), made, (views, likes, liked),
-                                         self.regram_form(uid, "note", ticker, week))  # fmt: skip
+                                         self.initial(uid), self.survey(uid, ticker, week, thanks), made, home, (views, likes, liked),
+                                         self.regram_form(uid, "note", ticker, week),
+                                         self.con.execute("select fiscal_year, revenue, operating_income from financials where ticker = ?"
+                                                          " order by fiscal_year desc limit 5", (ticker,)).fetchall()[::-1],
+                                         self.con.execute("select date, close from prices where ticker = ? order by date", (ticker,)).fetchall()
+                                         if sources.price_dev() else None, self.report(ticker))  # fmt: skip
+
+    def report(self, ticker: str) -> dict:
+        fin = self.con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities from financials"
+                               " where ticker = ? order by fiscal_year desc limit 5", (ticker,)).fetchall()[::-1]  # fmt: skip
+        divs = self.con.execute("select fiscal_year, dps, total, payout from dividends where ticker = ? order by fiscal_year", (ticker,)).fetchall()
+        biz = self.con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
+        return {"fin": fin, "divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None}
 
     # ---- 캘린더 (시안 _4) ----
 
@@ -777,7 +1022,6 @@ class App:
             kinds[r[2]] = kinds.get(r[2], 0) + 1
         prev = f"{y - (m == 1)}-{(m - 2) % 12 + 1:02d}"
         nxt = f"{y + (m == 12)}-{m % 12 + 1:02d}"
-        nav_btn = "flex items-center px-space-sm py-1 rounded-lg bg-surface-container hover:bg-surface-container-high transition-colors text-primary font-label-regular text-label-regular"
         cells = []
         for wk in weeks:
             for i, d in enumerate(wk):
@@ -814,26 +1058,39 @@ class App:
                          f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><span class="">{e(src)}</span></div></article></a>')  # fmt: skip
         if not items:
             items.append('<p class="py-3.5 font-body-compact text-body-compact text-on-surface-variant">이 달엔 내 종목의 큰 공시가 없어요.</p>')
-        top_kind = max(kinds, key=kinds.get) if kinds else None
-        tip_h, tip_b = TIPS.get(top_kind, TIP_DEFAULT)
+        # 이 달 일정에 나온 공시 종류마다 그에 맞는 읽기 팁 글 — 많이 나온 종류부터, 같은 글은 한 번, 최대 3편
+        picks = {}
+        for kind in sorted(kinds, key=kinds.get, reverse=True):
+            picks.setdefault(learn.FOR_EVENT.get(kind, "disclosure"), kind)
+        tips = "".join(
+            f'<a href="/learn/{slug}" class="py-3 flex items-center gap-space-md"><div class="w-12 h-12 rounded-lg flex-shrink-0 bg-surface-container flex items-center justify-center"><span class="material-symbols-outlined text-primary text-[22px]">menu_book</span></div>'
+            f'<div class="flex flex-col gap-0.5 min-w-0"><span class="font-label-micro text-label-micro text-outline">이 달 {e(EVENT_SHORT.get(kind, kind))} 공시와 관련</span>'
+            f'<p class="font-body-compact text-body-compact text-on-surface font-semibold truncate">{e(learn.BY_SLUG[slug]["title"])}</p>'
+            f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(TIPS.get(kind, TIP_DEFAULT)[0])}</span></div>'
+            '<span class="material-symbols-outlined text-outline text-[18px] ml-auto">chevron_right</span></a>'
+            for slug, kind in list(picks.items())[:3]) or (
+            '<a href="/learn/disclosure" class="py-3 flex items-center gap-space-md"><div class="w-12 h-12 rounded-lg flex-shrink-0 bg-surface-container flex items-center justify-center"><span class="material-symbols-outlined text-primary text-[22px]">menu_book</span></div>'
+            f'<div class="flex flex-col gap-0.5 min-w-0"><p class="font-body-compact text-body-compact text-on-surface font-semibold">{e(learn.BY_SLUG["disclosure"]["title"])}</p>'
+            f'<span class="font-label-micro text-label-micro text-on-surface-variant">{e(TIP_DEFAULT[0])}</span></div></a>')  # fmt: skip
         mix = " · ".join(f"{EVENT_SHORT.get(k, k)} {v}" for k, v in kinds.items()) or "큰 공시 없음"
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6 gap-space-lg">'
                  '<header class="flex flex-col pt-space-xs gap-space-xs"><div class="flex items-center justify-between"><div class="flex items-baseline gap-space-xs">'
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{y}년 {m}월</h1><span class="font-label-micro text-label-micro text-on-surface-variant">공시 타임라인</span></div>'
-                 f'<div class="flex items-center gap-space-xs"><a class="{nav_btn}" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[16px] mr-0.5">chevron_left</span>이전</a>'
-                 f'<a class="{nav_btn}" href="/calendar?m={nxt}">다음<span class="material-symbols-outlined text-[16px] ml-0.5">chevron_right</span></a></div></div>'
+                 '</div>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant">관심 기업의 주요 의사결정과 공시 기록을 날짜별로 천천히 짚어드려요.</p></header>'
                  '<section class="py-space-sm px-1 flex items-center justify-between border-b border-surface-container-high"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-primary text-[20px]">calendar_clock</span><div class="flex items-baseline gap-space-xs">'
                  f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">이번 달 주목할 공시 {len(mine)}건</span><span class="font-label-micro text-label-micro text-on-surface-variant">{e(mix)}</span></div></div>'
                  '</section>'
                  '<section class="flex flex-col gap-1 py-1"><div class="grid grid-cols-7 text-center font-label-micro text-label-micro font-semibold pb-1.5 border-b border-surface-container-high/60"><span class="text-tertiary">일</span><span class="text-on-surface-variant">월</span><span class="text-on-surface-variant">화</span><span class="text-on-surface-variant">수</span><span class="text-on-surface-variant">목</span><span class="text-on-surface-variant">금</span><span class="text-tertiary">토</span></div>'
-                 f'<div class="grid grid-cols-7 gap-1 pt-1">{"".join(cells)}</div></section>'
+                 f'<div class="grid grid-cols-7 gap-1 pt-1">{"".join(cells)}</div>'
+                 '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
+                 f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
+                 f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
                  '<section class="flex flex-col mt-2"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">최신순</span></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
                  f'<div class="flex flex-col">{"".join(items)}</div></section>'
-                 # 시안의 사진 자리 — 쓸 권리가 있는 그림이 없어 회색 빈 칸. 팁 문장은 우리가 쓴 고정 문장
-                 f'<a href="/learn/{learn.FOR_EVENT.get(top_kind, "disclosure")}" class="pt-4 pb-2 border-t border-surface-container-high flex items-center gap-space-md"><div class="w-16 h-16 rounded-lg flex-shrink-0 bg-surface-container flex items-center justify-center"><span class="material-symbols-outlined text-primary text-[28px]">menu_book</span></div><div class="flex flex-col gap-0.5 min-w-0"><span class="font-label-micro text-label-micro text-primary font-bold">주주를 위한 읽기 팁</span>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface truncate font-semibold">{e(tip_h)}</p><span class="font-label-micro text-label-micro text-on-surface-variant">{e(tip_b)}</span></div></a>'
+                 '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
+                 f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section>'
                  '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">지난 공시만 보여요. 앞으로의 일정(실적 발표일·배당일)은 준비 중이에요. 공휴일: 한국천문연구원.</p></footer>'
                  "</div></main>" + bottom_nav("calendar"))  # fmt: skip
         return page("캘린더", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
@@ -881,13 +1138,33 @@ class App:
                  '<div class="flex flex-col gap-1"><span class="font-label-regular text-label-regular text-on-surface font-semibold">프로필 사진</span>'
                  + ('<form method="post" action="/me/photo/delete"><button class="font-label-micro text-label-micro text-outline underline" type="submit">사진 지우기</button></form>' if at else "")
                  + '</div></div>'
-                 # 고른 사진 → 가운데 정사각형으로 잘라 256px JPEG → /me/photo
-                 "<script>document.getElementById('photo-input').addEventListener('change',async ev=>{const f=ev.target.files[0];if(!f)return;"
-                 "try{const b=await createImageBitmap(f);const s=Math.min(b.width,b.height);const c=document.createElement('canvas');c.width=c.height=256;"
-                 "c.getContext('2d').drawImage(b,(b.width-s)/2,(b.height-s)/2,s,s,0,0,256,256);"
-                 "const r=await fetch('/me/photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
+                 # 고른 사진 → 동그라미 안에서 끌어 옮기고 크기를 맞춘 뒤(인스타그램처럼) 보이는 부분만 256px JPEG → /me/photo
+                 '<div class="hidden fixed inset-0 z-[70] bg-on-background/80 flex-col items-center justify-center gap-4 px-margin" id="crop">'
+                 '<p class="font-label-regular text-label-regular text-surface">끌어서 옮기고, 아래 막대로 크기를 맞춰요</p>'
+                 '<div class="relative w-[280px] h-[280px] overflow-hidden rounded-xl bg-black touch-none select-none" id="stage">'
+                 '<img alt="" class="absolute top-0 left-0 max-w-none origin-top-left pointer-events-none" id="crop-img">'
+                 '<div class="absolute inset-0 rounded-full pointer-events-none" style="box-shadow:0 0 0 999px rgba(0,0,0,.55)"></div></div>'
+                 '<input class="w-[280px] accent-primary" id="zoom" max="3" min="1" step="0.01" type="range" value="1" aria-label="사진 크기">'
+                 '<div class="flex gap-3"><button class="px-5 py-2 rounded-lg border border-surface/60 text-surface font-label-regular text-label-regular" id="crop-cancel" type="button">취소</button>'
+                 '<button class="px-5 py-2 rounded-lg bg-primary text-on-primary font-label-regular text-label-regular font-semibold" id="crop-ok" type="button">이대로 저장</button></div></div>'
+                 "<script>(()=>{const S=280,box=document.getElementById('crop'),stage=document.getElementById('stage'),im=document.getElementById('crop-img'),zoom=document.getElementById('zoom');"
+                 "let base=1,k=1,x=0,y=0,drag=null;"
+                 "const clamp=()=>{const w=im.naturalWidth*base*k,h=im.naturalHeight*base*k;x=Math.min(0,Math.max(S-w,x));y=Math.min(0,Math.max(S-h,y));"
+                 "im.style.transform=`translate(${x}px,${y}px) scale(${base*k})`;};"
+                 "const open=()=>{box.classList.remove('hidden');box.classList.add('flex');},close=()=>{box.classList.add('hidden');box.classList.remove('flex');};"
+                 "document.getElementById('photo-input').addEventListener('change',ev=>{const f=ev.target.files[0];if(!f)return;im.onload=()=>{"
+                 "base=S/Math.min(im.naturalWidth,im.naturalHeight);k=1;zoom.value=1;x=(S-im.naturalWidth*base)/2;y=(S-im.naturalHeight*base)/2;clamp();open();};"
+                 "im.src=URL.createObjectURL(f);});"
+                 "stage.addEventListener('pointerdown',e=>{drag=[e.clientX-x,e.clientY-y];stage.setPointerCapture(e.pointerId);});"
+                 "stage.addEventListener('pointermove',e=>{if(!drag)return;x=e.clientX-drag[0];y=e.clientY-drag[1];clamp();});"
+                 "stage.addEventListener('pointerup',()=>drag=null);"
+                 "zoom.addEventListener('input',()=>{const c=S/2,old=base*k;k=+zoom.value;const now=base*k;x=c-(c-x)*now/old;y=c-(c-y)*now/old;clamp();});"
+                 "document.getElementById('crop-cancel').onclick=()=>{close();document.getElementById('photo-input').value='';};"
+                 "document.getElementById('crop-ok').onclick=async()=>{const sc=base*k,c=document.createElement('canvas');c.width=c.height=256;"
+                 "c.getContext('2d').drawImage(im,-x/sc,-y/sc,S/sc,S/sc,0,0,256,256);"
+                 "try{const r=await fetch('/me/photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
                  "const j=await r.json();location.href='/me/settings'+(j.msg?'?msg='+encodeURIComponent(j.msg):'');}"
-                 "catch(err){location.href='/me/settings?msg='+encodeURIComponent('사진을 바꾸지 못했어요. 다시 해 주세요.');}});</script>")  # fmt: skip
+                 "catch(err){location.href='/me/settings?msg='+encodeURIComponent('사진을 바꾸지 못했어요. 다시 해 주세요.');}};})();</script>")  # fmt: skip
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<a class="pt-5 flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/me"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                  '<span class="font-label-regular text-label-regular font-medium">내 프로필</span></a>'
@@ -1029,31 +1306,26 @@ class App:
         cards = []
         for who, nick, kind, ref, week, comment, at, pat in rows:
             if kind == "note":
-                hit = self.con.execute("select s.name, n.body from stocks s left join notes n on n.ticker = s.ticker and n.week = ?"
+                hit = self.con.execute("select s.name, n.body, s.induty_code from stocks s join notes n on n.ticker = s.ticker and n.week = ?"
                                        " where s.ticker = ?", (week, ref)).fetchone()  # fmt: skip
                 if not hit:
                     continue
-                head, sub, href, tag = hit[0], (json.loads(hit[1])["headline"] if hit[1] else ""), f"/n/{ref}", f"{week} 주 노트"
+                b = json.loads(hit[1])
+                head, sub, href, src, img = b["headline"], gist(b), f"/n/{ref}", hit[0], photo_for(hit[2], hit[0])
             else:
                 a = learn.BY_SLUG.get(ref)
                 if not a:
                     continue
-                head, sub, href, tag = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁"
+                head, sub, href, src, img = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁", "/static/photos/securities.jpg"
             d = at[:10].replace("-", ".")
-            who_html = "" if mine else (f'<a href="/u/{who}" class="flex items-center gap-2">{self.face(nick, "w-7 h-7", photo_url(who, pat))}'
-                                        f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(nick)}</span></a>')  # fmt: skip
-            cards.append(f'<article class="py-space-md flex flex-col gap-space-xs"><div class="flex items-center justify-between">{who_html}'
-                         f'<span class="font-label-micro text-label-micro text-outline flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">repeat</span>{d}</span></div>'
-                         + (f'<p class="font-body-compact text-body-compact text-on-surface">{e(comment)}</p>' if comment else "")
-                         + f'<a href="{e(href)}" class="block rounded-xl border border-outline-variant/50 bg-surface-container-low px-space-md py-space-sm hover:bg-surface-container">'
-                         f'<span class="font-label-micro text-label-micro text-outline">{e(tag)}</span>'
-                         f'<p class="font-body-reading-strong text-body-compact text-on-surface">{e(head)}</p>'
-                         f'<p class="font-body-compact text-body-compact text-on-surface-variant line-clamp-2">{e(sub)}</p></a></article>')  # fmt: skip
+            top = "" if mine else (f'<a href="/u/{who}" class="flex items-center gap-2">{self.face(nick, "w-6 h-6", photo_url(who, pat))}'
+                                   f'<span class="font-label-regular text-label-regular text-on-surface-variant"><b class="text-on-surface font-semibold">{e(nick)}</b>님이 리그램</span></a>')  # fmt: skip
+            cards.append(story(href, img, head, sub, src, d, top))
         if not cards:
             return ""
         body = "".join(cards)
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{body}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col">{body}</div></section>')  # fmt: skip
 
     def people(self, uid: int, q: str) -> str:
         if not q:
@@ -1066,23 +1338,62 @@ class App:
         none = '<p class="py-2 font-body-compact text-body-compact text-outline">그런 닉네임이 없어요.</p>'
         return f'<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/80">{items or none}</div>'
 
+    def latest(self, uid: int) -> str:
+        """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
+        rows = self.con.execute(
+            "select a.id, a.kind, a.date, a.body, s.name, s.induty_code, a.ticker in (select ticker from holdings where user_id = ?) mine"
+            " from articles a join stocks s using(ticker) order by mine desc, a.date desc, a.id desc limit 30", (uid,)).fetchall()  # fmt: skip
+        if not rows:
+            return ""
+        items = "".join(
+            story(f"/a/{i}", f"/static/photos/{KIND_PHOTO[k]}.jpg" if k in KIND_PHOTO else photo_for(ind, name),
+                  (b := json.loads(body))["title"], b["paragraphs"][0]["text"], name + (" · 내 종목" if mine else ""), d.replace("-", "."))
+            for i, k, d, body, name, ind, mine in rows)  # fmt: skip
+        return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 소식</h2>'
+                f'<div class="flex flex-col">{items}</div></section>')  # fmt: skip
+
+    def article(self, uid: int, aid: int):
+        row = self.con.execute("select a.ticker, a.kind, a.date, a.body, s.name, s.induty_code from articles a join stocks s using(ticker)"
+                               " where a.id = ?", (aid,)).fetchone()  # fmt: skip
+        if not row:
+            return "404 Not Found", [], self.simple("없음", "없는 기사예요. <a class='text-primary underline' href='/feed'>피드</a>")
+        t, kind, d, body, name, ind = row
+        b = json.loads(body)
+        img = f"/static/photos/{KIND_PHOTO[kind]}.jpg" if kind in KIND_PHOTO else photo_for(ind, name)
+        def cite(p):  # 출처 번호 → 원문 바로 열기 (작은 회색 위첨자)
+            return e(p["text"]) + "".join(f'<a class="{CITE}" href="{e(safe_url(b["links"].get(r, "#")))}" target="_blank" rel="noopener">[{e(r)}]</a>' for r in p["refs"])
+
+        paras = "".join(f'<p class="text-[15px] leading-[27px] text-on-surface mb-4">{cite(p)}</p>' for p in b["paragraphs"])
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+                 '<a class="pt-4 flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/feed"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular">피드</span></a>'
+                 f'<h1 class="mt-space-sm text-[22px] leading-[30px] font-bold tracking-tight text-on-surface">{e(b["title"])}</h1>'
+                 f'<p class="mt-1 text-[12px] text-outline">{e(name)} · {e(d.replace("-", "."))}</p>'
+                 f'<img alt="" class="mt-space-md w-full aspect-[16/10] object-cover rounded-xl" src="{e(img)}">'
+                 '<p class="mt-1 text-right text-[11px] text-outline">주제 사진 · Unsplash</p>'
+                 f'<article class="mt-space-md">{paras}</article>'
+                 f'<a class="mt-space-sm flex items-center justify-between rounded-xl border border-outline-variant/50 px-space-md py-3" href="/n/{e(t)}">'
+                 f'<span class="flex items-center gap-2">{logo(name, self.con.execute("select homepage from stocks where ticker = ?", (t,)).fetchone()[0], "w-8 h-8")}'
+                 f'<span class="text-[14px] font-semibold text-on-surface">{e(name)} 분석 보고서 보기</span></span><span class="material-symbols-outlined text-outline">chevron_right</span></a>'
+                 '<p class="mt-space-md text-[11px] text-outline leading-relaxed">공시·재무에서 코드가 뽑은 사실을 바탕으로 AI가 쓴 글이에요. 숫자는 코드가 원문과 대조했어요. 작은 번호를 누르면 원문이 열려요. 사라·팔아라는 뜻이 아니에요.</p>'
+                 + "</div></main>" + bottom_nav("feed"))  # fmt: skip
+        return "200 OK", [], page(b["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
     def popular(self) -> str:
         """팔로우한 사람의 리그램이 없을 때 — 이번 주 노트를 많이 읽힌 순서로."""
         rows = self.con.execute(
-            "select s.ticker, s.name, n.body, (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week) c"
+            "select s.ticker, s.name, n.body, s.induty_code, n.made_at,"
+            " (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week) c"
             " from notes n join stocks s using(ticker) where n.week = (select max(week) from notes) order by c desc, s.name limit 20").fetchall()  # fmt: skip
-        cards = "".join(f'<a href="/n/{e(t)}" class="py-space-md flex flex-col gap-0.5"><span class="flex items-center justify-between">'
-                        f'<span class="font-body-reading-strong text-body-compact text-on-surface">{e(name)}</span>'
-                        f'<span class="font-label-micro text-label-micro text-outline">읽음 {c:,}</span></span>'
-                        f'<span class="font-body-compact text-body-compact text-on-surface-variant line-clamp-2">{e(json.loads(b)["headline"])}</span></a>'
-                        for t, name, b, c in rows)  # fmt: skip
+        cards = "".join(story(f"/n/{t}", photo_for(ind, name), json.loads(b)["headline"], gist(json.loads(b)), name, made[:10].replace("-", "."))
+                        for t, name, b, ind, made, c in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
-                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{cards}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col">{cards}</div></section>')  # fmt: skip
 
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
-        body = self.regram_list(mine, (uid, uid), "리그램") if n else self.popular()
+        news = self.latest(uid)
+        body = news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램") if n else "") + ("" if news or n else self.popular())
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
@@ -1110,8 +1421,9 @@ class App:
     # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
 
     def doc(self, path: str, uid: int | None) -> str:
-        title, parts = (("개인정보 처리방침", policy.privacy(env().get("PRIVACY_CONTACT", "")))
-                        if path == "/privacy" else ("계산 방법", policy.method()))  # fmt: skip
+        contact = env().get("PRIVACY_CONTACT", "")
+        title, parts = {"/privacy": ("개인정보 처리방침", policy.privacy(contact)), "/method": ("계산 방법", policy.method()),
+                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact))}[path]  # fmt: skip
         body = "".join(
             f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
             + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)

@@ -131,6 +131,53 @@ def _save_code(con, rno: str, title: str, code: str, imp: int, how: str) -> None
                 " where rcept_no = ?", (code, imp, DIRECTION.get(code, 0), how, datetime.now().isoformat(), rno))  # fmt: skip
 
 
+BUSINESS_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["what", "segments", "risks"],
+                   "properties": {"what": {"type": "array", "items": {"type": "string"}},
+                                  "risks": {"type": "array", "items": {"type": "string"}},
+                                  "segments": {"type": "array", "items": {
+                                      "type": "object", "additionalProperties": False, "required": ["name", "share"],
+                                      "properties": {"name": {"type": "string"}, "share": {"type": "string"}}}}}}  # fmt: skip
+
+
+def check_business(j: dict, source: str) -> dict:
+    """사업보고서 요약 검사 — 숫자는 원문에 글자 그대로 있어야 하고, 금지어·예측 말투 없이. 어기면 ValueError(다시 묻는다)."""
+    have = numbers(source)
+    out = {"what": j["what"][:3], "segments": [], "risks": j["risks"][:4]}
+    for s in out["what"] + out["risks"]:
+        if bad := numbers(s) - have:
+            raise ValueError(f"원문에 없는 숫자 {bad}: {s!r}")
+        if FORBIDDEN.search(s) or PREDICT.search(s):
+            raise ValueError(f"금지어·예측: {s!r}")
+    for seg in j["segments"][:5]:
+        if not re.fullmatch(r"\d+(\.\d+)?%", seg["share"].strip()) or numbers(seg["share"]) - have or numbers(seg["name"]) - have:
+            continue  # % 가 아니거나 원문에 없는 비중 줄은 버린다 (금융사는 자산 규모를 쓰는 일이 있다)
+        out["segments"].append({"name": seg["name"].strip(), "share": seg["share"].strip()})
+    if not out["what"]:
+        raise ValueError("빈 요약")
+    return out
+
+
+def read_business(con: sqlite3.Connection, today: date, tickers: list[str] | None = None) -> int:
+    """종목마다 지난해 사업보고서 「사업의 내용」을 한 번 읽어 둔다(같은 보고서는 다시 읽지 않는다). 읽은 수를 돌려준다."""
+    year, n = today.year - 1, 0
+    dart = sources.Dart()
+    rows = con.execute("select s.ticker, b.body from stocks s left join business b using(ticker) where s.active = 1").fetchall()
+    for t, body in rows:
+        if (tickers and t not in tickers) or (body and json.loads(body).get("year") == year):
+            continue
+        rno, text = dart.business_text(t, year)
+        if not rno:
+            continue
+        src = text["overview"] + "\n" + text["etc"]
+        got = llm.ask("reader", "business", {"원문": src}, lambda j: check_business(j, src), BUSINESS_SCHEMA, prompt_file="business")
+        if got:
+            con.execute("insert or replace into business values (?, ?, ?, ?, ?)",
+                        (t, rno, json.dumps(got | {"year": year}, ensure_ascii=False), llm.MODELS["reader"], datetime.now().isoformat()))  # fmt: skip
+            con.commit()
+            n += 1
+    return n
+
+
 def read_disclosures(con: sqlite3.Connection, batch: int = 100) -> tuple[int, int]:
     """(규칙으로 확정, AI 로 분류). 규칙은 이미 AI 가 읽은 공시에도 다시 덮어쓴다 — 규칙이 늘면 과거 공시도 고쳐진다.
     AI 가 빠뜨린 공시는 비워 두고 다음 실행에서 다시 묻는다."""
@@ -324,15 +371,17 @@ def numbers(s: str) -> set[str]:
 
 # 조사 짝 — (받침 없을 때, 받침 있을 때). 빈칸 값 뒤의 조사를 값의 끝소리에 맞춘다(「7월 23일와」→「7월 23일과」)
 JOSA = {"와": ("와", "과"), "과": ("와", "과"), "는": ("는", "은"), "은": ("는", "은"),
-        "가": ("가", "이"), "이": ("가", "이"), "를": ("를", "을"), "을": ("를", "을")}  # fmt: skip
-SLOT_JOSA = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}(?:(와|과|는|은|가|이|를|을)(?![가-힣]))?")
+        "가": ("가", "이"), "이": ("가", "이"), "를": ("를", "을"), "을": ("를", "을"),
+        "로": ("로", "으로"), "으로": ("로", "으로")}  # fmt: skip
+SLOT_JOSA = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}(?:(으로|와|과|는|은|가|이|를|을|로)(?![가-힣]))?")
 
 
 def josa(value: str, p: str) -> str:
     """값의 마지막 글자에 받침이 있으면 「과·은·이·을」. 한글이 아닌 끝(%, 숫자)은 읽는 소리로 — %·퍼센트는 받침 없음."""
     last = value[-1]
     if "가" <= last <= "힣":
-        has = (ord(last) - 0xAC00) % 28 != 0
+        jong = (ord(last) - 0xAC00) % 28
+        has = jong != 0 and not (p in ("로", "으로") and jong == 8)  # ㄹ 받침 + 로 → 「로」
     else:
         has = last in "013678"  # 영·일·삼·육·칠·팔 — 받침 있는 숫자 소리
     return JOSA[p][1 if has else 0]
@@ -399,6 +448,9 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
+    if re.search(r"(늘었|줄었|돌아섰|이어졌)(?![어고는지으다던기])", text) or re.search(r"(늘었|줄었)\S*\s*(늘었|줄었|증가|감소|성장)", text):
+        raise ValueError(f"방향 낱말이 어색하게 이어짐: {text!r}")
+    text = text.replace("「「", "「").replace("」」", "」")
     if "{" in text or "}" in text:  # 영어 이름 같은, 정해 두지 않은 빈칸을 지어낸 경우 (「{N1.body}」)
         raise ValueError(f"없는 빈칸이 남음: {raw!r}")
     kinds = [by[fid]["slots"]["종류"] for fid, key in used if key == "종류"]
@@ -571,6 +623,7 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
     """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
+    print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건")
     print(f"공시 읽기 — 규칙 {ruled}건 · AI {ai}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]

@@ -196,5 +196,5 @@ def long_short(con) -> dict | None:
     return BY_SLUG["long-short"] | {"body": body, "charts": got}
 CATS = list(dict.fromkeys(a["cat"] for a in ARTICLES))
 # 캘린더의 「주주를 위한 읽기 팁」에서 이어 줄 글 — 공시 종류별
-FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "disclosure",
+FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "statements",
              "RIGHTS_ISSUE": "disclosure", "CB_BW": "disclosure"}  # fmt: skip

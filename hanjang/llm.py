@@ -43,10 +43,11 @@ def _openai(model: str, system: str, user: str | list, schema: dict | None = Non
     return j["choices"][0]["message"]["content"]
 
 
-def ask(prompt: str, task: str, payload, check, schema: dict | None = None, image: str | None = None):
+def ask(prompt: str, task: str, payload, check, schema: dict | None = None, image: str | None = None,
+        prompt_file: str | None = None):
     """묻고 `check(parsed)` 로 검사 — 실패하면 두 번까지 다시, 그래도 실패면 None.
     같은 입력에도 답이 매번 조금 달라서, 한 번 더 물으면 통과하는 일이 많다(실측 12장 중 2장)."""
-    system = (PROMPTS / f"{prompt}.md").read_text(encoding="utf-8")
+    system = (PROMPTS / f"{prompt_file or prompt}.md").read_text(encoding="utf-8")  # prompt = 모델(MODELS 의 열쇠)
     user = json.dumps({"task": task, "input": payload}, ensure_ascii=False, default=str)
     if image:  # 사진 한 장(data URL) — 캡처 읽기. 저장하지 않고 이 요청에만 싣는다
         user = [{"type": "text", "text": user}, {"type": "image_url", "image_url": {"url": image}}]
