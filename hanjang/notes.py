@@ -101,7 +101,7 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
-TITLES = ("회사 사정은 어떤가요?", "요즘 무슨 일이 있었나요?", "임원·큰손은 어떻게 움직였나요?", "요즘 기사는요")
+TITLES = ("회사 사정은 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
 
@@ -251,7 +251,7 @@ def trend(cur: int, prev: int | None) -> tuple[int, str, str]:
     return -1, "적자가 이어졌", "적자 지속"
 
 
-def facts(con: sqlite3.Connection, ticker: str, today: date, news: bool = True) -> list[dict]:
+def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
     out = []
@@ -298,18 +298,17 @@ def facts(con: sqlite3.Connection, ticker: str, today: date, news: bool = True) 
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{title}」{what}{tone}", "url": DART.format(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
     out += insider_facts(con, ticker, today)
-    if not news:  # 뉴스 꺼짐 (sources.news_dev) — 기사 사실을 아예 만들지 않는다
-        return out
-    news = con.execute("select url, date, press, title from news where ticker = ? and date >= ?"
-                       " order by date desc limit 5",
+    news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
+                       " order by date desc limit 8",
                        (ticker, (today - timedelta(days=NEWS_DAYS)).isoformat())).fetchall()  # fmt: skip
-    # 목표주가·매수 같은 말이 든 기사는 싣지 않는다 — 옮기기만 해도 권유가 된다 (불변식 1)
-    news = [n for n in news if not FORBIDDEN.search(n[3])]
-    for k, (url, d, press, title) in enumerate(news, 1):
+    # 목표주가·매수 같은 말이 든 소식은 싣지 않는다 — 옮기기만 해도 권유가 된다 (불변식 1)
+    news = [n for n in news if not FORBIDDEN.search(n[3] + " " + (n[4] or ""))]
+    for k, (url, d, press, title, summary) in enumerate(news, 1):
         d = date.fromisoformat(d)
         day = f"{d.month}월 {d.day}일"
-        out.append({"id": f"N{k}", "text": f"{day} {press or ''} 기사 제목 「{title}」", "url": url, "tone": 0,
-                    "slots": {"날짜": day, "매체": press or "기사", "제목": f"「{title}」"}})  # fmt: skip
+        # text 에 요약문까지 — AI 는 여기 적힌 숫자만 그대로 옮길 수 있다(fill 의 토큰 대조). 기사 본문은 없다
+        out.append({"id": f"N{k}", "text": f"{day} {press} 소식 「{title}」" + (f" — {summary}" if summary else ""), "url": url, "tone": 0,
+                    "slots": {"날짜": day, "매체": press, "제목": f"「{title}」"}})  # fmt: skip
     return out
 
 
@@ -425,10 +424,9 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         bare = re.sub(r"5\s*%", "", bare)
     for mth in months:
         bare = re.sub(rf"(?<!\d){mth}", "", bare)
-    # 기사(N)만 근거인 문장은 그 기사 제목·본문에 적힌 숫자를 그대로 옮겨도 된다 (토큰 대조)
-    news_only = refs and all(r.startswith("N") for r in refs)
-    src = set().union(*(numbers(by[r]["text"] + " " + by[r].get("body", "")) for r in refs if r in by)) if news_only else set()
-    if news_only and numbers(bare) <= src:
+    # 소식(N)을 근거에 둔 문장은 그 소식의 제목·요약문에 적힌 숫자를 그대로 옮겨도 된다 (토큰 대조) — 공시(D)와 함께 묶어도
+    src = set().union(*(numbers(by[r]["text"]) for r in refs if r.startswith("N") and r in by)) if refs else set()
+    if src and numbers(bare) <= src:
         bare = re.sub(r"\d", "", bare)
     if re.search(r"\d", bare):
         raise ValueError(f"숫자는 빈칸으로만: {raw!r}")
@@ -448,8 +446,8 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         return v + (josa(v, m[3]) if m[3] else "")
 
     text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
-    if re.search(r"(늘었|줄었|돌아섰|이어졌)(?![어고는지으다던기])", text) or re.search(r"(늘었|줄었)\S*\s*(늘었|줄었|증가|감소|성장)", text):
-        raise ValueError(f"방향 낱말이 어색하게 이어짐: {text!r}")
+    if re.search(r"(늘었|줄었|돌아섰|이어졌)(?![어고는지으다던기을거네죠습])", text) or re.search(r"(늘었|줄었)\S*\s*(늘었|줄었|증가|감소|성장)", text):
+        raise ValueError(f"방향 낱말이 어색하게 이어짐: {text!r}")  # 「늘었을 때」「늘었거든요」는 괜찮다
     text = text.replace("「「", "「").replace("」」", "」")
     if "{" in text or "}" in text:  # 영어 이름 같은, 정해 두지 않은 빈칸을 지어낸 경우 (「{N1.body}」)
         raise ValueError(f"없는 빈칸이 남음: {raw!r}")
@@ -466,6 +464,7 @@ def check_note(note: dict, fs: list[dict]) -> dict:
     ids = {f["id"] for f in fs}
     allowed = set().union(*(numbers(f["text"] + " " + f.get("body", "")) for f in fs)) if fs else set()
     quoted = [f["text"] for f in fs]
+    n_titles = [t.strip("「」") for f in fs if f["id"].startswith("N") and (t := f.get("slots", {}).get("제목"))]
     for key, sign in (("good", 1), ("concern", -1)):
         want = {f["id"] for f in fs if f["tone"] == sign}
         got = note.get(key) or []
@@ -483,6 +482,8 @@ def check_note(note: dict, fs: list[dict]) -> dict:
             raise ValueError(f"근거 없는 문장: {text!r}")
         if bad := numbers(text) - allowed:
             raise ValueError(f"사실에 없는 숫자 {bad}: {text!r}")
+        if any(f"「{t}」" in text for t in n_titles):  # 소식 제목을 따옴표로 베껴 넣은 문장 — 제목 대신 그 일을 말해야 한다
+            raise ValueError(f"소식 제목 인용: {text!r}")
         bare = re.sub(r"「([^」]*)」", lambda m: "" if any(m[1] in q for q in quoted) else m[0], text)
         if FORBIDDEN.search(bare):
             raise ValueError(f"금지어: {text!r}")
@@ -550,7 +551,7 @@ def code_headline(fs: list[dict]) -> str:
 
 def code_note(fs: list[dict]) -> dict:
     """AI 글이 검사에서 떨어졌을 때 — 사실 목록을 그대로 문장으로 (PRD §4.3)."""
-    groups = zip(TITLES, "FDIN")
+    groups = zip(TITLES, ("F", ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": f["text"] + ".", "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": f["text"] + ".", "refs": [f["id"]]} for f in fs if f["tone"] == sign]
@@ -591,24 +592,9 @@ def week_of(today: date) -> str:
     return (today - timedelta(days=today.weekday())).isoformat()
 
 
-READ_N = 4  # 종목마다 본문까지 읽는 기사 수 — 퀀트점프 WHY_READ 와 같게
-
-
-def read_bodies(news: list[dict]) -> None:
-    """기사 본문 앞부분을 사실에 붙인다(f["body"]) · 링크는 언론사 원문 주소로. 실패한 기사는 제목만."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    with ThreadPoolExecutor(len(news) or 1) as ex:
-        got = list(ex.map(lambda f: sources.read_article(f["url"], f["slots"]["제목"].strip("「」")), news))
-    for f, (orig, body) in zip(news, got):
-        f["url"] = orig or f["url"]
-        if body:
-            f["body"] = body
-
-
 def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
-    """이번 주 노트의 사실과 달라졌나 — 재무·공시·지분 보고는 누구 종목이든, 기사는 누군가 담은 종목만 본다.
-    (담지 않은 종목은 기사 하나 바뀐 것으로 다시 쓰지 않는다 — 비용)
+    """이번 주 노트의 사실과 달라졌나 — 재무·공시·지분 보고는 누구 종목이든, 소식(N)은 누군가 담은 종목만 본다.
+    (담지 않은 종목은 소식 하나 바뀐 것으로 다시 쓰지 않는다 — 비용)
     I1(최근 90일 임원 보고 집계)은 보지 않는다 — 날마다 창이 밀려 숫자가 조금씩 바뀐다(삼성전자는 90일에 800건). 월요일에 새로 센다."""
     if old is None:
         return True
@@ -630,9 +616,8 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
     week = week_of(today)
     by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
     held = {t for (t,) in con.execute("select distinct ticker from holdings")}
-    news = sources.news_dev()
     for t, name in rows:
-        fs = facts(con, t, today, news)
+        fs = facts(con, t, today)
         if not fs:
             continue
         if only_changed:
@@ -640,8 +625,6 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
             if not changed(fs, old and json.loads(old[0]), t in held):
                 by["same"] = by.get("same", 0) + 1
                 continue
-        if t in held:  # ⚠️ 개발 중 개인용만 — 기사 본문 앞부분을 읽어 「요즘 기사」를 풍부하게 (저장하지 않음)
-            read_bodies([f for f in fs if f["id"].startswith("N")][:READ_N])
         note, writer = write(name, fs, today)
         note["links"] = {f["id"]: f["url"] for f in fs}
         con.execute("insert or replace into notes values (?, ?, ?, ?, ?, ?)",

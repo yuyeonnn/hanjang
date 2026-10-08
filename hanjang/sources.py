@@ -454,13 +454,11 @@ def parse_ecos(body: dict, series_id: str) -> list[tuple[date, float]]:
             if r["DATA_VALUE"] not in (None, "", "-")]  # fmt: skip
 
 
-# --- 뉴스: 구글 뉴스 RSS — 제목·매체·링크만. ⚠️ 개발 중 개인용만 (data-rights §5) ---
+# --- 소식: 회사 뉴스룸 RSS + 언론사 RSS 의 제목·요약문·링크만 (data-rights §5) ---
+# 언론사·회사가 배포용으로 직접 내보내는 피드다. 기사 본문은 받지도 저장하지도 않는다 — 글은 AI 가 제목·요약문만 보고 새로 쓴다.
 
-
-def news_dev() -> bool:
-    """`.env` 에 NEWS_DEV=1 일 때만 기사를 받고 노트에 싣는다 — 내 컴퓨터에서 나 혼자 볼 때.
-    서버(.env 에 없음)는 늘 꺼진다: 남에게 보이는 곳에 개인용 기사가 나가지 않게."""
-    return env().get("NEWS_DEV") == "1"
+PRESS_FEEDS = {"https://www.yna.co.kr/rss/economy.xml": "연합뉴스", "https://www.hankyung.com/feed/economy": "한국경제"}
+NEWSROOMS = ROOT / "hanjang" / "newsrooms.txt"  # 종목코드 → 회사 뉴스룸 RSS (손으로 갱신 · 없는 회사는 언론 피드만)
 
 
 @dataclass(frozen=True)
@@ -468,89 +466,39 @@ class News:
     url: str
     published: datetime
     title: str
-    press: str | None
+    press: str
+    summary: str = ""  # RSS description — 언론사가 내보낸 요약문. 없으면 빈 글
 
 
-def news(name: str, count: int = 5) -> list[News]:
-    q = name if len(name) > 2 else f'"{name}" 주가'  # 두 글자 이름은 엉뚱한 기사를 끌어온다
-    r = httpx.get("https://news.google.com/rss/search", timeout=20, follow_redirects=True,
-                  params={"q": q + " when:7d", "hl": "ko", "gl": "KR", "ceid": "KR:ko"})  # fmt: skip
+def newsrooms() -> dict[str, str]:
+    rows = (ln.split(maxsplit=1) for ln in NEWSROOMS.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
+    return {t: u.strip() for t, u in rows}
+
+
+def fetch_rss(url: str, press: str) -> list[News]:
+    r = httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (hanjang)"})
     r.raise_for_status()
-    return parse_news(r.text, count)
+    return parse_rss(r.text, press)
 
 
-ROBOTS_UA = "Mozilla/5.0 (hanjang dev; personal use)"
-_robots: dict = {}
-BLOCKED = re.compile(r"403 ERROR|Request blocked|Just a moment|Access Denied|Attention Required|404 Not Found", re.I)
+def _plain(s: str | None) -> str:
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
 
-def robots_ok(url: str) -> bool:
-    """그 사이트 robots.txt 가 이 주소를 허용하나 — 호스트별 한 번. 못 받으면 False (우회하지 않는다)."""
-    from urllib.parse import urlparse
-    from urllib.robotparser import RobotFileParser
-
-    host = urlparse(url).netloc
-    if host not in _robots:
-        rp = RobotFileParser()
-        try:
-            rp.parse(httpx.get(f"https://{host}/robots.txt", headers={"User-Agent": ROBOTS_UA},
-                               timeout=15, follow_redirects=True).text.splitlines())  # fmt: skip
-        except httpx.HTTPError:
-            rp = None
-        _robots[host] = rp
-    return bool(_robots[host] and _robots[host].can_fetch(ROBOTS_UA, url))
-
-
-def md_text(md: str) -> str:
-    """Jina 마크다운 → 평문: 이미지·링크 주소·제목 기호·강조를 벗기고 공백을 합친다."""
-    md = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", md)
-    md = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", md)
-    md = re.sub(r"[#*_>`|]+", " ", md)
-    return re.sub(r"\s+", " ", md).strip()
-
-
-def jina_body(text: str, title: str, n: int = 2000) -> str:
-    """Jina Reader 응답 → 본문 평문. 기사 제목이 나오는 자리부터 자른다(앞쪽 사이트 메뉴를 건너뛴다)."""
-    head, _, md = text.rpartition("Markdown Content:")
-    if t := re.search(r"^Title: *(\S.*)$", head, re.M):
-        title = t[1]
-    letters = re.findall(r"[0-9A-Za-z가-힣]", title)[:12]
-    if len(letters) >= 6 and (m := re.search(r"[^0-9A-Za-z가-힣]{0,4}".join(map(re.escape, letters)), md)):
-        md = md[m.start():]
-    return md_text(md)[:n]
-
-
-def read_article(url: str, title: str) -> tuple[str, str]:
-    """구글 뉴스 링크 → (언론사 원문 주소, 본문 앞 2,000자). ⚠️ 개발 중 개인용만 (data-rights §5).
-    본문은 글쓰기 입력으로만 쓰고 저장하지 않는다. robots 가 막으면 본문은 안 받는다. 어디서 실패하든 제목만으로 계속."""
-    from googlenewsdecoder import gnewsdecoder  # 구글이 방식을 바꾸면 깨진다 — 실패는 정상 경로
-
-    try:
-        got = gnewsdecoder(url)
-    except Exception:  # noqa: BLE001
-        return url, ""
-    orig = str(got.get("decoded_url") or "") if (got.get("status") or got.get("success")) else ""
-    if not orig or "news.google.com" in orig or not robots_ok(orig):
-        return orig or url, ""
-    try:
-        r = httpx.get("https://r.jina.ai/" + orig, timeout=30, follow_redirects=True)
-    except httpx.HTTPError:
-        return orig, ""
-    body = jina_body(r.text, title) if r.status_code == 200 else ""
-    return orig, "" if BLOCKED.search(body[:300]) else body
-
-
-def parse_news(xml: str, count: int = 5) -> list[News]:
-    """제목 끝의 「 - 매체」 꼬리를 떼고 매체는 `<source>` 에서 읽는다."""
+def parse_rss(xml: str, press: str) -> list[News]:
     out = []
-    for it in ElementTree.fromstring(xml).findall(".//item")[:count]:
-        link, when = it.findtext("link"), it.findtext("pubDate")
+    for it in ElementTree.fromstring(xml).iter("item"):
+        link, when = (it.findtext("link") or "").strip(), it.findtext("pubDate")
         if not link or not when:
             continue
-        src = it.find("source")
-        press = (src.text or "").strip() if src is not None else None
-        title = html.unescape(re.sub(r"<[^>]+>", "", it.findtext("title") or "")).strip()
-        while press and title.endswith(f" - {press}"):  # 꼬리가 두 번 붙어 오기도 한다
-            title = title[: -len(press) - 3].strip()
-        out.append(News(link, parsedate_to_datetime(when), title, press or None))
+        try:
+            d = parsedate_to_datetime(when)
+        except (TypeError, ValueError):
+            continue
+        out.append(News(link, d, _plain(it.findtext("title")), press, _plain(it.findtext("description"))[:300]))
     return out
+
+
+def mentions(name: str, title: str) -> bool:
+    """제목에 그 회사 이름이 낱말로 들어 있나 — 「LG」가 「LG전자」에, 「기아」가 「기아차」에 걸리지 않게 앞뒤에 글자가 없어야 한다."""
+    return re.search(rf"(?<![0-9A-Za-z가-힣]){re.escape(name)}(?![0-9A-Za-z가-힣])", title) is not None

@@ -157,7 +157,6 @@ def test_empty_good_or_concern_side_is_hidden():
                           "concern": [{"text": "없었어요.", "refs": ["F1"]}], "good_title": "분류된 것 없음",
                           "concern_title": "분류된 것 없음"}, "llm:x")
     assert "긍정 요인과 부정 요인" not in old  # 둘 다 비면 절째 숨긴다
-    assert "가 최근 뉴스 보기" in old and "기사" not in old  # 기사 없이도 뉴스는 링크로만
 
 
 def test_avatar_opens_profile_with_real_counts():
@@ -240,13 +239,14 @@ def test_public_pages_and_security_headers():
     assert 'href="/privacy"' in body and 'name="agree"' in body
 
 
-def test_news_off_drops_article_facts():
-    con = db.connect(":memory:")
-    collect.save_universe(con, [("005930", "삼성전자")], {})
-    con.execute("insert into news values ('u', '005930', '2026-10-06', '연합', '삼성전자 기사')")
-    assert any(f["id"] == "N1" for f in notes.facts(con, "005930", date(2026, 10, 7)))
-    assert not any(f["id"].startswith("N") for f in notes.facts(con, "005930", date(2026, 10, 7), news=False))
+def test_news_fact_carries_rss_summary_so_its_numbers_may_be_quoted():
+    from datetime import date
 
+    app, con = _app()
+    con.execute("insert into news (url, ticker, date, press, title, summary) values ('u', '005930', '2026-10-06', '연합뉴스', '삼성전자 소식', '영업이익 107.4조원')")
+    con.execute("insert into news (url, ticker, date, press, title, summary) values ('v', '005930', '2026-10-06', '한국경제', '삼성전자 목표주가 상향', '')")
+    ns = [f for f in notes.facts(con, "005930", date(2026, 10, 7)) if f["id"].startswith("N")]
+    assert len(ns) == 1 and "107.4조원" in ns[0]["text"] and ns[0]["slots"]["매체"] == "연합뉴스"  # 목표주가 소식은 뺀다
 
 def test_backup_keeps_last_14(tmp_path):
     from hanjang import backup
@@ -452,14 +452,6 @@ def test_demo_browse_without_email_is_read_only(monkeypatch):
     assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
     assert "보기만" in call(app, "/add", "POST", "q=005930", ck)[2]  # 바꾸는 것은 막는다
     assert "로그인 없이 둘러보기" in call(app, "/")[2]
-
-
-def test_no_news_strips_article_traces():
-    b = {"headline": "h", "summary": [{"text": "기사 얘기", "refs": ["N1"]}, {"text": "매출", "refs": ["F1"]}],
-         "sections": [{"title": "요즘 기사는요", "sentences": [{"text": "x", "refs": ["N1"]}]},
-                      {"title": "회사 사정은 어떤가요?", "sentences": [{"text": "y", "refs": ["F1", "N2"]}]}], "keywords": ["#a"]}
-    got = web.no_news(b)
-    assert [s["text"] for s in got["summary"]] == ["매출"] and len(got["sections"]) == 1 and got["keywords"] == []
 
 
 def test_mark_uses_group_color_not_logo():

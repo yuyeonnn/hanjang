@@ -179,15 +179,15 @@ def test_disclosure_fact_carries_plain_meaning():
     assert notes.plain("[기재정정]주요사항보고서(유상증자결정)").startswith("새 주식을 찍어 팔아")
 
 
-def test_news_sentence_may_copy_numbers_from_its_article_body():
+def test_news_sentence_may_copy_numbers_from_its_rss_summary():
     by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
-    by["N1"] = {"id": "N1", "text": "10월 5일 기사 제목 「삼성 실적」", "tone": 0, "url": "https://n",
-                "slots": {"날짜": "10월 5일", "매체": "가", "제목": "「삼성 실적」"}, "body": "HBM4 공급이 3분기에 12% 늘었다"}
+    by["N1"] = {"id": "N1", "text": "10월 5일 연합뉴스 소식 「삼성 실적」 — HBM4 공급이 3분기에 12% 늘었다", "tone": 0, "url": "https://n",
+                "slots": {"날짜": "10월 5일", "매체": "연합뉴스", "제목": "「삼성 실적」"}}
     assert notes.fill({"text": "기사는 HBM4 공급이 12% 늘었다고 해요.", "refs": ["N1"]}, by)["text"].startswith("기사는 HBM4")
-    with pytest.raises(ValueError, match="빈칸으로만"):  # 기사에 없는 숫자
+    with pytest.raises(ValueError, match="빈칸으로만"):  # 소식에 없는 숫자
         notes.fill({"text": "기사는 공급이 30% 늘었다고 해요.", "refs": ["N1"]}, by)
-    with pytest.raises(ValueError, match="빈칸으로만"):  # 재무 사실과 섞이면 예외 없음
-        notes.fill({"text": "공급이 12% 늘었어요.", "refs": ["N1", "F1"]}, by)
+    assert notes.fill({"text": "공급이 12% 늘었다는 보도와 함께 공시도 있었어요.", "refs": ["N1", "D1"]}, by)  # 공시와 묶어도 소식 숫자는 된다
+    assert notes.fill({"text": "매출이 {F1.폭} {F1.방향}을 때 영업이익은 {F2.폭} {F2.방향}거든요.", "refs": []}, by)  # 「늘었을 때」
 
 
 def test_dates_of_facts_may_be_written_directly():
@@ -333,3 +333,12 @@ def test_article_check_rules():
     for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}):
         with pytest.raises(ValueError):
             articles.check(ok | bad, fs)
+
+
+def test_quoting_a_news_title_is_rejected():
+    fs = [{"id": "N1", "text": "10월 8일 연합뉴스 소식 「삼성 실적 신기록」 — 영업이익 107조", "tone": 0, "url": "https://n",
+           "slots": {"날짜": "10월 8일", "매체": "연합뉴스", "제목": "「삼성 실적 신기록」"}}]
+    note = lambda t: {"headline": "h", "summary": [{"text": t, "refs": ["N1"]}], "sections": [], "good": [], "concern": []}  # noqa: E731
+    with pytest.raises(ValueError, match="제목 인용"):
+        notes.check_note(note("「삼성 실적 신기록」이라는 보도가 있었어요."), fs)
+    notes.check_note(note("영업이익이 107조라는 보도가 있었어요."), fs)

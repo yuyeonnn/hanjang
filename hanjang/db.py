@@ -86,7 +86,8 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
-                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text")):  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
+                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"),
+                            ("news", "summary", "text")):  # RSS 요약문 — 기사 본문이 아니다  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")

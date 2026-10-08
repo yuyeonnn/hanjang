@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "내 종목을 쉬운 글 한 장으로 — 주간 노트 만들기 + 모바일 웹"
 requires-python = ">=3.13"
 dependencies = [
-    "googlenewsdecoder>=0.2.1",
     "httpx>=0.28",
     "selectolax<1",
 ]
