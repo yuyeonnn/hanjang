@@ -7,7 +7,6 @@ from datetime import date, timedelta
 
 from hanjang import db, sources
 
-UNIVERSE = 100
 DISCLOSURE_DAYS = 90
 MACRO_DAYS = 400  # 민감도(250거래일)에 넉넉히 — 쓰는 건 시세를 산 뒤
 
@@ -43,10 +42,10 @@ def save_disclosures(con: sqlite3.Connection, rows: list[sources.Disclosure]):
 def main(today: date) -> None:
     con = db.connect()
     dart = sources.Dart()
-    picked = sources.kospi_universe(UNIVERSE)
+    picked = sources.kospi_universe()
     tickers = [t for t, _ in picked]
     save_universe(con, picked, dart.corps())
-    print(f"종목 {len(tickers)}개 (코스피 시총 상위)")
+    print(f"종목 {len(tickers)}개 (universe.txt)")
 
     fin = [f for y in range(today.year - 1, today.year - 6, -1) for f in dart.financials(tickers, y)]  # 5년 — 노트 위 차트
     save_financials(con, fin)

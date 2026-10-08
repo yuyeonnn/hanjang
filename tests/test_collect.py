@@ -5,14 +5,10 @@ from datetime import date
 from hanjang import collect, db, sources
 
 
-def test_universe_keeps_kospi_common_by_mktcap():
-    rows = [
-        {"srtnCd": "005930", "itmsNm": "삼성전자", "mrktCtg": "KOSPI", "mrktTotAmt": "900"},
-        {"srtnCd": "005935", "itmsNm": "삼성전자우", "mrktCtg": "KOSPI", "mrktTotAmt": "999"},
-        {"srtnCd": "247540", "itmsNm": "에코프로비엠", "mrktCtg": "KOSDAQ", "mrktTotAmt": "998"},
-        {"srtnCd": "000660", "itmsNm": "SK하이닉스", "mrktCtg": "KOSPI", "mrktTotAmt": "1000"},
-    ]
-    assert sources.top_kospi(rows, 5) == [("000660", "SK하이닉스"), ("005930", "삼성전자")]
+def test_universe_file_has_100_common_stocks():
+    rows = sources.kospi_universe()
+    assert len(rows) == 100 and ("005930", "삼성전자") in rows
+    assert all(t.isdigit() and len(t) == 6 and t.endswith("0") and n for t, n in rows)  # 보통주만 (우선주는 끝자리 5)
 
 
 def test_corps_does_not_steal_next_code():

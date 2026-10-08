@@ -55,33 +55,13 @@ def _get(url: str, secret: str, **params) -> httpx.Response:
 # --- 유니버스: 코스피 시가총액 상위 (공공데이터포털 — 고르기에만 쓰고 저장·표시하지 않는다) ---
 
 
-def is_common(ticker: str) -> bool:
-    """보통주만 — 우선주는 끝자리가 0 이 아니다 (005930 삼성전자 / 005935 삼성전자우)."""
-    return bool(re.fullmatch(r"\d{5}0", ticker))
+UNIVERSE = ROOT / "hanjang" / "universe.txt"
 
 
-def top_kospi(rows: list[dict], n: int) -> list[tuple[str, str]]:
-    """시세 한 날치 → 코스피 보통주 시총 상위 n 개 (종목코드, 이름). 순수 함수."""
-    xs = [r for r in rows if r.get("mrktCtg") == "KOSPI" and is_common(r.get("srtnCd", ""))]
-    xs.sort(key=lambda r: -int(r.get("mrktTotAmt") or 0))
-    return [(r["srtnCd"], r["itmsNm"]) for r in xs[:n]]
-
-
-def kospi_universe(n: int = 100) -> list[tuple[str, str]]:
-    """가장 최근 거래일 하나. 주말·휴일이면 하루씩 거슬러 간다.
-    ponytail: 서비스 때는 공개된 코스피200 구성 목록 등으로 바꾼다 (시세는 상업 이용 금지)."""
-    e = env()
-    key, base = e["DATA_GO_KR_SERVICE_KEY"], e["DATA_GO_KR_BASE_URL"]
-    d = date.today()
-    for _ in range(10):
-        d -= timedelta(days=1)
-        body = _get(f"{base}/GetStockSecuritiesInfoService/getStockPriceInfo", key,
-                    serviceKey=key, resultType="json", numOfRows=5000,
-                    basDt=d.strftime("%Y%m%d")).json()["response"]["body"]  # fmt: skip
-        if body["totalCount"]:
-            items = body["items"]["item"]
-            return top_kospi(items if isinstance(items, list) else [items], n)
-    raise RuntimeError("최근 10일 시세가 비었다")
+def kospi_universe() -> list[tuple[str, str]]:
+    """종목 목록 [(종목코드, 이름)] — universe.txt (손으로 갱신). 시세 API 를 부르지 않는다 (data-rights §4)."""
+    rows = (ln.split(maxsplit=1) for ln in UNIVERSE.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
+    return [(t, n.strip()) for t, n in rows]
 
 
 def price_dev() -> bool:
