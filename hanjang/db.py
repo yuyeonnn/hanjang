@@ -70,7 +70,8 @@ create table if not exists feedback (
 def connect(path=PATH) -> sqlite3.Connection:
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=30)  # 매일 실행이 쓰는 동안 화면이 읽고 써도 잠깐 기다린다
+    con.execute("pragma journal_mode = wal")  # 읽기와 쓰기가 서로 막지 않게 (파일에 남는다)
     con.execute("pragma foreign_keys = on")
     con.executescript(SCHEMA)
     # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
