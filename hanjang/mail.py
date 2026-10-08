@@ -193,7 +193,7 @@ def weekly_mail(week: str, stocks: list[dict], events=(), holidays=()) -> tuple[
     names = [s["name"] for s in stocks]
     head = ", ".join(names[:3]) + (f" 외 {len(names) - 3}곳" if len(names) > 3 else "")
     mon, url = date.fromisoformat(week), base_url()
-    secs = lambda b: [x for x in b.get("sections", []) if not x["title"].startswith("요즘 기사")]  # noqa: E731  기사는 남에게 보내지 않는다 (data-rights §5)
+    secs = lambda b: b.get("sections", [])  # noqa: E731
     text = (f"{head}의 이번 주 노트가 올라왔어요.\n"
             + ("\n앞으로 7일\n" + "".join(f"· {_day(d)} {x}\n" for d, x in sorted([(d, f"{n} {k}") for d, n, k, *_ in events]
                                                                                  + [(d, f"{n} — 휴장") for d, n in holidays]))

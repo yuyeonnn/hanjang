@@ -2,7 +2,6 @@
 
 import sqlite3
 import sys
-import time
 from datetime import date, timedelta
 
 from hanjang import db, sources
@@ -37,6 +36,30 @@ def save_disclosures(con: sqlite3.Connection, rows: list[sources.Disclosure]):
         " on conflict(rcept_no) do update set title = excluded.title",
         [(d.rcept_no, d.ticker, d.day.isoformat(), d.title) for d in rows],
     )
+
+
+def save_news(con: sqlite3.Connection, picked: list[tuple[str, str]], today: date, days: int = 10) -> int:
+    """회사 뉴스룸 RSS + 언론사 RSS 에서 우리 종목 이름이 든 것만 — 제목·요약문·링크 (본문 없음). 피드 하나가 막혀도 나머지는 받는다."""
+    since = (today - timedelta(days=days)).isoformat()
+    rows: list[tuple] = []
+
+    def grab(url, press, keep):
+        try:
+            items = sources.fetch_rss(url, press)
+        except Exception as e:  # noqa: BLE001
+            print(f"  소식 실패 {press}: {type(e).__name__}", file=sys.stderr)
+            return
+        rows.extend((x.url, t, x.published.date().isoformat(), x.press, x.title, x.summary)
+                    for x in items for t in keep(x) if x.published.date().isoformat() >= since)
+
+    for url, press in sources.PRESS_FEEDS.items():
+        grab(url, press, lambda x: [t for t, name in picked if sources.mentions(name, x.title)])
+    rooms = sources.newsrooms()
+    for t, name in picked:
+        if t in rooms:
+            grab(rooms[t], f"{name} 뉴스룸", lambda x, t=t: [t])
+    con.executemany("insert or ignore into news (url, ticker, date, press, title, summary) values (?, ?, ?, ?, ?, ?)", rows)
+    return len(rows)
 
 
 def main(today: date) -> None:
@@ -113,20 +136,7 @@ def main(today: date) -> None:
     con.executemany("insert or replace into holidays values (?, ?)", [(d.isoformat(), n) for d, n in hs])
     print(f"공휴일 {len(hs)}일 ({today.year}~{today.year + 1})")
 
-    n = 0
-    for t, name in picked if sources.news_dev() else []:  # 서버에선 꺼짐 — NEWS_DEV=1 인 내 컴퓨터에서만
-        try:
-            got = sources.news(name)
-        except Exception as e:  # noqa: BLE001  뉴스 하나가 막혀도 나머지는 받는다
-            print(f"  뉴스 실패 {name}: {type(e).__name__}", file=sys.stderr)
-            continue
-        con.executemany(
-            "insert or ignore into news values (?, ?, ?, ?, ?)",
-            [(x.url, t, x.published.date().isoformat(), x.press, x.title) for x in got],
-        )
-        n += len(got)
-        time.sleep(0.5)  # 구글에 몰아치지 않는다
-    print(f"뉴스 {n}건 (개발용 · 개인용만)" if sources.news_dev() else "뉴스 꺼짐 (NEWS_DEV 없음)")
+    print(f"소식 {save_news(con, picked, today)}건 (회사 뉴스룸 · 언론사 RSS — 제목·요약문만)")
     con.commit()
 
 

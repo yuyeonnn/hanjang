@@ -18,7 +18,7 @@ sudo -u hanjang sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 cd /srv/hanjang && sudo -u hanjang /home/hanjang/.local/bin/uv sync --frozen
 ```
 
-`.env` — [.env.example](../.env.example) 을 복사해 값을 채운다. **`NEWS_DEV` 는 넣지 않는다**(기사는 개인용만).
+`.env` — [.env.example](../.env.example) 을 복사해 값을 채운다.
 
 ```bash
 sudo -u hanjang cp .env.example .env && sudo -u hanjang chmod 600 .env

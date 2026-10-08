@@ -1,0 +1,9 @@
+# 회사 뉴스룸 RSS — 회사가 배포하려고 직접 내보내는 글 (제목·요약문·링크만 받는다). 손으로 갱신 — 피드가 있는 회사만
+# 종목코드 주소
+005930 https://news.samsung.com/kr/feed
+000660 https://news.skhynix.co.kr/feed/
+005490 https://newsroom.posco.com/kr/feed/
+051910 https://blog.lgchem.com/feed/
+373220 https://news.lgensol.com/feed/
+017670 https://news.sktelecom.com/feed
+010130 https://www.koreazinc.co.kr/feed/

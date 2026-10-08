@@ -494,14 +494,7 @@ def md(made: str) -> str:
     return f"{int(made[5:7])}월 {int(made[8:10])}일" if re.match(r"\d{4}-\d{2}-\d{2}", made or "") else ""
 
 
-def no_news(body: dict) -> dict:
-    """노트에서 기사(N) 흔적을 뺀다 — 「요즘 기사」 절, 근거가 기사뿐인 문장, 언론 키워드."""
-    def keep(xs):
-        return [x for x in xs if not x["refs"] or not all(r.startswith("N") for r in x["refs"])]
-
-    return body | {"summary": keep(body.get("summary", [])), "good": keep(body.get("good", [])), "concern": keep(body.get("concern", [])),
-                   "sections": [sec | {"sentences": keep(sec["sentences"])} for sec in body["sections"] if not sec["title"].startswith("요즘 기사")],
-                   "keywords": []}  # fmt: skip
+NEWS_TITLES = ("이번 주 소식", "요즘 무슨")  # 공시·소식 절 — 새 이름과 옛 노트 이름
 
 
 def redone(week: str, made: str) -> str:
@@ -516,8 +509,6 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                 prices: list | None = None, report: dict | None = None) -> str:
     """report = {"divs": [(연도, 주당배당, 총액, 배당성향)], "biz": 요약, "rno": 사업보고서}."""
     report = report or {}
-    if not sources.news_dev():  # 기사를 꺼 둔 곳(서버·남에게 보여줄 때)에선 예전 노트의 기사 칸·기사만 근거인 문장도 그리지 않는다
-        body = no_news(body)
     """stats = (이 주 노트를 연 횟수, 좋아요 수, 내가 눌렀나)."""
     facts = facts or []
     head = ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe"><div class="h-14 max-w-[480px] mx-auto px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><button class="w-11 h-11 flex items-center justify-center text-on-surface hover:text-primary transition-colors -ml-space-xs" onclick="location.href=\'/\'"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><h1 class="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px]">Note</h1></div><div class="flex items-center gap-space-sm">'
@@ -536,34 +527,28 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     parts.append(business_block(report.get("biz"), report.get("rno")))
     nd = sum(f["id"][0] == "D" for f in facts)
     good_d, bad_d = sum(f["id"][0] == "D" and f["tone"] == 1 for f in facts), sum(f["id"][0] == "D" and f["tone"] == -1 for f in facts)
-    # 기사는 가져오지 않고 검색 링크만 — 남이 보는 노트에 기사 데이터를 싣지 않는다 (data-rights §5)
-    news_link = ('<a class="mb-space-lg flex items-center gap-1 font-label-regular text-label-regular text-primary" target="_blank" rel="noopener" '
-                 f'href="https://news.google.com/search?q={quote(name)}&hl=ko&gl=KR&ceid=KR:ko">{e(name)} 최근 뉴스 보기'
-                 '<span class="material-symbols-outlined text-[15px]">open_in_new</span></a>')  # fmt: skip
     for sec in body["sections"]:
         text = " ".join(sentence(s) for s in sec["sentences"])
         extra = ""
         if sec["title"].startswith("회사 사정"):
             extra = metrics(facts)
-        elif sec["title"].startswith("요즘 무슨"):
+        elif sec["title"].startswith(NEWS_TITLES):  # 「이번 주 소식」(공시+소식) · 옛 노트의 「요즘 무슨 일이 있었나요?」
             right = (f"반가운 쪽 {good_d}" + (f" · 걸리는 쪽 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
                      f'<span class="font-label-regular text-label-regular text-on-surface font-medium">최근 주요 공시 {nd}건 집계</span><span class="font-label-micro text-label-micro text-on-surface-variant">· DART 기준 자동 분류</span></div></div>'
-                     f'<span class="font-label-micro text-label-micro text-secondary font-semibold">{e(right)}</span></div>')  # fmt: skip
+                     f'<span class="font-label-micro text-label-micro text-secondary font-semibold">{e(right)}</span></div>'
+                     + (('<div class="pt-space-sm pb-1 flex flex-col gap-1.5"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
+                         + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"]) + "</div></div>")
+                        if body.get("keywords") else "")
+                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요 — 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
-        elif sec["title"].startswith("요즘 기사") and body.get("keywords"):
-            extra = ('<div class="pt-space-sm pb-1 flex flex-col gap-1.5 border-t border-outline-variant/30 mt-space-xs"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
-                     + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"])
-                     + "</div></div>")  # fmt: skip
-        if sec["title"].startswith("요즘 기사"):
-            extra += '<p class="font-label-micro text-label-micro text-tertiary">⚠️ 개발용 — 기사 제목은 개인용으로만 모은 것이라 남에게 보여주면 안 돼요.</p>'
         parts.append(chapter(sec["title"], text, extra))
-        if sec["title"].startswith("요즘 무슨"):
-            parts += [news_link, dividend_block(report.get("divs", []))]
-    if not any(s["title"].startswith("요즘 무슨") for s in body["sections"]):
-        parts += [news_link, dividend_block(report.get("divs", []))]
+        if sec["title"].startswith(NEWS_TITLES):
+            parts.append(dividend_block(report.get("divs", [])))
+    if not any(s["title"].startswith(NEWS_TITLES) for s in body["sections"]):
+        parts.append(dividend_block(report.get("divs", [])))
     parts.append(risk_block(report.get("biz")))
 
     def filled(key):  # 옛 노트의 「분류된 것 없음」 자리 채움 문장도 빈 칸으로 본다

@@ -28,13 +28,15 @@ def test_financials_prefer_consolidated():
     assert (f.revenue, f.liabilities, f.equity, f.operating_income) == (333600, 10, None, 7)
 
 
-def test_news_strips_press_tail():
-    xml = ("<rss><channel><item><title>삼전 최대 실적 - 마켓인 - 마켓인</title><link>https://n/1</link>"
-           "<pubDate>Sun, 05 Oct 2026 01:00:00 GMT</pubDate><source>마켓인</source></item>"
-           "</channel></rss>")
-    [n] = sources.parse_news(xml)
-    assert (n.title, n.press, n.published.date()) == ("삼전 최대 실적", "마켓인", date(2026, 10, 5))
-
+def test_rss_keeps_title_summary_link_and_name_matching_is_wordwise():
+    xml = ("<rss><channel><item><title>삼성전자 &lt;b&gt;3분기&lt;/b&gt; 잠정실적</title><link>https://x/1</link>"
+           "<pubDate>Thu, 08 Oct 2026 09:00:00 +0900</pubDate><description>&lt;p&gt;매출 195조원,  영업이익 107.4조원&lt;/p&gt;</description></item>"
+           "<item><title>날짜 없음</title><link>https://x/2</link></item></channel></rss>")
+    [n] = sources.parse_rss(xml, "연합뉴스")
+    assert (n.title, n.summary, n.press, n.url) == ("삼성전자 3분기 잠정실적", "매출 195조원, 영업이익 107.4조원", "연합뉴스", "https://x/1")
+    assert sources.mentions("LG", "LG, 3분기 실적") and not sources.mentions("LG", "LG전자 신제품")
+    assert sources.mentions("기아", "기아 美 공장") and not sources.mentions("기아", "기아차 판매")
+    assert len(sources.newsrooms()) >= 5 and all(u.startswith("https://") for u in sources.newsrooms().values())
 
 def test_ecos_empty_and_values():
     assert sources.parse_ecos({"RESULT": {"CODE": "INFO-200"}}, "x") == []
