@@ -150,6 +150,7 @@ def main(today: date) -> None:
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
     print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
 
+    con.execute("delete from macro where series_id = 'ECOS:731Y001:0000001'")  # 서울외국환중개 작성 — 예전에 받은 것 지움
     for sid, name in sources.MACRO.items():
         pts = sources.ecos(sid, today - timedelta(days=MACRO_DAYS), today)
         con.executemany("insert or replace into macro values (?, ?, ?)",
