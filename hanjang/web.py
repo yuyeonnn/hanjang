@@ -148,12 +148,12 @@ def photo_for(induty_code: str | None, name: str = "") -> str:
 
 def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
     """뉴닉식 한 줄 — 왼쪽 사진, 오른쪽 제목 · 두 줄 요약 · 출처와 날짜. 글씨는 작게, 줄 사이는 넉넉히 (사용자 10/8)."""
-    return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-3.5 items-start">'
-            f'<img alt="" loading="lazy" class="w-[36%] max-w-[148px] aspect-[4/3] object-cover rounded-lg shrink-0 bg-surface-container" src="{e(img)}">'
-            '<span class="min-w-0 flex flex-col gap-1 pt-0.5">'
-            f'<span class="text-[15px] leading-[21px] font-semibold tracking-tight text-on-surface line-clamp-2">{e(title)}</span>'
-            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(excerpt)}</span>'
-            f'<span class="mt-0.5 text-[11px] leading-4 text-outline"><b class="text-on-surface-variant font-medium">{e(source)}</b>  {e(day)}</span>'
+    return (f'<article class="py-4 lg:py-6 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-3.5 items-start lg:flex-col lg:gap-4 group">'
+            f'<img alt="" loading="lazy" class="w-[36%] max-w-[148px] aspect-[4/3] lg:w-full lg:max-w-none lg:aspect-[16/9] object-cover rounded-lg lg:rounded-2xl shrink-0 bg-surface-container" src="{e(img)}">'
+            '<span class="min-w-0 flex flex-col gap-1 lg:gap-2 pt-0.5">'
+            f'<span class="text-[15px] leading-[21px] lg:text-[21px] lg:leading-[30px] font-semibold tracking-tight text-on-surface line-clamp-2 lg:group-hover:underline">{e(title)}</span>'
+            f'<span class="text-[13px] leading-[19px] lg:text-[15px] lg:leading-[25px] text-on-surface-variant line-clamp-2 lg:line-clamp-3">{e(excerpt)}</span>'
+            f'<span class="mt-0.5 text-[11px] leading-4 lg:text-[13px] text-outline"><b class="text-on-surface-variant font-medium">{e(source)}</b>  {e(day)}</span>'
             "</span></a></article>")  # fmt: skip
 
 
@@ -1414,7 +1414,7 @@ class App:
                   (b := json.loads(body))["title"], b["paragraphs"][0]["text"], name + (" · 내 종목" if mine else ""), d.replace("-", "."))
             for i, k, d, body, name, ind, mine in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 소식</h2>'
-                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-12">{items}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{items}</div></section>')  # fmt: skip
 
     def article(self, uid: int, aid: int):
         row = self.con.execute("select a.ticker, a.kind, a.date, a.body, s.name, s.induty_code from articles a join stocks s using(ticker)"
@@ -1451,7 +1451,7 @@ class App:
         cards = "".join(story(f"/n/{t}", photos.pick(None, ind, name), json.loads(b)["headline"], gist(json.loads(b)), name, made[:10].replace("-", "."))
                         for t, name, b, ind, made, c in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
-                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-12">{cards}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{cards}</div></section>')  # fmt: skip
 
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
