@@ -1498,7 +1498,7 @@ if __name__ == "__main__":
     if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
-    app = App(sqlite3.connect(db.PATH, check_same_thread=False), cfg["SECRET"])
+    app = App(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False), cfg["SECRET"])
     lock = threading.Lock()
 
     def serial(environ, start_response):
