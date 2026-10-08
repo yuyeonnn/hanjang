@@ -399,11 +399,14 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
             out["전년백원당"] = f"{round(opp / rp * 100)}원"
     if rev and rp and rp > 0 and op is not None and opp and opp > 0:
         r, o = rev / rp - 1, op / opp - 1
-        out["관계"] = ("판 돈보다 남긴 돈이 더 빨리 늘었" if r > 0 and o > r else
-                      "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았" if r > 0 and 0 <= o <= r else
-                      "더 많이 팔았지만 남긴 돈은 줄었" if r > 0 and o < 0 else
-                      "덜 팔았지만 남긴 돈은 늘었" if r <= 0 and o > 0 else "판 돈도 남긴 돈도 줄었")  # fmt: skip
+        out["관계"] = (RELATIONS[0] if r > 0 and o > r else RELATIONS[1] if r > 0 and 0 <= o <= r else
+                      RELATIONS[2] if r > 0 and o < 0 else RELATIONS[3] if r <= 0 and o > 0 else RELATIONS[4])  # fmt: skip
     return out
+
+
+RELATIONS = ("판 돈보다 남긴 돈이 더 빨리 늘었", "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았",
+             "더 많이 팔았지만 남긴 돈은 줄었", "덜 팔았지만 남긴 돈은 늘었", "판 돈도 남긴 돈도 줄었")  # fmt: skip
+REL_WORDS = re.compile(r"판 돈보다 남긴 돈이 더|늘어난 만큼은? 남긴 돈|팔았지만 남긴 돈|판 돈도 남긴 돈도")
 
 
 def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
@@ -687,6 +690,8 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
 
     # 「관계」 빈칸은 그 자체가 판 돈·남긴 돈 이야기 — 앞에 AI 가 같은 말을 또 쓰면(「판 돈보다 남긴 돈이 더 빨리 {F8.관계}」) 그 말을 뺀다
     raw = re.sub(r"(?:판 돈|남긴 돈|매출|영업이익)[^.{}]*?(\{F\d+\.관계\})", r"\1", raw)
+    if REL_WORDS.search(SLOT.sub("", raw)):
+        raise ValueError(f"관계는 빈칸으로만: {raw!r}")
     text = mend(dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었")))
     text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
     text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」
@@ -769,6 +774,9 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     by = {f["id"]: f for f in fs}
     total, dropped = 0, []
 
+    def days(refs):
+        return {by[r]["slots"]["날짜"] for r in refs if r in by and "날짜" in by[r].get("slots", {})}
+
     def keep(xs):
         """틀린 문장만 빼고 나머지는 살린다 — 한 문장 때문에 글 전체가 사실 목록으로 바뀌지 않게 (사용자 10/8)."""
         nonlocal total
@@ -778,6 +786,8 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
             try:
                 y = fill(x, by)
                 check_sentence(y, fs)
+                if "같은 날" in y["text"] and (not out or not days(y["refs"]) or not days(y["refs"]) <= days(out[-1]["refs"])):
+                    raise ValueError(f"「같은 날」인데 날짜가 다름: {y['text']!r}")
                 out.append(y)
             except ValueError as err:
                 dropped.append(str(err))
