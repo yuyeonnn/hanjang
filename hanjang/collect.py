@@ -42,6 +42,24 @@ def save_disclosures(con: sqlite3.Connection, rows: list[sources.Disclosure]):
     )
 
 
+def save_ipos(con: sqlite3.Connection, dart: "sources.Dart", today: date) -> int:
+    """공모주 청약·상장 일정 — 신고서가 정정되면 새 값으로. 상장 예정일은 투자설명서 원문에서, 아직 모르는 것만 다시 연다."""
+    xs = dart.ipos(today - timedelta(days=DISCLOSURE_DAYS), today)
+    con.executemany(
+        "insert into ipos (corp_code, rcept_no, name, sub_start, sub_end, pay_date, price, total, lead, uses) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " on conflict(corp_code) do update set rcept_no = excluded.rcept_no, name = excluded.name, sub_start = excluded.sub_start,"
+        " sub_end = excluded.sub_end, pay_date = excluded.pay_date, price = excluded.price, total = excluded.total,"
+        " lead = excluded.lead, uses = excluded.uses",
+        [(x.corp_code, x.rcept_no, x.name, x.sub_start.isoformat(), x.sub_end.isoformat(), x.pay and x.pay.isoformat(),
+          x.price, x.total, x.lead, x.uses) for x in xs])  # fmt: skip
+    # ponytail: 상장일을 못 찾은 공모는 청약 뒤 2주까지 매일 원문을 다시 연다 (하루 열 콜 남짓)
+    for cc, rno in con.execute("select corp_code, rcept_no from ipos where list_date is null and sub_end >= ?",
+                               ((today - timedelta(days=14)).isoformat(),)).fetchall():  # fmt: skip
+        if d := sources.parse_listing_day(dart.doc_text(rno)):
+            con.execute("update ipos set list_date = ? where corp_code = ?", (d.isoformat(), cc))
+    return len(xs)
+
+
 def save_news(con: sqlite3.Connection, picked: list[tuple[str, str]], today: date, days: int = 10) -> int:
     """회사 뉴스룸 RSS + 언론사 RSS 에서 우리 종목 이름이 든 것만 — 제목·요약문·링크 (본문 없음). 피드 하나가 막혀도 나머지는 받는다."""
     since = (today - timedelta(days=days)).isoformat()
@@ -130,6 +148,7 @@ def main(today: date) -> None:
     con.executemany("insert or replace into events values (?, ?, ?, ?, ?)", evs)
     print(f"  일정 {len(evs)}건 (공시 {len(todo)}건에서)")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
+    print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
 
     for sid, name in sources.MACRO.items():
         pts = sources.ecos(sid, today - timedelta(days=MACRO_DAYS), today)

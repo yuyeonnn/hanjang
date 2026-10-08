@@ -514,6 +514,11 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
     assert html_.count("외 1건") == 1 and "계약 2건" in html_  # 두 건이 한 줄로
     assert "한국 금리 결정" in html_ and "미국 금리 결정" in html_ and "관련 높은 순" in html_ and "🇰🇷" not in html_
     assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>")  # 내 종목 공시가 시장 일정보다 위
+    con.execute("insert into ipos values ('c1', 'r9', '엘리스그룹', '2026-10-07', '2026-10-08', '2026-10-13', '2026-10-16', 70400, 156428800000, '미래에셋증권', '시설자금 1,549억원')")
+    html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
+    assert html_.count("엘리스그룹 공모주 청약</span>") == 1 and "엘리스그룹 공모주 상장" in html_  # 청약 첫날 · 상장일
+    assert "1주 70,400원(증권신고서 기준) · 모으는 돈 1,564억원 · 대표 주관 미래에셋증권. 모은 돈은 시설자금 1,549억원에 쓴다고 적었어요. 상장 예정일은 10월 16일이에요." in html_
+    assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>") < html_.index("공모주 청약</h3>")
     assert "line-clamp-2" not in html_  # 칸 안 칩은 한 줄
     assert sources.macro_events("2026-11-01", "2026-11-30")[0] == ("2026-11-03", "물가", "KR", "한국 소비자물가 발표")
 

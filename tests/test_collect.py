@@ -67,3 +67,21 @@ def test_schedule_reads_dates_from_exchange_forms():
     assert sources.parse_schedule("현금ㆍ현물배당결정", div) == [(date(2026, 9, 11), "DIVIDEND", "배당 기준일")]
     assert sources.parse_schedule("현금ㆍ현물배당결정(자회사의 주요경영사항)", div) == []
     assert sources.parse_schedule("단일판매ㆍ공급계약체결", div) == []
+
+
+def test_ipo_from_dart_key_info_and_listing_day():
+    j = {"group": [
+        {"title": "일반사항", "list": [{"rcept_no": "r1", "corp_code": "c1", "corp_name": "엔키화이트햇 ",
+                                       "sbd": "2026년 11월 12일 ~ 2026년 11월 13일", "pymd": "2026년 11월 17일"}]},
+        {"title": "증권의종류", "list": [{"slprc": "13,000", "slta": "22,100,000,000", "slmthn": "일반공모"}]},
+        {"title": "인수인정보", "list": [{"actsen": "공동", "actnmn": "A증권"}, {"actsen": "대표", "actnmn": "신영증권"}]},
+        {"title": "자금의사용목적", "list": [{"se": "시설투자", "amt": "11,000,000,000"}, {"se": "발행제비용", "amt": "500,000,000"},
+                                         {"se": "운영자금", "amt": "35,557,833"}]}]}
+    x = sources.parse_ipo(j)
+    assert (x.name, x.sub_start, x.sub_end, x.pay, x.price, x.lead) == ("엔키화이트햇", date(2026, 11, 12), date(2026, 11, 13), date(2026, 11, 17), 13000, "신영증권")
+    assert x.uses == "시설투자 110억원 · 운영자금 3,556만원"  # 발행 비용은 쓰임이 아니라 뺀다
+    j["group"][1]["list"][0]["slmthn"] = "주주배정"
+    assert sources.parse_ipo(j) is None  # 이미 상장한 회사의 증자는 공모주가 아니다
+    assert sources.parse_listing_day("주요일정 ... 상장 예정일 : 2026년 11월 24일 (예정)") == date(2026, 11, 24)
+    assert sources.parse_listing_day("매매개시 예정일 | 2026.11.25") == date(2026, 11, 25)
+    assert sources.parse_listing_day("상장 일정 미정") is None
