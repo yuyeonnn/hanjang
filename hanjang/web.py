@@ -328,7 +328,7 @@ def photo_url(uid: int, at: str | None) -> str | None:
 
 
 def top_bar(initial: str) -> str:
-    return ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe"><div class="h-14 max-w-[480px] mx-auto px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><span class="font-display-editorial text-headline-md text-primary tracking-tight">한장</span><span class="text-on-surface-variant font-label-micro text-label-micro uppercase tracking-wider pl-space-xs">Editorial Digest</span></div><div class="flex items-center gap-space-sm">'
+    return ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe lg:border-b lg:border-surface-container-high"><div class="h-14 max-w-[480px] lg:max-w-[1200px] mx-auto px-margin lg:px-8 flex items-center justify-between"><div class="flex items-center gap-space-sm"><a href="/" class="font-display-editorial text-headline-md text-primary tracking-tight">한장</a><span class="text-on-surface-variant font-label-micro text-label-micro uppercase tracking-wider pl-space-xs">Editorial Digest</span></div><div class="flex items-center gap-space-sm">'
             + avatar(initial) + "</div></div></header>")  # fmt: skip
 
 
@@ -339,7 +339,12 @@ TABS = (("cards", "/", "newspaper", "내 종목"), ("feed", "/feed", "dynamic_fe
 def bottom_nav(tab: str) -> str:
     on = "transition-colors text-primary-container font-semibold"
     off = "text-on-surface-variant hover:text-on-surface transition-colors"
-    return ('<nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl"><div class="max-w-[480px] mx-auto h-14 flex items-center justify-around px-1">'
+    top = ('<nav aria-label="메뉴" class="hidden lg:flex fixed top-0 left-1/2 -translate-x-1/2 z-[60] h-14 items-center gap-1">'
+           + "".join(f'<a {"aria-current=page " if tab == k else ""}class="px-3.5 py-1.5 rounded-full text-[14px] '
+                     f'{"bg-primary/10 text-primary font-semibold" if tab == k else "text-on-surface-variant hover:text-on-surface hover:bg-surface-container"}" href="{href}">{label}</a>'
+                     for k, href, icon, label in TABS)
+           + "</nav>")  # fmt: skip
+    return top + ('<nav class="lg:hidden fixed bottom-0 w-full z-50 pb-safe bg-surface/90 backdrop-blur-xl"><div class="max-w-[480px] mx-auto h-14 flex items-center justify-around px-1">'
             + "".join(f'<a {"aria-current=page " if tab == k else ""}class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-1 {on if tab == k else off}" href="{href}">'
                       f'<span class="material-symbols-outlined text-[22px]">{icon}</span><span class="font-label-micro text-label-micro mt-0.5">{label}</span></a>'
                       for k, href, icon, label in TABS)
@@ -524,7 +529,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     report = report or {}
     """stats = (이 주 노트를 연 횟수, 좋아요 수, 내가 눌렀나)."""
     facts = facts or []
-    head = ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe"><div class="h-14 max-w-[480px] mx-auto px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><button class="w-11 h-11 flex items-center justify-center text-on-surface hover:text-primary transition-colors -ml-space-xs" onclick="location.href=\'/\'"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><h1 class="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px]">Note</h1></div><div class="flex items-center gap-space-sm">'
+    head = ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe"><div class="h-14 max-w-[480px] lg:max-w-[760px] mx-auto px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><button class="w-11 h-11 flex items-center justify-center text-on-surface hover:text-primary transition-colors -ml-space-xs" onclick="location.href=\'/\'"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><h1 class="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px]">Note</h1></div><div class="flex items-center gap-space-sm">'
             + avatar(initial) + '</div></div></header>')  # fmt: skip
     parts = [
         # 머리 — 로고·이름 한 줄, 업종 · 날짜 · 읽음 한 줄 (글자를 줄였다, 사용자 10/8)
@@ -600,7 +605,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
               "function toggleCitation(id){const d=citations[id];if(!d)return;document.getElementById('citation-badge').innerText=d.badge;document.getElementById('citation-title').innerText=d.title;document.getElementById('citation-body').innerText=d.body;document.getElementById('citation-meta').innerText=d.meta;document.getElementById('citation-link').href=d.url;const g=document.getElementById('citation-dialog');g.classList.remove('hidden');g.classList.add('flex');}"
               "function hideCitation(){const g=document.getElementById('citation-dialog');g.classList.add('hidden');g.classList.remove('flex');}"
               "function closeCitation(ev){if(ev.target.id==='citation-dialog')hideCitation();}</script>")  # fmt: skip
-    inner = (head + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-safe bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-space-xl">'
+    inner = (head + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-safe bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-space-xl">'
              + "".join(parts) + dialog + "</div></main>")  # fmt: skip
     return page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -656,7 +661,7 @@ class App:
 
     def simple(self, title: str, msg: str) -> str:
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
-                    f'<main class="w-full max-w-[480px] mx-auto px-margin pt-14"><p class="font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
+                    f'<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto px-margin pt-14"><p class="font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
 
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
@@ -775,7 +780,7 @@ class App:
     def login_page(self, error: str = "", cohort: str = "") -> str:
         hidden = f'<input type="hidden" name="c" value="{cohort}">' if COHORT.fullmatch(cohort) else ""
         box = f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else ""
-        inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
+        inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
                  '<h1 class="font-headline-sm text-headline-sm text-on-surface mt-4 max-w-[280px] leading-relaxed">내 주식이 지금 어떤 상황인지,<br>쉬운 글 한 장으로.</h1>'
@@ -926,7 +931,7 @@ class App:
                        f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p></a>'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full">'
                  '<section class="sticky top-0 z-30 bg-surface/95 backdrop-blur-md px-margin py-3 border-b border-surface-container-high transition-all duration-200"><div class="relative w-full">'
                  '<form method="post" action="/add" class="h-11 w-full bg-surface-container-low/60 rounded-xl flex items-center px-3 border border-surface-container-high/60 focus-within:border-primary-container focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline text-[20px] mr-2">search</span>'
                  '<input autocomplete="off" class="w-full bg-transparent text-on-surface font-body-compact text-body-compact placeholder:text-outline focus:outline-none" id="stock-search-input" name="q" placeholder="종목 이름 또는 코드로 담기" type="text">'
@@ -943,7 +948,7 @@ class App:
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
                  '</header>'
-                 f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
+                 f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
                  '<footer class="px-margin pt-4 pb-8 flex flex-col items-center justify-center gap-2"><p class="font-label-regular text-label-regular text-on-surface-variant text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[15px] text-primary">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 노트가 있는 종목(코스피 시총 상위)만. 업종은 DART 업종 코드에서
@@ -1069,27 +1074,27 @@ class App:
             for i, d in enumerate(wk):
                 iso = d.isoformat()
                 if d.month != m:
-                    num = f'<span class="font-label-micro text-label-micro text-outline-variant">{d.day}</span>'
+                    num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-outline-variant">{d.day}</span>'
                 elif d == today:
                     num = (f'<div class="flex items-center justify-between"><span class="w-5 h-5 flex items-center justify-center rounded-full bg-primary-container text-on-primary font-label-micro text-label-micro font-bold">{d.day}</span>'
                            '<span class="text-[8px] text-primary-container font-semibold">오늘</span></div>')  # fmt: skip
                 elif iso in hol:  # 공휴일은 시안대로 검은 숫자 + 이름 (사용자 10/7: 시안 그대로)
-                    num = f'<span class="font-label-micro text-label-micro text-on-surface font-medium">{d.day}</span>'
+                    num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-on-surface font-medium">{d.day}</span>'
                 elif i in (0, 6):  # 주말은 빨간 숫자
-                    num = f'<span class="font-label-micro text-label-micro text-tertiary font-semibold">{d.day}</span>'
+                    num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-tertiary font-semibold">{d.day}</span>'
                 else:
-                    num = f'<span class="font-label-micro text-label-micro text-on-surface">{d.day}</span>'
+                    num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-on-surface">{d.day}</span>'
                 cell = num
                 if iso in hol and d.month == m:
-                    cell += f'<span class="text-[8px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">{e(hol[iso])}</span>'
+                    cell += f'<span class="text-[8px] lg:text-[11px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">{e(hol[iso])}</span>'
                 for _, name, code, _, rno, dr, _, _ in by.get(iso, []) if d.month == m else []:
                     tint = {1: "bg-secondary-fixed text-on-secondary-fixed-variant", -1: "bg-tertiary-fixed text-on-tertiary-fixed-variant"}.get(dr, "bg-surface-container-high text-on-surface-variant")
-                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 px-1 py-0.5 rounded {tint} text-[9px] font-semibold leading-tight line-clamp-1">'
-                             f"{e(short_name(name))} {e(EVENT_SHORT.get(code, ''))}</a>")  # fmt: skip
-                for name, kind, _, rno in ahead.get(iso, []) if d.month == m else []:
-                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 px-0.5 py-0.5 rounded border border-primary/40 text-primary text-[9px] font-semibold leading-tight tracking-tighter whitespace-nowrap overflow-hidden">'
-                             f"{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</a>")  # fmt: skip
-                cells.append(f'<div class="min-h-[52px] p-1 flex flex-col justify-start">{cell}</div>')
+                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 lg:mt-1 px-1 lg:px-1.5 py-0.5 lg:py-1 rounded {tint} text-[9px] lg:text-[12px] font-semibold leading-tight line-clamp-1 lg:line-clamp-2">'
+                             f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}</a>")  # fmt: skip
+                for name, kind, what, rno in ahead.get(iso, []) if d.month == m else []:
+                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 px-0.5 py-0.5 rounded border border-primary/40 text-primary text-[9px] lg:text-[12px] lg:mt-1 lg:px-1.5 lg:py-1 font-semibold leading-tight tracking-tighter lg:tracking-normal whitespace-nowrap overflow-hidden">'
+                             f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></a>")  # fmt: skip
+                cells.append(f'<div class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else ""}">{cell}</div>')
         items = []
         for d, name, code, title, rno, dr, t, amount in mine:
             dd = date.fromisoformat(d)
@@ -1123,24 +1128,29 @@ class App:
             f'<div class="flex flex-col gap-0.5 min-w-0"><p class="font-body-compact text-body-compact text-on-surface font-semibold">{e(learn.BY_SLUG["disclosure"]["title"])}</p>'
             f'<span class="font-label-micro text-label-micro text-on-surface-variant">{e(TIP_DEFAULT[0])}</span></div></a>')  # fmt: skip
         mix = " · ".join(f"{EVENT_SHORT.get(k, k)} {v}" for k, v in kinds.items()) or "큰 공시 없음"
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6 gap-space-lg">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6 gap-space-lg">'
                  '<header class="flex flex-col pt-space-xs gap-space-xs"><div class="flex items-center justify-between"><div class="flex items-baseline gap-space-xs">'
-                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{y}년 {m}월</h1><span class="font-label-micro text-label-micro text-on-surface-variant">공시 타임라인</span></div>'
+                 f'<h1 class="font-headline-lg text-headline-lg lg:text-[32px] lg:leading-[40px] text-on-surface tracking-tight">{y}년 {m}월</h1><span class="font-label-micro text-label-micro text-on-surface-variant">공시 타임라인</span></div>'
+                 '<nav class="hidden lg:flex items-center gap-2 text-[13px]">'
+                 f'<a class="flex items-center gap-0.5 px-3 py-1.5 rounded-full border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[16px]">chevron_left</span>이전 달</a>'
+                 f'<a class="px-3 py-1.5 rounded-full bg-primary text-on-primary font-semibold" href="/calendar">오늘</a>'
+                 f'<a class="flex items-center gap-0.5 px-3 py-1.5 rounded-full border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[16px]">chevron_right</span></a></nav>'
                  '</div>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant">관심 기업의 주요 의사결정과 공시 기록을 날짜별로 천천히 짚어드려요.</p></header>'
                  '<section class="py-space-sm px-1 flex items-center justify-between border-b border-surface-container-high"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-primary text-[20px]">calendar_clock</span><div class="flex items-baseline gap-space-xs">'
                  f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">이번 달 주목할 공시 {len(mine)}건</span><span class="font-label-micro text-label-micro text-on-surface-variant">{e(mix)}</span></div></div>'
                  '</section>'
-                 '<section class="flex flex-col gap-1 py-1"><div class="grid grid-cols-7 text-center font-label-micro text-label-micro font-semibold pb-1.5 border-b border-surface-container-high/60"><span class="text-tertiary">일</span><span class="text-on-surface-variant">월</span><span class="text-on-surface-variant">화</span><span class="text-on-surface-variant">수</span><span class="text-on-surface-variant">목</span><span class="text-on-surface-variant">금</span><span class="text-tertiary">토</span></div>'
-                 f'<div class="grid grid-cols-7 gap-1 pt-1">{"".join(cells)}</div>'
+                 '<div class="flex flex-col gap-space-lg lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10 lg:items-start">'
+                 '<section class="flex flex-col gap-1 py-1 lg:rounded-2xl lg:border lg:border-surface-container-high lg:p-4"><div class="grid grid-cols-7 text-center font-label-micro text-label-micro font-semibold pb-1.5 lg:pb-2.5 lg:text-[13px] border-b border-surface-container-high/60"><span class="text-tertiary">일</span><span class="text-on-surface-variant">월</span><span class="text-on-surface-variant">화</span><span class="text-on-surface-variant">수</span><span class="text-on-surface-variant">목</span><span class="text-on-surface-variant">금</span><span class="text-tertiary">토</span></div>'
+                 f'<div class="grid grid-cols-7 gap-1 lg:gap-0 pt-1 lg:pt-0">{"".join(cells)}</div>'
                  '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
-                 '<section class="flex flex-col mt-2"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">최신순</span></div>'
+                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">최신순</span></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
                  f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
-                 f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section>'
+                 f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'
                  '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당)이에요. 공휴일: 한국천문연구원.</p></footer>'
                  "</div></main>" + bottom_nav("calendar"))  # fmt: skip
         return page("캘린더", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
@@ -1151,7 +1161,7 @@ class App:
     def profile(self, uid: int) -> str:
         """내 프로필 — 남이 보는 모양 그대로(이름·자기소개·팔로워·리그램). 설정은 오른쪽 위 톱니바퀴."""
         email, nick, bio, at = self.con.execute("select email, nickname, bio, photo_at from users where id = ?", (uid,)).fetchone()
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick or email, "w-14 h-14", photo_url(uid, at))}<div class="flex flex-col min-w-0 flex-1">'
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
@@ -1215,7 +1225,7 @@ class App:
                  "try{const r=await fetch('/me/photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
                  "const j=await r.json();location.href='/me/settings'+(j.msg?'?msg='+encodeURIComponent(j.msg):'');}"
                  "catch(err){location.href='/me/settings?msg='+encodeURIComponent('사진을 바꾸지 못했어요. 다시 해 주세요.');}};})();</script>")  # fmt: skip
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<a class="pt-5 flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/me"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                  '<span class="font-label-regular text-label-regular font-medium">내 프로필</span></a>'
                  '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-sm">설정</h1>'
@@ -1287,7 +1297,7 @@ class App:
         return ""
 
     def welcome_page(self, nick: str = "", error: str = "") -> str:
-        inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-16 pb-12">'
+        inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-16 pb-12">'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span>'
                  '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">닉네임을 정해 주세요</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">다른 사람에게는 이메일 대신 이 이름이 보여요. 한글·영문·숫자 2~20자, 다른 사람과 겹칠 수 없어요.</p>'
@@ -1401,7 +1411,7 @@ class App:
                   (b := json.loads(body))["title"], b["paragraphs"][0]["text"], name + (" · 내 종목" if mine else ""), d.replace("-", "."))
             for i, k, d, body, name, ind, mine in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 소식</h2>'
-                f'<div class="flex flex-col">{items}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-12">{items}</div></section>')  # fmt: skip
 
     def article(self, uid: int, aid: int):
         row = self.con.execute("select a.ticker, a.kind, a.date, a.body, s.name, s.induty_code from articles a join stocks s using(ticker)"
@@ -1415,7 +1425,7 @@ class App:
             return e(p["text"]) + "".join(f'<a class="{CITE}" href="{e(safe_url(b["links"].get(r, "#")))}" target="_blank" rel="noopener">[{e(r)}]</a>' for r in p["refs"])
 
         paras = "".join(f'<p class="text-[15px] leading-[27px] text-on-surface mb-4">{cite(p)}</p>' for p in b["paragraphs"])
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<a class="pt-4 flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/feed"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular">피드</span></a>'
                  f'<h1 class="mt-space-sm text-[22px] leading-[30px] font-bold tracking-tight text-on-surface">{e(b["title"])}</h1>'
                  f'<p class="mt-1 text-[12px] text-outline">{e(name)} · {e(d.replace("-", "."))}</p>'
@@ -1438,7 +1448,7 @@ class App:
         cards = "".join(story(f"/n/{t}", photos.pick(None, ind, name), json.loads(b)["headline"], gist(json.loads(b)), name, made[:10].replace("-", "."))
                         for t, name, b, ind, made, c in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
-                f'<div class="flex flex-col">{cards}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-12">{cards}</div></section>')  # fmt: skip
 
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
@@ -1446,7 +1456,7 @@ class App:
         photos = Photos()
         news = self.latest(uid, photos)
         body = news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
                  f'<input class="flex-1 bg-transparent font-body-compact text-body-compact focus:outline-none" name="q" value="{e(q)}" placeholder="닉네임으로 사람 찾기"></form>'
@@ -1461,7 +1471,7 @@ class App:
         nick, bio, pat = row
         on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
         btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
-        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
+        inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other)}</div>'
                  f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{"팔로잉" if on else "팔로우"}</button></form></header>'
@@ -1535,7 +1545,7 @@ class App:
             f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
             + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)
             + "</section>" for h, ps in parts)  # fmt: skip
-        inner = ('<main class="flex flex-col relative w-full max-w-[480px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-space-lg pb-24">'
+        inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-space-lg pb-24">'
                  '<a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                  '<span class="font-label-regular text-label-regular font-medium">한장</span></a>'
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">{e(title)}</h1>'
@@ -1551,7 +1561,7 @@ class App:
         return re.sub(r"\*\*(.+?)\*\*", r'<strong class="font-semibold text-primary">\1</strong>', e(text))
 
     def learn(self, uid: int, slug: str):
-        wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] mx-auto pt-14 pb-24 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
+        wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
         end = ('<p class="font-label-micro text-label-micro text-outline text-center py-space-lg">설명을 위한 글이에요. 특정 종목이나 상품을 추천하지 않아요.</p></div></main>'
                + bottom_nav("learn"))
         if slug.startswith("big/"):  # 큰손 포트폴리오 한 곳
