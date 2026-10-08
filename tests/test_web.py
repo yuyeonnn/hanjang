@@ -68,7 +68,7 @@ def test_unknown_stock_and_forged_cookie():
     app, con = _app()
     ck = _login(app)
     _, h, _ = call(app, "/add", "POST", "q=" + quote("없는회사"), ck)
-    assert "아직 노트가 없어요" in unquote(h["Location"])
+    assert "상장사에서 찾지 못했어요" in unquote(h["Location"])
     assert "시작하기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
     assert web.safe_url("javascript:alert(1)") == "#"
 
@@ -531,3 +531,15 @@ def test_soften_parentheses():
     h = web.soften("영업이익이 늘었어요(9.0조원 · 7,921억원)(영업이익률 8.8%). 끝")
     assert h.count("<span") == 1 and "(9.0조원 · 7,921억원 · 영업이익률 8.8%)" in h and "text-outline" in h
     assert web.soften("괄호 없음") == "괄호 없음"
+
+def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
+    """코스닥 등 노트가 아직 없는 상장사도 담긴다 — 카드는 「내일 아침」, 검색 목록(/stocks.js)엔 상장사 전체."""
+    app, con = _app()
+    collect.save_universe(con, [("005930", "삼성전자")], {}, [("247540", "에코프로비엠"), ("005930", "삼성전자")])
+    assert dict(con.execute("select ticker, active from stocks")) == {"005930": 1, "247540": 0}
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("에코프로 비엠"), ck)
+    assert con.execute("select ticker from holdings order by ticker").fetchall()[-1] == ("247540",)
+    assert "내일 아침 7시에 첫 노트" in call(app, "/", cookie=ck)[2]
+    js = call(app, "/stocks.js")[2]
+    assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]
