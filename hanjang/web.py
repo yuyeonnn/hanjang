@@ -149,11 +149,39 @@ def gist(body: dict) -> str:
     return first[0]["text"] if first else ""
 
 
+# 로고를 못 쓸 때의 표시 — 그룹 대표색 동그라미 + 짧은 이름. 로고 모양은 따라 그리지 않는다(색·글자만).
+# (이름 앞부분, 보일 글자, 바탕색, 글자색) — 앞에서부터 처음 맞는 것
+GROUP = (("삼성", "삼성", "#1428A0", "#fff"), ("SK", "SK", "#EA002C", "#fff"), ("LG", "LG", "#A50034", "#fff"),
+         ("LIG", "LIG", "#00205B", "#fff"), ("LS", "LS", "#0A3D91", "#fff"), ("KB", "KB", "#FFBC00", "#3d2f00"),
+         ("KT&G", "KT&G", "#C8102E", "#fff"), ("KT", "KT", "#ED1C24", "#fff"), ("HD", "HD", "#0A2F6B", "#fff"),
+         ("현대", "현대", "#002C5F", "#fff"), ("기아", "KIA", "#05141F", "#fff"), ("한화", "한화", "#F37321", "#fff"),
+         ("포스코", "POSCO", "#05507D", "#fff"), ("POSCO", "POSCO", "#05507D", "#fff"), ("두산", "두산", "#005EB8", "#fff"),
+         ("카카오", "kakao", "#FFE812", "#3a1d1d"), ("NAVER", "N", "#03C75A", "#fff"), ("신한", "신한", "#0046FF", "#fff"),
+         ("하나", "하나", "#008485", "#fff"), ("우리", "우리", "#0067AC", "#fff"), ("DB", "DB", "#00854A", "#fff"),
+         ("GS", "GS", "#005A9C", "#fff"), ("CJ", "CJ", "#EF3E33", "#fff"), ("한국전력", "KEPCO", "#00A0E2", "#fff"),
+         ("한전", "KEPCO", "#00A0E2", "#fff"), ("셀트리온", "셀트", "#4A2A8C", "#fff"), ("NH", "NH", "#0B7A3E", "#fff"),
+         ("BNK", "BNK", "#D6001C", "#fff"), ("JB", "JB", "#00479D", "#fff"), ("HMM", "HMM", "#003A70", "#fff"),
+         ("S-Oil", "S-OIL", "#FFD100", "#1d2a57"), ("한진", "한진", "#004C97", "#fff"), ("대한항공", "KAL", "#0064DE", "#fff"),
+         ("메리츠", "메리츠", "#E4002B", "#fff"), ("미래에셋", "미래", "#F58220", "#fff"), ("키움", "키움", "#E5006E", "#fff"),
+         ("하이브", "HYBE", "#111111", "#fff"), ("크래프톤", "KRAF", "#111111", "#fff"))  # fmt: skip
+OTHER = ("#154539", "#2f5d50", "#5a3e8c", "#0e6e8c", "#8c5a0e", "#8c2f2f", "#3e5a8c", "#4a6b2f")  # 그 밖의 회사 — 이름마다 정해진 색
+
+
+def mark(name: str, size: str = "w-9 h-9") -> str:
+    hit = next((g for g in GROUP if name.startswith(g[0])), None)
+    if hit:
+        text, bg, fg = hit[1], hit[2], hit[3]
+    else:
+        text, bg, fg = name[:1], OTHER[sum(map(ord, name)) % len(OTHER)], "#fff"
+    fs = {1: "13px", 2: "11px" if text.isascii() else "10px"}.get(len(text), "8px" if len(text) <= 4 else "7px")
+    return (f'<span class="{size} shrink-0 rounded-full flex items-center justify-center font-bold tracking-tight leading-none" '
+            f'style="background:{bg};color:{fg};font-size:{fs}">{e(text)}</span>')  # fmt: skip
+
+
 def logo(name: str, homepage: str | None, size: str = "w-9 h-9") -> str:
     """회사 로고 동그라미 — Brandfetch Logo API(무료·출처 표시 의무 없음, .env BRANDFETCH_CLIENT_ID).
     키나 도메인이 없거나 로고를 못 찾으면 첫 글자 동그라미. 로고는 「이 회사」를 알려주는 데만 쓴다(상표적 사용 아님)."""
-    letter = (f'<span class="{size} shrink-0 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center '
-              f'font-label-regular text-label-regular font-semibold">{e(name[:1])}</span>')  # fmt: skip
+    letter = mark(name, size)
     key = env().get("BRANDFETCH_CLIENT_ID", "")
     if not (key and homepage):
         return letter
