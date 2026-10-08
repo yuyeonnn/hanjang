@@ -572,3 +572,9 @@ def test_returns_watch_and_cite_tone():
     assert "매출 1,000원 (2025년 · 전년보다 +0.0%)" in h and "「살펴볼 숫자」는" in h
     assert "「살펴볼 숫자」는" not in web.risk_block({"risks": ["환율 위험"]}, fins)
     assert "text-outline/70" in web.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in web.sentence({"text": "재무", "refs": ["F1"]})
+
+
+def test_metrics_compares_last_year_and_this_year():
+    h = web.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
+    assert "2024년 → 2025년" in h and "+56.8%" in h and h.count("bg-outline-variant") == 2 and h.count("bg-primary") == 2
+    assert web.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다

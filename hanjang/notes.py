@@ -61,6 +61,10 @@ TITLE_PLAIN = (
     (r"자기주식처분", "회사가 갖고 있던 자기 회사 주식을 팔거나 나눠 주기로 했어요"),
     (r"주식소각|자기주식소각", "회사가 갖고 있던 자기 주식을 아예 없애기로(소각) 했어요 — 전체 주식 수가 줄어요"),
     (r"(?<!무)유상증자결정", "새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
+    (r"발행가액|발행가격", "새로 찍는 주식을 한 주에 얼마에 팔지 값이 정해졌어요"),
+    (r"증권신고서", "주식·채권을 팔기 전에 금융감독원에 내는 신고서예요 — 얼마를 왜 모으는지 적혀 있어요"),
+    (r"결산실적공시예고", "1년 실적을 언제 발표할지 미리 알렸어요"),
+    (r"기업설명회", "투자자에게 회사를 설명하는 자리(IR)를 연다고 알렸어요"),
     (r"발행결과", "앞서 정한 증자·채권 발행을 실제로 마쳤다는 결과 보고예요"),
     (r"무상증자결정", "주주에게 새 주식을 공짜로 나눠 주기로 했어요"),
     (r"전환사채권발행결정", "나중에 주식으로 바꿀 수 있는 채권(전환사채)을 팔아 돈을 빌리기로 했어요"),
@@ -382,6 +386,22 @@ def _slots(key: str, cur: int | None, prev: int | None) -> dict:
             | ({f"{key}폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
 
 
+def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -> dict:
+    """판 돈(매출)과 남긴 돈(영업이익)이 1년 전보다 어떻게 움직였나 — 말 줄기와 100원당 남긴 돈. 계산은 코드가, 말은 AI 가 옮긴다."""
+    out = {}
+    if rev and rev > 0 and op is not None:
+        out["백원당"] = f"{round(op / rev * 100)}원"
+        if rp and rp > 0 and opp is not None:
+            out["전년백원당"] = f"{round(opp / rp * 100)}원"
+    if rev and rp and rp > 0 and op is not None and opp and opp > 0:
+        r, o = rev / rp - 1, op / opp - 1
+        out["관계"] = ("판 돈보다 남긴 돈이 더 빨리 늘었" if r > 0 and o > r else
+                      "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았" if r > 0 and 0 <= o <= r else
+                      "더 많이 팔았지만 남긴 돈은 줄었" if r > 0 and o < 0 else
+                      "덜 팔았지만 남긴 돈은 늘었" if r <= 0 and o > 0 else "판 돈도 남긴 돈도 줄었")  # fmt: skip
+    return out
+
+
 def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가."""
     row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
@@ -392,10 +412,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     (name, months), url, out = QLABEL[q], DART.format(rno), []
     if parts := [x for x in (_change("매출", rev, rp, "1년 전 같은 분기"), _change("영업이익", op, opp, "1년 전 같은 분기")) if x]:
         out.append({"id": "F8", "text": f"{y}년 {name}({months}) " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp)})  # fmt: skip
+                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)})  # fmt: skip
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
         out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp)})  # fmt: skip
+                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
     return out
 
 
@@ -488,13 +508,13 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
-    for k, (rno, d, title, code, dr) in enumerate(sorted(evs, key=lambda r: r[1], reverse=True), 1):
+    for k, (rno, d, title, code, dr) in enumerate(evs, 1):  # 중요한 것부터(D1 이 가장 중요), 같으면 최근 것부터
         d = date.fromisoformat(d)
         tone = {1: " — 주주에게 반가운 쪽으로 분류", -1: " — 주주에게 걸리는 쪽으로 분류"}.get(dr, "")
         day = f"{d.month}월 {d.day}일"
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": DART.format(rno),
-                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"}})  # fmt: skip
+                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"} | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
                        " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터

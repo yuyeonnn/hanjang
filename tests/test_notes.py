@@ -446,3 +446,11 @@ def test_tidy_broken_joins():
     assert notes.mend("매출이 줄었어요(9.4% -9.4%).") == "매출이 줄었어요(-9.4%)."
     assert notes.mend("매출이 늘었고 2025년에는") == "매출이 늘었고 2025년에는"
     assert notes.mend("(매출 10.9% 늘었 · 영업이익 33.2% 줄었)") == "(매출 10.9% 증가 · 영업이익 33.2% 감소)"
+
+
+def test_relation_says_what_numbers_mean():
+    r = notes.relation(130, 100, 123, 100)
+    assert r == {"백원당": "95원", "전년백원당": "100원", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
+    assert notes.relation(110, 100, 150, 100)["관계"] == "판 돈보다 남긴 돈이 더 빨리 늘었"
+    assert notes.relation(90, 100, 80, 100)["관계"] == "판 돈도 남긴 돈도 줄었"
+    assert "관계" not in notes.relation(100, None, 10, None)

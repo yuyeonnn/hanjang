@@ -562,28 +562,32 @@ def cite_data(facts: list[dict]) -> dict:
     return out
 
 
-def metrics(facts: list[dict]) -> str:
-    """주요 실적 한눈에 보기 — F1(매출)·F2(영업이익)의 코드 값. 막대 길이는 두 변화율 중 큰 쪽을 꽉 찬 것으로 본 상대 길이."""
-    rows = [(FACT_SHORT[f["id"]] + ("액" if f["id"] == "F1" else ""), f["slots"])
-            for f in facts if f["id"] in ("F1", "F2") and "값" in f.get("slots", {})]  # 빈칸 값이 없는 옛 노트는 건너뛴다
-    if not rows:
+def metrics(fins: list[tuple]) -> str:
+    """주요 실적 한눈에 보기 — 매출·영업이익을 전년과 올해 막대 둘로 (같은 잣대: 둘 중 큰 값이 꽉 찬 막대).
+    fins = [(연도, 매출, 영업이익, 순이익, 자본, 부채)] 최근 해부터. 전년이 없으면 그리지 않는다."""
+    if len(fins) < 2:
         return ""
-    unit = "조원" if all(s["값"].endswith("조원") for _, s in rows) else ""
-    nums = {i: abs(float(s["변화"][:-1])) for i, (_, s) in enumerate(rows) if re.fullmatch(r"[+-][\d.]+%", s.get("변화", ""))}
-    top = max(nums.values(), default=0) or 1
+    (y, *now), (py, *was) = fins[0], fins[1]
     cells = []
-    for i, (label, s) in enumerate(rows):
-        chg = s.get("변화", "")
+    for label, k in (("매출 — 판 돈", 0), ("영업이익 — 본업으로 남긴 돈", 1)):
+        cur, prev = now[k], was[k]
+        if cur is None or prev is None:
+            continue
+        top = max(abs(cur), abs(prev)) or 1
+        _, _, chg = notes.trend(cur, prev)
         tone = "text-secondary" if chg.startswith("+") or chg == "흑자 전환" else "text-tertiary"
-        width = round(nums.get(i, 0) / top * 100)
-        cells.append(f'<div class="py-1"><div class="font-label-micro text-label-micro text-on-surface-variant">{e(label)}</div>'
-                     f'<div class="flex items-baseline gap-1.5 mt-0.5"><span class="font-headline-sm text-headline-sm text-on-surface">{e(s["값"].removesuffix(unit) if unit else s["값"])}</span>'
+        bar = lambda v, col, yr: (f'<div class="flex items-center gap-2 mt-1"><span class="w-9 text-[11px] text-outline tabular-nums">{yr}</span>'
+                                  f'<span class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><span class="block h-full rounded-full {col}" style="width:{max(v, 0) / top * 100:.1f}%"></span></span>'
+                                  f'<span class="w-16 text-right text-[12px] tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{e(notes.won(v))}</span></div>')  # fmt: skip
+        cells.append(f'<div class="py-1"><div class="flex items-baseline justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{e(label)}</span>'
                      f'<span class="font-label-micro text-label-micro {tone} font-semibold">{e(chg)}</span></div>'
-                     f'<div class="w-full bg-surface-container h-1 rounded-full mt-2 overflow-hidden"><div class="{"bg-primary" if i == 0 else "bg-secondary"} h-full rounded-full" style="width: {width}%;"></div></div></div>')  # fmt: skip
-    return ('<div class="py-space-md my-space-xs border-y border-outline-variant/30"><div class="flex justify-between items-center mb-space-sm">'
+                     + bar(prev, "bg-outline-variant", py) + bar(cur, "bg-primary", y) + "</div>")  # fmt: skip
+    if not cells:
+        return ""
+    return ('<div class="py-space-md my-space-xs border-y border-outline-variant/30"><div class="flex justify-between items-center mb-space-xs">'
             '<span class="font-label-regular text-label-regular text-on-surface font-semibold">주요 실적 한눈에 보기</span>'
-            f'<span class="font-label-micro text-label-micro text-on-surface-variant">{"단위: 조원 " if unit else ""}(전년대비)</span></div>'
-            f'<div class="grid grid-cols-2 gap-space-md">{"".join(cells)}</div></div>')  # fmt: skip
+            f'<span class="font-label-micro text-label-micro text-on-surface-variant">{py}년 → {y}년</span></div>'
+            f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-space-md gap-y-space-sm">{"".join(cells)}</div></div>')  # fmt: skip
 
 
 def chapter(title: str, body: str, extra: str = "") -> str:
@@ -681,7 +685,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         text = paras(sec["sentences"], seen)
         extra = ""
         if sec["title"].startswith("회사 사정"):
-            extra = metrics(facts) + money_blocks(report.get("fin"))
+            extra = metrics(report.get("fins") or []) + money_blocks(report.get("fin"))
         elif sec["title"].startswith(NEWS_TITLES):  # 「이번 주 소식」(공시+소식) · 옛 노트의 「요즘 무슨 일이 있었나요?」
             right = (f"반가운 쪽 {good_d}" + (f" · 걸리는 쪽 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
