@@ -13,7 +13,7 @@ MODELS = {"reader": "gpt-4.1-mini", "writer": "gpt-4.1"}  # 읽기는 싼 모델
 PRICE = {"gpt-4.1-mini": (0.40, 1.60), "gpt-4.1": (2.00, 8.00)}  # USD / 1M 토큰 (입력, 출력)
 PROMPTS = Path(__file__).parent / "prompts"
 spent = {"usd": 0.0, "calls": 0}  # 이번 실행 비용 — 끝에 찍는다
-CAP_USD = 3.0  # 한 번 실행 상한. ponytail: 주간 1회 · 100종목이면 $1 안쪽 (실측 뒤 조정)
+CAP_USD = 6.0  # 한 번 실행 상한 — 월요일 노트 100장(약 $2) + 뉴닉식 기사 30편(약 $1.5). ponytail: 실측 뒤 조정
 
 
 def _openai(model: str, system: str, user: str | list, schema: dict | None = None) -> str:
