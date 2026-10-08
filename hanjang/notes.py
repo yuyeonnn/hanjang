@@ -602,6 +602,17 @@ def dedupe(text: str) -> str:
     return re.sub(r" ?\(「[^」]*」(?:(?:, ?| ?· ?)「[^」]*」)*\)", "", text)
 
 
+def mend(text: str) -> str:
+    """빈칸 값(낱말 줄기 「4번째로 많았」「줄였」, 「2021년」)에 AI 가 토씨·글자를 또 붙여 깨진 이음을 고친다.
+    fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」 (사용자 10/9 검토)."""
+    text = re.sub(r"(았|었)(?:으로|로)(?=[,\s])", r"\1고", text)
+    text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
+    text = re.sub(r"(\d년)년", r"\1", text)
+    text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
+    text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
+    return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
+
+
 def fill(sent: dict, by: dict[str, dict]) -> dict:
     """AI 문장의 빈칸을 코드 값으로 채운다. 쓴 빈칸의 사실은 근거(refs)에 저절로 들어간다.
     검사: ① 빈칸 밖 숫자는 근거 사실에 글자 그대로 있을 때만 ② 없는 빈칸 금지 ③ 빈칸 없이 쓴 방향 낱말이 사실과 반대면 탈락."""
@@ -648,7 +659,7 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         v = by[m[1]]["slots"][m[2]]
         return v + (josa(v, m[3]) if m[3] else "")
 
-    text = dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었"))
+    text = mend(dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었")))
     text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
     text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」
     # 빈칸을 끼우며 생기는 어색한 이음 — 「가장 많았인」「최근 최근 90일」「10.9%이었으니」
