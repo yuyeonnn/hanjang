@@ -65,8 +65,22 @@ HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-container": "#2e6e4e", "secondary-fixed": "#aef1c9", "outline-variant": "#c0c8c4", "tertiary": "#741f11", "on-background": "#1b1b1d", "surface-container-low": "#f6f3f5", "on-tertiary-fixed-variant": "#802919", "surface-container-lowest": "#ffffff", "surface-container": "#f0edef", "surface-dim": "#dcd9dc", "outline": "#717975", "primary-fixed": "#bceddc", "primary-container": "#2f5d50", "error": "#ba1a1a", "error-container": "#ffdad6", "on-error": "#ffffff", "tertiary-fixed": "#ffdad3", "surface-bright": "#fcf8fb", "surface": "#fcf8fb", "on-primary-fixed-variant": "#204f42", "background": "#fcf8fb", "primary-fixed-dim": "#a0d1c0", "primary": "#154539", "surface-variant": "#e4e2e4", "on-secondary": "#ffffff", "on-primary-fixed": "#002019", "secondary-container": "#abeec6", "surface-tint": "#396759", "on-primary": "#ffffff", "surface-container-highest": "#e4e2e4", "tertiary-fixed-dim": "#ffb4a5", "on-tertiary": "#ffffff", "on-secondary-fixed-variant": "#095134", "on-tertiary-fixed": "#3f0400", "on-surface": "#1b1b1d", "inverse-primary": "#a0d1c0", "secondary": "#296a4a", "tertiary-container": "#933625", "inverse-on-surface": "#f3f0f2", "on-error-container": "#93000a", "on-secondary-fixed": "#002112", "on-surface-variant": "#404945", "inverse-surface": "#303032", "on-tertiary-container": "#ffb8aa", "on-primary-container": "#a3d4c3", "surface-container-high": "#eae7ea", "secondary-fixed-dim": "#93d5ae" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-md": "0.875rem", "margin": "1rem", "space-xs": "0.25rem", "space-xl": "2rem", "space-lg": "1.25rem", "gutter": "0.75rem", "space-sm": "0.5rem" }, "fontFamily": { "headline-lg": ["Newsreader"], "label-regular": ["Be Vietnam Pro"], "body-reading-strong": ["Be Vietnam Pro"], "label-micro": ["Be Vietnam Pro"], "headline-sm": ["Be Vietnam Pro"], "citation-ref": ["Be Vietnam Pro"], "body-reading": ["Be Vietnam Pro"], "display-editorial": ["Newsreader"], "headline-md": ["Be Vietnam Pro"], "body-compact": ["Be Vietnam Pro"] }, "fontSize": { "headline-lg": ["24px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "label-regular": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}], "body-reading-strong": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "label-micro": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "citation-ref": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "body-reading": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "display-editorial": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "body-compact": ["14px", {"lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400"}] } } } };</script>"""
 
 
+# 카카오톡·문자로 링크를 보낼 때 뜨는 미리보기 카드 — 어느 쪽을 보내도 같은 소개 (로그인 같은 화면 이름은 빼고)
+SHARE_TITLE = "한장 — 내 주식, 쉬운 글 한 장"
+SHARE_DESC = "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다."
+
+
+def share_tags() -> str:
+    img = f"{mail.base_url()}/static/og.png"
+    return (f'<meta property="og:type" content="website"><meta property="og:site_name" content="한장">'
+            f'<meta property="og:title" content="{SHARE_TITLE}"><meta property="og:description" content="{SHARE_DESC}">'
+            f'<meta name="description" content="{SHARE_DESC}"><meta property="og:image" content="{img}">'
+            f'<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">'
+            f'<meta name="twitter:card" content="summary_large_image">')  # fmt: skip
+
+
 def page(title: str, body_attr: str, inner: str) -> str:
-    return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}<title>{e(title)} · 한장</title></head>'
+    return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{share_tags()}<title>{e(title)} · 한장</title></head>'
             f'<body class="{body_attr}">{inner}</body></html>')  # fmt: skip
 
 
@@ -651,6 +665,8 @@ class App:
             return self.login(form.get("email", "").strip().lower(), form.get("agree") == "1", form.get("c", ""))
         if path.startswith("/static/photos/") and re.fullmatch(r"(pool/)?[a-z]+\d*\.jpg", path[15:]) and (STATIC / "photos" / path[15:]).exists():
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
+        if path == "/static/og.png":  # 링크 미리보기 그림
+            return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
         if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
