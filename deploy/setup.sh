@@ -15,6 +15,13 @@ if ss -ltn | grep -q ':8000\b' && ! systemctl is-active -q hanjang-web; then
 	echo "8000 을 다른 프로그램이 쓰고 있어요"; exit 1
 fi
 
+command -v git >/dev/null || { apt-get update && apt-get install -y git curl; }
+# 메모리 1GB 서버 — 설치·노트 만들 때 모자라지 않게 스왑 1GB
+if ! swapon --show | grep -q .; then
+	fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+	echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 id hanjang >/dev/null 2>&1 || adduser --disabled-password --gecos "" hanjang
 mkdir -p /srv/hanjang && chown hanjang /srv/hanjang
 [ -d /srv/hanjang/.git ] || sudo -u hanjang git clone "$REPO" /srv/hanjang
