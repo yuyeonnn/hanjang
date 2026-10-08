@@ -473,3 +473,17 @@ def test_reading_checks_hard_words_cut_stems_and_repeats():
                 "DS 부문 영업이익이 많았는데 DS 부문 영업이익이 가장 컸어요."):
         with pytest.raises(ValueError):
             notes.check_sentence({"text": bad, "refs": ["F1"]}, fs)
+
+
+def test_relation_only_from_slot_and_same_day_must_match():
+    by = {"F8": {"id": "F8", "text": "2026년 2분기 매출 1.3조원", "tone": 0, "slots": {"관계": notes.RELATIONS[1]}}}
+    with pytest.raises(ValueError):
+        notes.fill({"text": "판 돈보다 남긴 돈이 더 빨리 늘었어요.", "refs": ["F8"]}, by)
+    fs = [{"id": "D1", "text": "10월 8일 실적 공시", "tone": 0, "url": "u", "slots": {"날짜": "10월 8일"}},
+          {"id": "D2", "text": "7월 30일 배당 공시", "tone": 0, "url": "u", "slots": {"날짜": "7월 30일"}}]
+    j = {"headline": "소식", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
+         "sections": [{"title": "이번 주 소식", "sentences": [{"text": "실적을 미리 알렸어요.", "refs": ["D1"]},
+                                                          {"text": "같은 날 배당도 정했어요.", "refs": ["D2"]},
+                                                          {"text": "그 전에 배당을 정했어요.", "refs": ["D2"]}]}]}
+    with pytest.raises(ValueError):  # 셋 중 하나 탈락 = 30% 넘음 → 다시 쓰게
+        notes.fill_note(j, fs)
