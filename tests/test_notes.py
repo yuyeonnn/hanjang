@@ -214,7 +214,8 @@ def test_dedupe_paren_list():
     assert notes.dedupe("(10월 1일, 「A, B」, 「A, B」)") == "(10월 1일, 「A, B」)"
     assert notes.dedupe("(매출 97.1조원 · 영업이익 47.2조원)") == "(매출 97.1조원 · 영업이익 47.2조원)"
     assert notes.dedupe("소식이 나왔어요(「A」, 「B」). 끝") == "소식이 나왔어요. 끝"
-    assert notes.dedupe("「A」라는 기사(「A」)") == "「A」라는 기사(「A」)"
+    assert notes.dedupe("수주했어요(「삼성중공업, LNG선 2척 수주」).") == "수주했어요."
+    assert notes.dedupe("나왔어요(「[특징주] 한전기술 강세(종합)」).") == "나왔어요."  # 제목 속 괄호도
     assert notes.dedupe("8월 8월 3일에 공시가 나왔어요.") == "8월 3일에 공시가 나왔어요."
 
 

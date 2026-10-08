@@ -37,6 +37,12 @@ create table if not exists prices (
 create table if not exists articles (
   id integer primary key, ref text unique not null, ticker text not null references stocks, date text not null,
   kind text not null, body text not null, made_at text not null);
+create table if not exists big_pairs (
+  inst text not null, corp_code text not null, stock_code text not null, corp_name text not null, corp_cls text,
+  primary key (inst, corp_code));
+create table if not exists big_holdings (
+  inst text not null, stock_code text not null, corp_name text not null, corp_cls text, rate real not null,
+  rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
 create table if not exists events (
   ticker text not null references stocks, date text not null, kind text not null,
@@ -79,7 +85,7 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
-                            ("stocks", "homepage", "text")):  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
+                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text")):  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")
