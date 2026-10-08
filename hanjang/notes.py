@@ -299,7 +299,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{title}」"}})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
-                       " order by date desc limit 8",
+                       " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터
                        (ticker, (today - timedelta(days=NEWS_DAYS)).isoformat())).fetchall()  # fmt: skip
     # 목표주가·매수 같은 말이 든 소식은 싣지 않는다 — 옮기기만 해도 권유가 된다 (불변식 1)
     news = [n for n in news if not FORBIDDEN.search(n[3] + " " + (n[4] or ""))]
