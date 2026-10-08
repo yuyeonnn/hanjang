@@ -137,6 +137,9 @@ def test_title_rules_decide_without_ai():
     assert notes.by_rule("연결재무제표기준영업(잠정)실적(공정공시)") == ("EARNINGS", 2)
     assert notes.by_rule("최대주주등소유주식변동신고서") == ("OTHER", 1)
     assert notes.by_rule("투자설명서") is None  # 규칙에 없으면 AI 에게
+    assert notes.by_rule("불성실공시법인지정") == ("TRADING_HALT", 3)  # 코스닥에 잦은 거래소 경고
+    assert notes.by_rule("주권매매거래정지해제") is None and "다시 열렸어요" in notes.plain("주권매매거래정지해제")
+    assert "사고팔기를 잠시 멈췄어요" in notes.plain("주권매매거래정지(합병 관련)")
 
 
 def test_schema_limits_refs_to_this_notes_facts():
