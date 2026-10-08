@@ -368,7 +368,7 @@ def test_industry_photos_served_and_used():
 
 
 def test_note_logo_and_domain():
-    assert ">삼<" in web.logo("삼성전자", None)  # 로고를 못 찾으면 첫 글자
+    assert ">삼성<" in web.logo("삼성전자", None)  # 로고를 못 찾으면 그룹 대표색 표시
     from hanjang import sources
     assert sources.domain("www.samsung.com/sec") == "samsung.com" and sources.domain("http://WWW.SKHYNIX.COM") == "skhynix.com"
     assert sources.domain("-") is None
@@ -431,3 +431,9 @@ def test_no_news_strips_article_traces():
                       {"title": "회사 사정은 어떤가요?", "sentences": [{"text": "y", "refs": ["F1", "N2"]}]}], "keywords": ["#a"]}
     got = web.no_news(b)
     assert [s["text"] for s in got["summary"]] == ["매출"] and len(got["sections"]) == 1 and got["keywords"] == []
+
+
+def test_mark_uses_group_color_not_logo():
+    assert "#1428A0" in web.mark("삼성전자") and ">삼성<" in web.mark("삼성전자")
+    assert ">SK<" in web.mark("SK하이닉스") and ">KB<" in web.mark("KB금융")
+    assert web.mark("유한양행") == web.mark("유한양행") and ">유<" in web.mark("유한양행")  # 그 밖의 회사는 이름마다 같은 색
