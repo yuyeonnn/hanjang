@@ -610,6 +610,8 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     return page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
+FLAG = {"KR": "한", "US": "미"}  # 국기 이모지는 윈도우에서 「KR」 글자로 나와서 쓰지 않는다
+CHIP = "block mt-0.5 lg:mt-1 px-0.5 lg:px-1.5 py-0.5 lg:py-1 rounded text-[9px] lg:text-[12px] font-semibold leading-tight tracking-tighter lg:tracking-normal truncate"  # 캘린더 칸 칩 — 한 줄, 넘치면 …
 AHEAD_SHORT = {"EARNINGS": "실적", "AGM": "주총", "DIVIDEND": "배당", "OTHER": "IR"}  # 달력 칸이 좁아 한 낱말로
 TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant"),
             -1: ("부정", "bg-tertiary-fixed text-on-tertiary-fixed-variant"),
@@ -1061,18 +1063,26 @@ class App:
             " join holdings h on h.ticker = d.ticker and h.user_id = ? join stocks s on s.ticker = d.ticker"
             " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date",
             (uid, lo, hi)).fetchall()  # fmt: skip
-        by: dict[str, list] = {}
+        # 같은 날 같은 회사의 같은 종류 공시는 하나로 묶는다 — 계약 두 건, 자사주 취득·소각이 같은 말로 두 번 나오지 않게 (사용자 10/9)
+        grouped: dict[tuple, list] = {}
         for r in rows:
-            by.setdefault(r[0], []).append(r)
+            grouped.setdefault((r[0], r[6], r[2]), []).append(r)
+        by: dict[str, list] = {}
+        for (d, _, _), rs in grouped.items():
+            by.setdefault(d, []).append(rs)
+        macro = sources.macro_events(lo, hi)
+        macro_by: dict[str, list] = {}
+        for x in macro:
+            macro_by.setdefault(x[0], []).append(x)
         ahead: dict[str, list] = {}  # 공시에서 읽은 일정(실적 발표·주총·배당 기준일·지급일) — 테두리 칩으로 지난 공시와 구분
         for d, name, kind, what, rno in self.con.execute(
                 "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
                 " join stocks s on s.ticker = e.ticker where e.date between ? and ? order by e.date", (uid, lo, hi)):  # fmt: skip
             ahead.setdefault(d, []).append((name, kind, what, rno))
-        mine = sorted((r for r in rows if r[0][:7] == f"{y}-{m:02d}"), key=lambda r: r[0], reverse=True)  # 최신순
+        mine = sorted((rs for rs in grouped.values() if rs[0][0][:7] == f"{y}-{m:02d}"), key=lambda rs: rs[0][0], reverse=True)  # 최신순
         kinds: dict[str, int] = {}
-        for r in mine:
-            kinds[r[2]] = kinds.get(r[2], 0) + 1
+        for rs in mine:
+            kinds[rs[0][2]] = kinds.get(rs[0][2], 0) + 1
         prev = f"{y - (m == 1)}-{(m - 2) % 12 + 1:02d}"
         nxt = f"{y + (m == 12)}-{m % 12 + 1:02d}"
         cells = []
@@ -1093,30 +1103,51 @@ class App:
                 cell = num
                 if iso in hol and d.month == m:
                     cell += f'<span class="text-[8px] lg:text-[11px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">{e(hol[iso])}</span>'
-                for _, name, code, _, rno, dr, _, _ in by.get(iso, []) if d.month == m else []:
+                # 칸 안 칩은 한 줄 — 넘치면 말줄임(…), 전체 이름은 마우스를 올리면·오른쪽 목록에서. 칸마다 셋까지, 나머지는 「+N」 (사용자 10/9: 줄바꿈이 별로)
+                chips = []
+                for rs in by.get(iso, []) if d.month == m else []:
+                    _, name, code, _, rno, dr, _, _ = rs[0]
                     tint = {1: "bg-secondary-fixed text-on-secondary-fixed-variant", -1: "bg-tertiary-fixed text-on-tertiary-fixed-variant"}.get(dr, "bg-surface-container-high text-on-surface-variant")
-                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 lg:mt-1 px-1 lg:px-1.5 py-0.5 lg:py-1 rounded {tint} text-[9px] lg:text-[12px] font-semibold leading-tight line-clamp-1 lg:line-clamp-2">'
-                             f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}</a>")  # fmt: skip
+                    many = f" {len(rs)}건" if len(rs) > 1 else ""
+                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}{many}</a>")  # fmt: skip
                 for name, kind, what, rno in ahead.get(iso, []) if d.month == m else []:
-                    cell += (f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="mt-0.5 px-0.5 py-0.5 rounded border border-primary/40 text-primary text-[9px] lg:text-[12px] lg:mt-1 lg:px-1.5 lg:py-1 font-semibold leading-tight tracking-tighter lg:tracking-normal whitespace-nowrap overflow-hidden">'
-                             f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></a>")  # fmt: skip
+                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(what)}" class="{CHIP} border border-primary/40 text-primary">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></a>")  # fmt: skip
+                for _, kind, nat, what in macro_by.get(iso, []) if d.month == m else []:
+                    chips.append(f'<span title="{e(what)}" class="{CHIP} border border-dashed border-outline-variant text-on-surface-variant">'
+                                 f"<span class='lg:hidden'>{FLAG[nat]} {e(kind)}</span><span class='hidden lg:inline'>{e(what)}</span></span>")  # fmt: skip
+                cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
                 cells.append(f'<div class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else ""}">{cell}</div>')
         items = []
-        for d, name, code, title, rno, dr, t, amount in mine:
+        for rs in mine:
+            d, name, code, title, rno, dr, t, _ = rs[0]
             dd = date.fromisoformat(d)
             label, chip = TONE_TAG.get(dr or 0, TONE_TAG[0])
-            src = "DART 공시: " + re.sub(r"^\[[^\]]*\]", "", title) + (f" {notes.won(amount)} 규모" if amount else "")
-            items.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
+            src = "DART 공시: " + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
+            title = clean_title(title, code) + (f" 외 {len(rs) - 1}건" if len(rs) > 1 else "")
+            items.append((1, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
                          f'<span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · {e(name)} ({e(t)})</span>'
                          f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></div>'
-                         f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(clean_title(title, code))}</h3>'
+                         f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(title)}</h3>'
                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(EVENT_EXPLAIN.get(code, ""))}</p>'
-                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><span class="">{e(src)}</span></div></article></a>')  # fmt: skip
+                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><span class="">{e(src)}</span></div></article></a>'))  # fmt: skip
         soon = [(d, *x) for d in sorted(ahead) if d[:7] == f"{y}-{m:02d}" for x in ahead[d]]
-        items = [f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
+        items += [(0, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
                  f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{(dd := date.fromisoformat(d)).month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})</span> · {e(name)} <b>{e(what)}</b></span>'
-                 '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold flex-shrink-0">일정</span></article></a>'
-                 for d, name, _, what, rno in soon] + items  # fmt: skip
+                 '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold flex-shrink-0">일정</span></article></a>')
+                  for d, name, _, what, rno in soon]  # fmt: skip
+        for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
+            if d[:7] != f"{y}-{m:02d}":
+                continue
+            dd, (who, url) = date.fromisoformat(d), sources.MACRO_SOURCE[nat + kind]
+            items.append((1 + sources.MACRO_RANK[kind], d, f'<a href="{e(url)}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
+                          f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · 시장 전체</span>'
+                          '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-dashed border-outline-variant text-on-surface-variant font-semibold">시장 일정</span></div>'
+                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(what)}</h3>'
+                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(sources.MACRO_EXPLAIN[(kind, nat)])}</p>'
+                          f'<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</span></article></a>'))  # fmt: skip
+        items = [html_ for _, _, html_ in sorted(items, key=lambda x: (x[0], x[1]))]  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
         if not items:
             items.append('<p class="py-3.5 font-body-compact text-body-compact text-on-surface-variant">이 달엔 내 종목의 큰 공시가 없어요.</p>')
         # 이 달 일정에 나온 공시 종류마다 그에 맞는 읽기 팁 글 — 많이 나온 종류부터, 같은 글은 한 번, 최대 3편
@@ -1152,12 +1183,12 @@ class App:
                  '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
-                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">최신순</span></div>'
+                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
                  f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
                  f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'
-                 '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당)이에요. 공휴일: 한국천문연구원.</p></footer>'
+                 '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당), 점선 칩은 금리·물가·고용·선거 같은 시장 일정이에요. 공휴일: 한국천문연구원.</p></footer>'
                  "</div></main>" + bottom_nav("calendar"))  # fmt: skip
         return page("캘린더", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
