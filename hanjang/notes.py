@@ -139,6 +139,10 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
+# 읽기 검사 (사용자 10/9: 깨진 이음·되풀이·어려운 말이 하나라도 있으면 안 된다) — 걸리면 다시 쓰게 한다
+HARD = re.compile(r"유상증자|신주|발행가액|공정공시|기재정정|단일판매|전환사채|자기주식|잠정실적|결산실적")  # 괄호 밖에서 — 쉬운 말로 바꿔 쓴다
+STEM = re.compile(r"(늘었|줄었|많았|적었|높았|낮았|돌아섰|이어졌|늘렸|줄였)(?![어고는지으다던기을거네죠습음])")  # 줄기 뒤에 끝이 없음
+REPEAT = re.compile(r"([가-힣][가-힣 ]{6,}[가-힣])[^.]*?\1")  # 한 문장 안에서 같은 말(8자 넘게)이 두 번
 TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
@@ -743,6 +747,13 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"금지어: {text!r}")
     if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
         raise ValueError(f"예측 말투: {text!r}")
+    outside = re.sub(r"\([^()]*\)|「[^」]*」", "", text)
+    if not all(r.startswith("N") for r in refs) and HARD.search(outside):
+        raise ValueError(f"어려운 말: {text!r}")
+    if STEM.search(outside):
+        raise ValueError(f"끝이 잘린 말: {text!r}")
+    if any(REPEAT.search(x) for x in re.split(r"(?<=[.?!])\s", outside)):
+        raise ValueError(f"같은 말 되풀이: {text!r}")
 
 
 def short_title(t: str, what: str) -> str:
@@ -907,11 +918,13 @@ def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
     return sig(fs) != sig(old)
 
 
-def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
-    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로."""
+def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True) -> None:
+    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로.
+    read=False: 사업보고서 읽기(DART)를 건너뛴다 — DART 점검 중에 노트만 다시 쓸 때 (python -m hanjang.notes --rewrite)."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
-    print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건 · 사업부별 실적 {read_segments(con, today)}곳")
+    if read:
+        print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건 · 사업부별 실적 {read_segments(con, today)}곳")
     print(f"공시 읽기 — 규칙 {ruled}건 · AI {ai}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]
@@ -938,4 +951,4 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:], date.today())
+    main([a for a in sys.argv[1:] if a != "--rewrite"], date.today(), read="--rewrite" not in sys.argv)

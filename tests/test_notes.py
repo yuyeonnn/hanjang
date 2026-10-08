@@ -462,3 +462,14 @@ def test_relation_slot_is_not_wrapped_twice():
     got = notes.fill({"text": "{F8.분기}엔 판 돈보다 남긴 돈이 더 빨리 {F8.관계}어요.", "refs": ["F8"]}, by)
     assert got["text"] == "2026년 2분기엔 판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았어요."
     assert notes.mend("줄인 보고가 1건 있었어요(1건).") == "줄인 보고가 1건 있었어요."
+
+
+def test_reading_checks_hard_words_cut_stems_and_repeats():
+    fs = [{"id": "F1", "text": "2025년 매출 9.0조원", "tone": 0, "slots": {}}, {"id": "N1", "text": "유상증자 기사", "tone": 0, "slots": {}}]
+    ok = {"text": "새 주식을 찍어 팔아 돈을 모으기로 했어요(유상증자).", "refs": ["F1"]}
+    notes.check_sentence(ok, fs)
+    notes.check_sentence({"text": "기사는 유상증자 이야기를 해요.", "refs": ["N1"]}, fs)  # 소식만 근거면 그 말을 옮겨도 된다
+    for bad in ("유상증자 신주 발행가액 공시도 있었어요.", "매출은 4번째로 많았 바닥보다는 올라왔어요.",
+                "DS 부문 영업이익이 많았는데 DS 부문 영업이익이 가장 컸어요."):
+        with pytest.raises(ValueError):
+            notes.check_sentence({"text": bad, "refs": ["F1"]}, fs)
