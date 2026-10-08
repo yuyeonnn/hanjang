@@ -523,6 +523,20 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
     assert sources.macro_events("2026-11-01", "2026-11-30")[0] == ("2026-11-03", "물가", "KR", "한국 소비자물가 발표")
 
 
+def test_money_blocks_and_use_ring():
+    h = web.money_blocks((2025, 1000, 200, -50, 400, 600))
+    assert "100원 팔면" in h and "20원" in h and "적자" in h and "부채비율 150%" in h
+    assert web.money_blocks((2025, None, 8, 5, 60, 737)) == ""  # 금융사(매출 없음)는 그리지 않는다
+    d = web.dividend_block([(2025, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))
+    assert "배당으로 나눠 줌" in d and "25%" in d and "회사에 남김" in d
+    assert "배당으로 나눠 줌" not in web.dividend_block([(2024, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))  # 해가 다르면 도넛 없음
+
+
+def test_soften_parentheses():
+    h = web.soften("영업이익이 늘었어요(9.0조원 · 7,921억원)(영업이익률 8.8%). 끝")
+    assert h.count("<span") == 1 and "(9.0조원 · 7,921억원 · 영업이익률 8.8%)" in h and "text-outline" in h
+    assert web.soften("괄호 없음") == "괄호 없음"
+
 def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     """코스닥 등 노트가 아직 없는 상장사도 담긴다 — 카드는 「내일 아침」, 검색 목록(/stocks.js)엔 상장사 전체."""
     app, con = _app()
