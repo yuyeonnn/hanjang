@@ -48,9 +48,9 @@ def main(today: date) -> None:
     save_universe(con, picked, dart.corps())
     print(f"종목 {len(tickers)}개 (코스피 시총 상위)")
 
-    fin = [f for y in (today.year - 1, today.year - 2) for f in dart.financials(tickers, y)]
+    fin = [f for y in range(today.year - 1, today.year - 6, -1) for f in dart.financials(tickers, y)]  # 5년 — 노트 위 차트
     save_financials(con, fin)
-    print(f"재무 {len(fin)}행 ({today.year - 2}~{today.year - 1})")
+    print(f"재무 {len(fin)}행 ({today.year - 5}~{today.year - 1})")
 
     lo = today - timedelta(days=DISCLOSURE_DAYS)
     ds = dart.disclosures(lo, today, set(tickers))
@@ -63,8 +63,8 @@ def main(today: date) -> None:
                        (lo.isoformat(), today.isoformat())).rowcount  # fmt: skip
     print(f"  정정되어 옛 판이 된 공시 {gone}건 정리")
 
-    for (t,) in con.execute("select ticker from stocks where active = 1 and induty_code is null").fetchall():
-        con.execute("update stocks set induty_code = ? where ticker = ?", (dart.industry(t), t))
+    for (t,) in con.execute("select ticker from stocks where active = 1 and (induty_code is null or homepage is null)").fetchall():
+        con.execute("update stocks set induty_code = ?, homepage = ? where ticker = ?", (*dart.company(t), t))
     # 자기주식 취득 결정은 금액을 전용 API 로 받는다 (제목만으로는 규모를 모른다)
     want = con.execute("select distinct ticker from disclosures where amount is null and date >= ?"
                        " and replace(title, ' ', '') like '%자기주식취득결정%'", (lo.isoformat(),)).fetchall()  # fmt: skip
@@ -73,6 +73,9 @@ def main(today: date) -> None:
         for rno, v in dart.buybacks(t, lo, today).items():
             got += con.execute("update disclosures set amount = ? where rcept_no = ?", (v, rno)).rowcount
     print(f"  업종 코드 · 자사주 취득 금액 {got}건 · DART {dart.calls}콜")
+    divs = [(t, *r) for t in tickers for y in (today.year - 1, today.year - 4) for r in dart.dividends(t, y)]  # 3년씩 두 번 = 6년
+    con.executemany("insert or replace into dividends values (?, ?, ?, ?, ?)", divs)
+    print(f"  배당 {len(divs)}행")
     ins = [x for t in tickers for x in dart.insiders(t, lo)]  # 종목마다 2콜 — 임원·주요주주 · 5% 대량보유
     con.executemany("insert or replace into insiders values (?, ?, ?, ?, ?, ?, ?, ?)",
                     [(x.rcept_no, x.ticker, x.day.isoformat(), x.kind, x.who, x.change, x.rate, x.rate_chg)
@@ -90,6 +93,14 @@ def main(today: date) -> None:
         pts = sources.ecos(sid, date(1957, 1, 1), today, "M")
         con.executemany("insert or replace into macro values (?, ?, ?)", [(sid, d.isoformat(), v) for d, v in pts])
         print(f"{name} 주가지수 {len(pts)}달 (OECD)")
+
+    if sources.price_dev():  # ⚠️ 개발 중 개인용만 — 서버에선 꺼짐 (data-rights §4)
+        n = 0
+        for t in tickers:
+            pts = sources.prices(t, today - timedelta(days=370))
+            con.executemany("insert or replace into prices values (?, ?, ?)", [(t, d.isoformat(), v) for d, v in pts])
+            n += len(pts)
+        print(f"주가 {n}행 (개발용 · 개인용만)")
 
     hs = [h for y in (today.year, today.year + 1) for h in sources.holidays(y)]
     con.executemany("insert or replace into holidays values (?, ?)", [(d.isoformat(), n) for d, n in hs])

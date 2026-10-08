@@ -82,6 +82,23 @@ def kospi_universe(n: int = 100) -> list[tuple[str, str]]:
     raise RuntimeError("최근 10일 시세가 비었다")
 
 
+def price_dev() -> bool:
+    """`.env` 에 PRICE_DEV=1 일 때만 주가를 받고 화면에 그린다 — 내 컴퓨터에서 나 혼자 볼 때.
+    시세는 「상업 금지 · 제3자 제공 금지」(data-rights §4). 서버(.env 에 없음)는 늘 꺼진다."""
+    return env().get("PRICE_DEV") == "1"
+
+
+def prices(ticker: str, since: date) -> list[tuple[date, int]]:
+    """공공데이터포털 주식시세 — 그 종목의 일별 종가 [(날짜, 종가)], 오래된 것부터. ⚠️ 개발 중 개인용만."""
+    e = env()
+    key, base = e["DATA_GO_KR_SERVICE_KEY"], e["DATA_GO_KR_BASE_URL"]
+    body = _get(f"{base}/GetStockSecuritiesInfoService/getStockPriceInfo", key, serviceKey=key, resultType="json",
+                numOfRows=1000, likeSrtnCd=ticker, beginBasDt=since.strftime("%Y%m%d")).json()["response"]["body"]  # fmt: skip
+    items = (body.get("items") or {}).get("item") or []
+    items = items if isinstance(items, list) else [items]
+    return sorted((_ymd(r["basDt"]), int(r["clpr"])) for r in items if r.get("srtnCd") == ticker and r.get("clpr"))
+
+
 def holidays(year: int) -> list[tuple[date, str]]:
     """공휴일·대체공휴일 — 한국천문연구원 특일 정보 (이용허락범위 제한 없음). 1년 한 콜."""
     key = env()["DATA_GO_KR_SERVICE_KEY"]
@@ -209,10 +226,37 @@ class Dart:
                                bsns_year=str(year), reprt_code="11011")["list"]  # fmt: skip
         return parse_financials(rows, year)
 
-    def industry(self, ticker: str) -> str | None:
-        """회사 개황의 업종 코드(통계청 한국표준산업분류) — 「264」「2611」「64992」."""
+    def company(self, ticker: str) -> tuple[str | None, str | None]:
+        """회사 개황 — (업종 코드(통계청 한국표준산업분류 「264」「64992」), 홈페이지 도메인 「samsung.com」)."""
         cc = self.corps().get(ticker)
-        return self._call("company.json", corp_code=cc).json().get("induty_code") if cc else None
+        j = self._call("company.json", corp_code=cc).json() if cc else {}
+        return j.get("induty_code"), domain(j.get("hm_url"))
+
+    def business_text(self, ticker: str, year: int) -> tuple[str | None, dict[str, str]]:
+        """그해 사업보고서 「II. 사업의 내용」 — (접수번호, {"overview", "etc"}). 정정본은 고친 부분만 붙어 있을 때가 있어
+        최신 판부터 차례로 열어 본문이 있는 첫 판을 쓴다. 원문은 저장하지 않고 읽기(AI)의 입력으로만 쓴다."""
+        cc = self.corps().get(ticker)
+        if not cc:
+            return None, {}
+        rows = self._list("list.json", corp_code=cc, bgn_de=f"{year + 1}0101", end_de=f"{year + 1}1231",
+                          pblntf_ty="A", page_count=50)["list"]  # fmt: skip
+        for rno in sorted((r["rcept_no"] for r in rows if "사업보고서" in r["report_nm"] and f"({year}.12)" in r["report_nm"]), reverse=True):
+            raw = self._call("document.xml", rcept_no=rno).content
+            if raw[:2] != b"PK":  # 파일 없음(014) 등 — 다음 판
+                continue
+            z = zipfile.ZipFile(io.BytesIO(raw))
+            text = parse_report(z.read(max(z.namelist(), key=lambda n: z.getinfo(n).file_size)).decode("utf-8", "ignore"))
+            if text["overview"]:
+                return rno, text
+        return None, {}
+
+    def dividends(self, ticker: str, year: int) -> list[tuple[int, int | None, int | None, float | None]]:
+        """배당에 관한 사항 — 그해 사업보고서가 주는 3년치 [(연도, 주당 현금배당금(보통주, 원), 현금배당금총액(원), 연결 배당성향 %)]."""
+        cc = self.corps().get(ticker)
+        if not cc:
+            return []
+        rows = self._list("alotMatter.json", corp_code=cc, bsns_year=str(year), reprt_code="11011")["list"]
+        return parse_dividends(rows, year)
 
     def insiders(self, ticker: str, since: date) -> list[Insider]:
         """임원·주요주주 소유보고(elestock) + 5% 대량보유 보고(majorstock) — since 이후 것만. 둘 다 회사별 전체 이력을 준다."""
@@ -239,6 +283,40 @@ def _num(s: str | None) -> float | None:
         return float(s)
     except ValueError:
         return None
+
+
+def _flat(xml: str) -> str:
+    t = re.sub(r"</(TR|P|TITLE)>", "\n", xml)
+    t = re.sub(r"</T[DHE]>", " | ", t)
+    t = html.unescape(re.sub(r"<[^>]+>", "", t))
+    return re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n+", "\n", t)).strip()
+
+
+def parse_report(xml: str) -> dict[str, str]:
+    """사업보고서 본문에서 「1. 사업의 개요」~「3. 원재료」, 「7. 기타 참고사항」~「III.」 를 꺼낸다(제목 모양이 회사마다 조금씩 다르다)."""
+    def cut(start, end, n):
+        a = re.search(start, xml)
+        if not a:
+            return ""
+        b = re.search(end, xml[a.end():])
+        return _flat(xml[a.start(): a.end() + (b.start() if b else 400_000)])[:n]
+
+    return {"overview": cut(r"<TITLE[^>]*>\s*1\.\s*사업의\s*개요", r"<TITLE[^>]*>\s*3\.", 7000),
+            "etc": cut(r"<TITLE[^>]*>\s*7\.\s*기타\s*참고\s*사항", r"<TITLE[^>]*>\s*III\.", 12000)}  # fmt: skip
+
+
+def parse_dividends(rows: list[dict], year: int) -> list[tuple[int, int | None, int | None, float | None]]:
+    def pick(se, kind=None):
+        r = next((r for r in rows if (r.get("se") or "").replace(" ", "") == se and (kind is None or r.get("stock_knd") == kind)), {})
+        return [r.get(k) for k in ("thstrm", "frmtrm", "lwfr")]
+
+    dps, total, payout = pick("주당현금배당금(원)", "보통주"), pick("현금배당금총액(백만원)"), pick("(연결)현금배당성향(%)")
+    out = []
+    for i in range(3):
+        d, t, p = _won(dps[i]), _won(total[i]), _num(payout[i])
+        if d is not None or t is not None:
+            out.append((year - i, d, None if t is None else t * 1_000_000, p))
+    return out
 
 
 def parse_insider(kind: str, r: dict, ticker: str) -> Insider:
@@ -300,6 +378,13 @@ INDUSTRY = {
     "52": "물류", "59": "엔터테인먼트", "61": "통신", "62": "IT 서비스", "63": "인터넷 플랫폼", "65": "보험",
     "70": "연구개발", "72": "엔지니어링", "96": "생활 서비스",
 }  # fmt: skip
+
+
+def domain(url: str | None) -> str | None:
+    """「www.samsung.com/sec」·「http://www.skhynix.com」 → 「samsung.com」 — 로고를 찾을 때 쓴다."""
+    host = re.sub(r"^[a-z]+://", "", (url or "").strip().lower()).split("/")[0].split(":")[0]
+    host = host.removeprefix("www.")
+    return host if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", host) else None
 
 
 def industry_label(code: str | None) -> str | None:

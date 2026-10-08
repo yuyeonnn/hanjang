@@ -27,6 +27,16 @@ create table if not exists news (
 create table if not exists insiders (
   rcept_no text primary key, ticker text not null references stocks, date text not null, kind text not null,
   who text not null, change integer, rate real, rate_chg real);
+create table if not exists dividends (
+  ticker text not null references stocks, fiscal_year integer not null, dps integer, total integer, payout real,
+  primary key (ticker, fiscal_year));
+create table if not exists business (
+  ticker text primary key references stocks, rcept_no text not null, body text not null, read_model text, read_at text);
+create table if not exists prices (
+  ticker text not null references stocks, date text not null, close integer not null, primary key (ticker, date));
+create table if not exists articles (
+  id integer primary key, ref text unique not null, ticker text not null references stocks, date text not null,
+  kind text not null, body text not null, made_at text not null);
 create table if not exists holidays (date text primary key, name text not null);
 create table if not exists events (
   ticker text not null references stocks, date text not null, kind text not null,
@@ -68,7 +78,8 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("disclosures", "amount", "integer"),
                             ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
-                            ("users", "photo", "blob"), ("users", "photo_at", "text")):  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
+                            ("users", "photo", "blob"), ("users", "photo_at", "text"),
+                            ("stocks", "homepage", "text")):  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")

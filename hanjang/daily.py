@@ -6,7 +6,7 @@ import sqlite3
 import sys
 from datetime import date
 
-from hanjang import backup, collect, db, mail, notes
+from hanjang import articles, backup, collect, db, mail, notes
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -27,6 +27,7 @@ def main(today: date) -> None:
     print(f"백업 {backup.backup(today)}")  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
     collect.main(today)
     notes.main([], today, only_changed=not monday)
+    articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
     if monday:
         print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
 

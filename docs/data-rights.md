@@ -55,6 +55,13 @@ ECOS 에서 표마다 「작성기관」을 조회했다(`StatisticTableList`).
 
 임원·주요주주 소유보고(`elestock`)·대량보유 상황보고(`majorstock`) 모두 OpenDART API — §1 과 같은 조건. 임원 **이름은 받지도 저장하지도 않는다**(직위만). 5% 보고자는 기관 이름 그대로(공시 원문에 있는 그대로).
 
+## 2-3. 사업보고서 원문 · 배당 · 사진 · 로고 (2026-10-08)
+
+- **사업보고서 원문**(OpenDART `document.xml`) · **배당**(`alotMatter`) — §1 과 같은 조건. 원문은 저장하지 않고 AI 요약의 입력으로만, 화면엔 요약과 원문 링크.
+- **주제 사진** — Unsplash 무료 라이선스(상업 이용 가능·출처 표시 의무 없음), 회사 로고·제품이 안 보이는 것만. `hanjang/static/photos/SOURCES.md`.
+- **회사 로고** — Brandfetch Logo API(무료·출처 표시 의무 없음, Client ID 필요). 회사를 알아보게 하는 데만 쓴다(상표적 사용 아님).
+- **주가** — 여전히 ❌(§4). 화면 개발용으로 `PRICE_DEV=1` 인 내 컴퓨터에서만 받아 그린다(뉴스 `NEWS_DEV` 와 같은 방식). 서버엔 넣지 않는다.
+
 ## 3. FRED (미국 세인트루이스 연준) — ⚠️ 쓰지 않는다
 
 - 미국 10년 금리(`DGS10`) 자체는 「Public Domain: Citation Requested」 — 출처만 밝히면 되는 자료다. ([DGS10](https://fred.stlouisfed.org/series/DGS10))
