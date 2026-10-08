@@ -291,13 +291,15 @@ class Dart:
         rows += [("5%", r) for r in self._list("majorstock.json", corp_code=cc)["list"]]
         return [x for kind, r in rows if (x := parse_insider(kind, r, ticker)).day >= since]
 
-    def doc_text(self, rcept_no: str) -> str:
-        """공시 원문을 글자로 — 표는 칸마다 줄을 바꾼다(_flat). 파일이 없으면 빈 글."""
+    def doc_text(self, rcept_no: str, every: bool = False) -> str:
+        """공시 원문을 글자로 — 표는 칸마다 줄을 바꾼다(_flat). 파일이 없으면 빈 글.
+        보통은 가장 큰 파일(본문) 하나, every=True 면 XML 파일 전부 (ETF 는 기초지수가 첨부 간이투자설명서 표지에 있다)."""
         raw = self._call("document.xml", rcept_no=rcept_no).content
         if raw[:2] != b"PK":
             return ""
         z = zipfile.ZipFile(io.BytesIO(raw))
-        return _flat(z.read(max(z.namelist(), key=lambda n: z.getinfo(n).file_size)).decode("utf-8", "ignore"))
+        names = [n for n in z.namelist() if n.lower().endswith(".xml")] or z.namelist() if every else [max(z.namelist(), key=lambda n: z.getinfo(n).file_size)]
+        return " ".join(_flat(z.read(n).decode("utf-8", "ignore")) for n in names)
 
     def ipos(self, start: date, end: date) -> "list[Ipo]":  # Ipo 는 아래에 — 서버 3.13 은 따옴표가 있어야 한다
         """그 사이 증권신고서(지분증권)를 낸 비상장 회사(corp_cls E)의 일반공모 — 회사마다 주요정보 1콜. 철회한 회사는 뺀다."""
