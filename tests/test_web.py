@@ -150,6 +150,7 @@ def test_empty_good_or_concern_side_is_hidden():
                           "concern": [{"text": "없었어요.", "refs": ["F1"]}], "good_title": "분류된 것 없음",
                           "concern_title": "분류된 것 없음"}, "llm:x")
     assert "긍정 요인과 부정 요인" not in old  # 둘 다 비면 절째 숨긴다
+    assert "가 최근 뉴스 보기" in old and "기사" not in old  # 기사 없이도 뉴스는 링크로만
 
 
 def test_avatar_opens_profile_with_real_counts():

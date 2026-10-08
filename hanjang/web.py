@@ -523,6 +523,10 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     parts.append(business_block(report.get("biz"), report.get("rno")))
     nd = sum(f["id"][0] == "D" for f in facts)
     good_d, bad_d = sum(f["id"][0] == "D" and f["tone"] == 1 for f in facts), sum(f["id"][0] == "D" and f["tone"] == -1 for f in facts)
+    # 기사는 가져오지 않고 검색 링크만 — 남이 보는 노트에 기사 데이터를 싣지 않는다 (data-rights §5)
+    news_link = ('<a class="mb-space-lg flex items-center gap-1 font-label-regular text-label-regular text-primary" target="_blank" rel="noopener" '
+                 f'href="https://news.google.com/search?q={quote(name)}&hl=ko&gl=KR&ceid=KR:ko">{e(name)} 최근 뉴스 보기'
+                 '<span class="material-symbols-outlined text-[15px]">open_in_new</span></a>')  # fmt: skip
     for sec in body["sections"]:
         text = " ".join(sentence(s) for s in sec["sentences"])
         extra = ""
@@ -544,9 +548,9 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             extra += '<p class="font-label-micro text-label-micro text-tertiary">⚠️ 개발용 — 기사 제목은 개인용으로만 모은 것이라 남에게 보여주면 안 돼요.</p>'
         parts.append(chapter(sec["title"], text, extra))
         if sec["title"].startswith("요즘 무슨"):
-            parts.append(dividend_block(report.get("divs", [])))
+            parts += [news_link, dividend_block(report.get("divs", []))]
     if not any(s["title"].startswith("요즘 무슨") for s in body["sections"]):
-        parts.append(dividend_block(report.get("divs", [])))
+        parts += [news_link, dividend_block(report.get("divs", []))]
     parts.append(risk_block(report.get("biz")))
 
     def filled(key):  # 옛 노트의 「분류된 것 없음」 자리 채움 문장도 빈 칸으로 본다
@@ -564,8 +568,9 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + side("긍정", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("부정", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
                      + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">긍정·부정 요인은 코드가 정한 기준으로 분류했어요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
-    how = ("기사·공시·재무에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
-           if writer.startswith("llm") else "기사·공시·재무에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
+    src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
+    how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
+           if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
     views, likes, liked = stats
     faces = "".join('<span class="w-7 h-7 rounded-full bg-surface-container-high border-2 border-surface flex items-end justify-center overflow-hidden -ml-2 first:ml-0">'
                     '<span class="material-symbols-outlined text-outline text-[22px] translate-y-1" style="font-variation-settings: \'FILL\' 1;">person</span></span>'
@@ -576,7 +581,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                  f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART)나 기사 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
+                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} <span class="text-outline">[F1]</span>, <span class="text-outline">[D1]</span> 같은 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
                  '<div class="pt-1"><p class="font-label-regular text-label-regular text-on-surface leading-relaxed font-medium">사라·팔아라는 의견도, 목표주가도, 앞으로의 예측도 없어요. 투자 판단은 본인이 해요.</p></div></footer>')  # fmt: skip
     dialog = ('<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-end justify-center px-margin pb-6" id="citation-dialog" onclick="closeCitation(event)"><div class="bg-surface-container-lowest w-full max-w-[440px] rounded-2xl p-space-lg shadow-xl flex flex-col gap-space-sm" onclick="event.stopPropagation()"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded font-citation-ref text-citation-ref bg-primary-fixed text-on-primary-fixed font-bold" id="citation-badge"></span><span class="font-label-regular text-label-regular font-bold text-on-surface" id="citation-title"></span></div><button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container" onclick="hideCitation()" type="button"><span class="material-symbols-outlined text-[20px]">close</span></button></div><div class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed" id="citation-body"></div><div class="flex items-center justify-between pt-2"><span class="font-label-micro text-label-micro text-outline font-mono" id="citation-meta"></span><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="#" id="citation-link" rel="noopener noreferrer" target="_blank">원문 확인<span class="material-symbols-outlined text-[14px]">open_in_new</span></a></div></div></div>'
               # JSON 안의 </script> 를 막으려고 < 를 < 로
