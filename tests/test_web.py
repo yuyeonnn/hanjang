@@ -240,6 +240,7 @@ def test_public_pages_and_security_headers():
     assert f"부채비율 {notes.DEBT_GOOD}% 미만" in body and "임원 이름은 받지도" in body
     _, _, body = call(app, "/")
     assert 'href="/privacy"' in body and 'name="agree"' in body
+    assert 'property="og:title" content="한장' in body and "/static/og.png" in body  # 링크 미리보기 카드
 
 
 def test_news_fact_carries_rss_summary_so_its_numbers_may_be_quoted():
