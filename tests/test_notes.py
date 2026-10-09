@@ -493,3 +493,29 @@ def test_mend_moves_leading_dates_to_the_end():
     assert notes.mend("10월 1일에는 큰 계약을 맺었어요.") == "큰 계약을 맺었어요(10월 1일)."
     assert notes.mend("요점이에요. 8월 13일과 8월 12일에는 주식을 없애기로 했어요.") == "요점이에요. 주식을 없애기로 했어요(8월 13일과 8월 12일)."
     assert notes.mend("실적이 좋았어요. 그 뒤 9월 9일에 샀어요.") == "실적이 좋았어요. 그 뒤 9월 9일에 샀어요."  # 문장 가운데 날짜는 둔다
+
+
+def test_bond_fact_sums_one_filing_and_names_its_use():
+    con = _con()
+    con.executemany("insert into bonds values (?, ?, '005930', '2026-10-21', ?, ?, ?, '신한투자증권', ?)",
+                    [("r1", "1", 50_000_000_000, "2028-10-20", None, '{"채무상환자금": 50000000000}'),
+                     ("r1", "2", 100_000_000_000, "2029-10-19", "3.52", '{"채무상환자금": 80000000000, "운영자금": 20000000000}')])
+    [f] = notes.bond_fact(con, "005930", date(2026, 10, 9))
+    assert f["text"] == "10월 21일 회사채 1,500억원 납입 예정 — 만기 2년·3년 · 이자 연 3.52% · 쓰임: 빚 갚기(채무상환자금) 1,300억원 · 회사 운영(운영자금) 200억원"
+    assert f["id"] == "F12" and f["tone"] == 0 and f["slots"]["금액"] == "1,500억원"
+    assert any(x["id"] == "F12" for x in notes.facts(con, "005930", date(2026, 10, 9)))
+    assert notes.bond_fact(con, "005930", date(2027, 3, 1)) == []  # 90일 지나면 빠진다
+
+
+def test_no_credit_falls_back_to_code_without_more_calls(monkeypatch):
+    from hanjang import llm
+    calls = []
+
+    def broke(*a, **k):
+        calls.append(1)
+        raise RuntimeError("OpenAI 크레딧 소진")
+    monkeypatch.setattr(llm, "_openai", broke)
+    monkeypatch.setitem(llm.spent, "no_credit", False)
+    fs = notes.facts(_con(), "005930", date(2026, 10, 7))
+    assert notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code" and notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code"
+    assert len(calls) == 1  # 한 번 막히면 그 뒤로는 묻지 않는다

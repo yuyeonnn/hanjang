@@ -314,6 +314,17 @@ class Dart:
                 out.append(x)
         return out
 
+    def bonds(self, start: date, end: date, tickers: set[str]) -> "list[Bond]":  # Bond 는 아래에 — 서버 3.13 은 따옴표
+        """우리 종목이 그 사이 낸 증권신고서(채무증권) → 회사마다 주요정보 1콜."""
+        rows = self._pages(start, end, pblntf_detail_ty="C002")
+        corps = dict.fromkeys(r["corp_code"] for r in rows if r.get("stock_code") in tickers and "증권신고서(채무증권)" in r["report_nm"])
+        out = []
+        for cc in corps:
+            j = self._call("bdRs.json", corp_code=cc, bgn_de=start.strftime("%Y%m%d"), end_de=end.strftime("%Y%m%d")).json()
+            if j.get("status") == "000":
+                out += parse_bonds(j)
+        return out
+
     def buybacks(self, ticker: str, start: date, end: date) -> dict[str, int]:
         """자기주식 취득 결정의 취득 예정 금액(보통주, 원) — {접수번호: 금액}. 주요사항보고서 전용 API."""
         cc = self.corps().get(ticker)
@@ -371,6 +382,42 @@ def parse_listing_day(text: str) -> date | None:
     """투자설명서 원문의 「상장 예정일」 · 「매매개시 예정일」 뒤 첫 날짜."""
     m = re.search(r"(상장|매매\s*개시)\s*예정\s*일[^0-9]{0,40}(20\d\d)\s*[년.\-]\s*(\d{1,2})\s*[월.\-]\s*(\d{1,2})", text)
     return date(int(m[2]), int(m[3]), int(m[4])) if m else None
+
+
+# --- 회사채 — 상장사가 낸 증권신고서(채무증권). 사실만 옮긴다 ---
+
+
+@dataclass(frozen=True)
+class Bond:
+    """회사채 한 회차 — 같은 신고서에 2년물·3년물처럼 회차가 여럿일 수 있다. 원 단위."""
+    rcept_no: str
+    tm: str  # 회차 「51-1」
+    corp_code: str
+    pay: date  # 납입일 = 돈이 실제로 들어오는 날
+    amount: int  # 권면 총액
+    maturity: date | None
+    rate: str | None  # 이자율 — 수요예측 전 신고서엔 「-」
+    lead: str
+    uses: dict[str, int]  # 자금 쓰임 {구분: 원}
+
+
+def parse_bonds(j: dict) -> list[Bond]:
+    """bdRs.json (증권신고서 주요정보 · 채무증권) → 회차마다 하나. 파생결합사채(증권사 ELS 류)는 회사채가 아니라 뺀다."""
+    g = {x["title"]: x["list"] for x in j.get("group", [])}
+    out = []
+    for r in g.get("일반사항", []):
+        tm, pay, amt = (r.get("tm") or "").strip(), _kdate(r.get("pymd", "")), _won(r.get("fta")) or _won(r.get("slta"))
+        if not pay or not amt or "파생결합" in r.get("bdnmn", ""):
+            continue
+        lead = next((x["actnmn"] for x in g.get("인수인정보", []) if (x.get("tm") or "").strip() == tm and x.get("actsen") == "대표"), "")
+        uses: dict[str, int] = {}
+        for x in g.get("자금의사용목적", []):
+            if (x.get("tm") or "").strip() == tm and (v := _won(x.get("amt"))) and "제비용" not in x.get("se", ""):
+                uses[x["se"].strip()] = uses.get(x["se"].strip(), 0) + v
+        rate = (r.get("intr") or "").strip()
+        out.append(Bond(r["rcept_no"], tm, r["corp_code"], pay, amt, _kdate(r.get("rpd", "")),
+                        rate if re.search(r"\d", rate) else None, lead, uses))  # fmt: skip
+    return out
 
 
 # 앞으로의 일정이 적힌 공시 — 거래소 서식이라 「항목 이름」 다음 줄에 날짜가 온다. 자회사 공시는 그 회사 일정이 아니라 뺀다
@@ -582,6 +629,9 @@ MACRO = {  # 쓸 지표 — 출처 표시 「한국은행 ECOS」 (data-rights �
 # 읽기 팁 「오래 갖고 있으면」 글의 재료 — OECD 주가지수(월평균, 2015=100). 작성기관 OECD (CC BY 4.0, data-rights §2-1).
 # ECOS 일별 코스피(802Y001)는 작성기관이 한국거래소라 쓰지 않는다
 INDEX = {"ECOS:902Y002:KOR": "한국", "ECOS:902Y002:USA": "미국"}
+# 읽기 팁 「금리」 그림 — 월평균, 작성기관 한국은행 (data-rights §2 · §6). 순서 = 그림 범례 순서
+RATES = {"ECOS:722Y001:0101000": "기준금리", "ECOS:721Y001:5020000": "국고채 3년", "ECOS:721Y001:5050000": "국고채 10년",
+         "ECOS:721Y001:7020000": "회사채 AA-", "ECOS:721Y001:7030000": "회사채 BBB-"}
 
 
 def ecos(series_id: str, start: date, end: date, cycle: str = "D") -> list[tuple[date, float]]:
