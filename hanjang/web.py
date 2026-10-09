@@ -596,6 +596,13 @@ window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(funct
 addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
+def ind_tag(kr: str | None = None, sic: str | None = None, issuer: str = "") -> str:
+    """종목 이름 옆 회색 작은 글씨 「#반도체」 — 한국은 통계청 업종, 미국은 SEC 산업분류(짧은 이름을 아는 것만, 아니면 큰 업종). 상자·배경 없이(사용자 10/10)."""
+    name = sources.industry_label(kr) if kr else (notes.SIC_LABEL.get(sic or "") or gurus.sector(sic, issuer))
+    name = "ETF" if name and name.startswith("ETF") else name
+    return f'<span class="shrink-0 text-[12px] font-normal text-outline">#{e(name)}</span>' if name else ""
+
+
 TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게(사용자 10/10)
 
 
@@ -1024,6 +1031,17 @@ def people_credits() -> dict[str, tuple[str, str, str]]:
 
 
 PEOPLE = people_credits()  # 키 → (찍은 사람, 이용 허락, 원본 주소)
+BOOK_FACE = {"book-graham": "graham", "book-buffett": "buffett", "book-bogle": "bogle", "book-marks": "marks"}  # 책 글 → 지은이 사진 (자유 이용 사진이 없는 린치·말킬·피셔·하우절은 없음)
+
+
+def book_face(slug: str) -> tuple[str, str]:
+    """책에서 배우기 — (글 첫머리에 띄워 글이 옆으로 흐르는 지은이 얼굴, 맨 밑 출처 한 줄) (사용자 10/10). 사진이 없으면 둘 다 빈 글."""
+    key = BOOK_FACE.get(slug)
+    if key not in PEOPLE:
+        return "", ""
+    who, lic, url = PEOPLE[key]
+    return (f'<img alt="" class="float-left w-20 h-20 lg:w-24 lg:h-24 mr-4 mb-2 mt-1 rounded-full object-cover object-[50%_20%] bg-surface-container" src="/static/people/{key}.jpg">',
+            f'<a class="block mt-space-md text-[12px] text-outline hover:underline" href="{e(url)}" target="_blank" rel="noopener">사진: {e(who)} · {e(lic)} · 위키미디어 공용</a>')  # fmt: skip
 
 
 def kdate(iso: str) -> str:
@@ -1252,7 +1270,7 @@ class App:
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
         if path == "/stocks.js":  # 검색 자동완성 — 상장사 이름·코드는 공개 정보라 로그인 없이
             return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "public, max-age=86400")], self.stocks_js()
-        if path.startswith("/static/people/") and path[15:-4] in gurus.GURUS and path.endswith(".jpg") and (STATIC / "people" / path[15:]).exists():
+        if path.startswith("/static/people/") and path[15:-4] in PEOPLE and path.endswith(".jpg") and (STATIC / "people" / path[15:]).exists():
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "people" / path[15:]).read_bytes()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
@@ -2417,7 +2435,8 @@ class App:
     def nps_portfolio(self, after_pie: str = "") -> str:
         """국민연금 주식 — 한국(국민연금 연간 공시 평가액)과 미국(같은 날 13F, 한국은행 환율로 원화)을 금액 큰 순 하나로. 파이도 그 비중."""
         rows = self.con.execute(
-            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker)"
+            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker),"
+            " coalesce(s.induty_code, (select b.induty_code from big_holdings b where b.stock_code = p.ticker limit 1)), s.sic"
             " from nps_port p left join stocks s on s.ticker = p.ticker order by p.won desc").fetchall()  # fmt: skip
         meta = self.con.execute("select asof, fx from nps_meta order by asof desc limit 1").fetchone()
         if not rows or not meta:
@@ -2430,11 +2449,12 @@ class App:
             return name if mkt == "KR" else issuer_name(name, kname)
 
         def line(i, r):
-            mkt, _, t, won, _, home, has_note = r
+            mkt, name, t, won, _, home, has_note, kr, sic = r
             tag = ('<span class="ml-1.5 px-1.5 py-px rounded text-[10px] font-semibold align-middle '
                    + ("bg-surface-container-high text-on-surface-variant\">한국" if mkt == "KR" else "bg-secondary-container text-on-secondary-container\">미국") + "</span>")
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label(r), home, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'{ind_tag(kr if mkt == "KR" else None, sic, name)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {won / total * 100:.1f}% · {e(sources.won_short(won))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
@@ -2449,17 +2469,18 @@ class App:
     def us_portfolio(self, key: str, after_pie: str = "") -> str:
         """기관의 미국 주식 — 13F 로 보유 전체가 공개된다(국내 5% 보고와 달리). 파이 + 큰 10종목."""
         rows = self.con.execute(
-            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker)"
+            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker),"
+            " coalesce(nullif(g.sic, ''), s.sic)"
             " from guru_holdings g left join stocks s on s.ticker = g.ticker where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
         if not rows:
             return ""
         total = sum(r[2] for r in rows)
 
         def line(i, r):
-            issuer, t, value, weight, _, kname, khome, has_note = r
+            issuer, t, value, weight, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
@@ -2517,10 +2538,10 @@ class App:
                     "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
         def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note, _ = r
+            issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
                 return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
@@ -2638,11 +2659,12 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
             more_label, more_url = a["more"]
+            face, credit = book_face(slug)
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
-                     + self.flow(a["body"][:1])
+                     + f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
+                     + '<div class="block">' + face + self.flow(a["body"][:1]) + '<div class="clear-both"></div></div>'
                      + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
@@ -2650,7 +2672,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
-                     + self.related(slug)
+                     + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
         groups = "".join(
