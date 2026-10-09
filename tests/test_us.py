@@ -138,6 +138,7 @@ def test_8k_items_map_to_our_kinds_without_ai():
     assert us.needs_text("2.02,7.01,9.01") and not us.needs_text("1.01,2.03") and us.needs_text("7.01,8.01,9.01") and us.needs_text("5.02")
     assert us.classify_8k("2.02,9.01", "announced vehicle production and deliveries for the third quarter")[3] == "판매·인도 대수 알림 (8-K 2.02)"  # 테슬라
     assert us.member_name("nvda:ProfessionalVisualizationMember") == "전문가용 그래픽" and us.member_name("x:CloudPlatformSegmentMember") == "Cloud Platform"
+    assert us.member_name("jpm:AssetandWealthManagementMember") == "Asset & Wealth Management" and us.member_name("x:AllOtherGeographiesMemberMember") == "All Other Geographies"
     assert us.classify_8k("8.01,9.01", "declared a quarterly dividend of $0.26 per share")[:2] == ("DIVIDEND", 2)
     assert us.classify_8k("7.01", "new share repurchase program")[:3] == ("BUYBACK", 3, 1)
     assert us.classify_8k("5.02", "appointed Chief Financial Officer")[0] == "EXEC" and us.classify_8k("5.02", "director resigned")[1] == 1
@@ -183,3 +184,8 @@ def test_outlook_quotes_must_be_in_the_release_and_are_said_in_korean():
     assert us.say_outlook({"low": 16.0, "high": 18.0, "plus_minus": 0, "plus_minus_unit": "none", "unit": "percent"}) == "16.0~18.0%"
     assert us.say_outlook({"low": 85.95, "high": 85.95, "plus_minus": 0, "plus_minus_unit": "none", "unit": "percent"}) == "85.95%"  # 반올림하지 않는다
     assert us.say_outlook({"low": 2.31, "high": 2.31, "plus_minus": 0, "plus_minus_unit": "none", "unit": "billion"}) == "23.1억 달러"
+
+
+def test_parts_must_cover_most_of_revenue():
+    a, b = [{"revenue": 12}, {"revenue": 9}], [{"revenue": 60}, {"revenue": 40}]
+    assert us.covering(100, a, b) is b and us.covering(100, a) == []

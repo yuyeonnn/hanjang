@@ -207,8 +207,9 @@ BUSINESS_SCHEMA = {"type": "object", "additionalProperties": False, "required": 
 def check_business(j: dict, source: str) -> dict:
     """사업보고서 요약 검사 — 숫자는 원문에 글자 그대로 있어야 하고, 금지어·예측 말투 없이. 어기면 ValueError(다시 묻는다)."""
     have = numbers(source)
-    out = {"what": j["what"][:3], "segments": [], "risks": j["risks"][:4]}
-    for s in out["what"] + out["risks"]:
+    # 위험 문장은 하나가 걸리면 그 문장만 뺀다 — 「비용을 예측하기 어렵다」처럼 회사의 위험 설명에 금지어가 섞일 수 있다 (팔란티어·유나이티드헬스 10/9)
+    out = {"what": j["what"][:3], "segments": [], "risks": [s for s in j["risks"][:4] if not (numbers(s) - have or FORBIDDEN.search(s) or PREDICT.search(s))]}
+    for s in out["what"]:
         if bad := numbers(s) - have:
             raise ValueError(f"원문에 없는 숫자 {bad}: {s!r}")
         if FORBIDDEN.search(s) or PREDICT.search(s):
