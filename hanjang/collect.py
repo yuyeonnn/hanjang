@@ -81,6 +81,10 @@ def save_news(con: sqlite3.Connection, picked: list[tuple[str, str]], today: dat
     for t, name in picked:
         if t in rooms:
             grab(rooms[t], f"{name} 뉴스룸", lambda x, t=t: [t])
+    # 쓸 권리가 없어진 출처(뺀 언론사·뉴스룸)에서 받아 둔 것은 지운다 — 남은 출처만 노트에 쓰이게 (2026-10-10)
+    press, own = sorted(set(sources.PRESS_FEEDS.values())) or [""], list(rooms) or [""]
+    con.execute(f"delete from news where press not like '% 뉴스룸' and press not in ({','.join('?' * len(press))})", press)
+    con.execute(f"delete from news where press like '% 뉴스룸' and ticker not in ({','.join('?' * len(own))})", own)
     con.executemany("insert or ignore into news (url, ticker, date, press, title, summary) values (?, ?, ?, ?, ?, ?)", rows)
     return len(rows)
 
@@ -218,7 +222,7 @@ def main(today: date) -> None:
     con.executemany("insert or replace into holidays values (?, ?)", [(d.isoformat(), n) for d, n in hs])
     print(f"공휴일 {len(hs)}일 ({today.year}~{today.year + 1})")
 
-    print(f"소식 {save_news(con, picked, today)}건 (회사 뉴스룸 · 언론사 RSS — 제목·요약문만)")
+    print(f"소식 {save_news(con, picked, today)}건 (회사 뉴스룸 — 제목·요약문만)")
     con.commit()
 
 

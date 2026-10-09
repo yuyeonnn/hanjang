@@ -36,7 +36,7 @@ def test_rss_keeps_title_summary_link_and_name_matching_is_wordwise():
     assert (n.title, n.summary, n.press, n.url) == ("삼성전자 3분기 잠정실적", "매출 195조원, 영업이익 107.4조원", "연합뉴스", "https://x/1")
     assert sources.mentions("LG", "LG, 3분기 실적") and not sources.mentions("LG", "LG전자 신제품")
     assert sources.mentions("기아", "기아 美 공장") and not sources.mentions("기아", "기아차 판매")
-    assert len(sources.newsrooms()) >= 5 and all(u.startswith("https://") for u in sources.newsrooms().values())
+    assert len(sources.newsrooms()) >= 3 and all(u.startswith("https://") for u in sources.newsrooms().values())
 
 def test_ecos_empty_and_values():
     assert sources.parse_ecos({"RESULT": {"CODE": "INFO-200"}}, "x") == []
@@ -98,3 +98,13 @@ def test_bonds_from_dart_key_info():
     a, b = sources.parse_bonds(j)  # 파생결합사채(증권사 ELS 류)는 뺀다
     assert (a.tm, a.amount, a.rate, a.lead, a.uses) == ("121-1", 50_000_000_000, None, "신한투자증권", {})
     assert (b.tm, b.rate, b.maturity, b.uses) == ("121-2", "3.52", date(2029, 10, 19), {"채무상환자금": 80_000_000_000, "운영자금": 20_000_000_000})
+
+
+def test_news_from_dropped_sources_is_purged(monkeypatch):
+    con = db.connect(":memory:")
+    con.executemany("insert into stocks (ticker, name) values (?, ?)", [("005930", "삼성전자"), ("005490", "POSCO홀딩스")])
+    con.executemany("insert into news (url, ticker, date, press, title) values (?, ?, '2026-10-09', ?, 't')",
+                    [("u1", "005930", "연합뉴스"), ("u2", "005490", "POSCO홀딩스 뉴스룸"), ("u3", "005930", "삼성전자 뉴스룸")])  # fmt: skip
+    monkeypatch.setattr(sources, "fetch_rss", lambda url, press: [])
+    collect.save_news(con, [("005930", "삼성전자")], date(2026, 10, 10))
+    assert [r[0] for r in con.execute("select url from news")] == ["u3"]  # 쓸 권리가 확인된 뉴스룸만 남는다
