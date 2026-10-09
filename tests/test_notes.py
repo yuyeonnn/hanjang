@@ -155,7 +155,7 @@ def test_fallback_headline_is_the_companys_biggest_issue():
     con = _con()
     collect.save_disclosures(con, [sources.Disclosure("20261001000001", "005930", date(2026, 10, 1), "유상증자결정")])
     con.execute("update disclosures set code='RIGHTS_ISSUE', importance=3, direction=-1 where rcept_no='20261001000001'")
-    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "10월 1일에 유상증자 공시가 있었어요."
+    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "새 주식을 찍어 팔아 돈을 모으기로 했어요(10월 1일)."  # 어려운 말 대신 무슨 일인지
 
 
 def test_year_may_be_written_but_nothing_else():
@@ -519,3 +519,15 @@ def test_no_credit_falls_back_to_code_without_more_calls(monkeypatch):
     fs = notes.facts(_con(), "005930", date(2026, 10, 7))
     assert notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code" and notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code"
     assert len(calls) == 1  # 한 번 막히면 그 뒤로는 묻지 않는다
+
+
+def test_empty_concern_is_filled_by_code_and_code_headline_is_plain():
+    fs = [{"id": "F2", "text": "2025년 영업이익 1조원(전년보다 -10.0%)", "tone": -1, "url": "u",
+           "slots": {"연도": "2025년", "값": "1조원", "변화": "-10.0%", "방향": "줄었", "폭": "10.0%"}},
+          {"id": "D1", "text": "9월 14일 유상증자 공시 — 무슨 일: 새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주주에게 걸리는 쪽으로 분류",
+           "tone": -1, "url": "u", "slots": {"날짜": "9월 14일", "종류": "유상증자", "무슨일": "새 주식을 찍어 팔아 돈을 모으기로 했어요"}}]
+    j = {"headline": "", "summary": [{"text": "장사가 줄었어요.", "refs": ["F2"]}], "sections": [], "good": [], "concern": [],
+         "good_title": "", "concern_title": ""}
+    note = notes.fill_note(j, fs)
+    assert [s["refs"] for s in note["concern"]] == [["F2"], ["D1"]]
+    assert "유상증자" not in notes.code_headline(fs) and "(9월 14일)" in notes.code_headline(fs)
