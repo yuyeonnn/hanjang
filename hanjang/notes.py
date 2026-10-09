@@ -454,6 +454,44 @@ def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
              "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "평균": f"{avg:.1f}%"}}]  # fmt: skip
 
 
+# 자금 쓰임 이름 → 쉬운 말 (이름도 함께 둔다 — 쓰기 규칙 「용어 이름과 풀이 함께」)
+USE_PLAIN = {"채무상환자금": "빚 갚기", "운영자금": "회사 운영", "시설자금": "공장·설비", "타법인증권취득자금": "다른 회사 지분 사기",
+             "운전자금": "회사 운영", "차환자금": "빚 갚기"}  # fmt: skip
+
+
+def span(a: date, b: date | None) -> str:
+    """납입일~만기 → 「3년」 「18개월」."""
+    if not b:
+        return ""
+    m = round((b - a).days / 30.44)
+    return f"{m // 12}년" if m % 12 == 0 else f"{m}개월"
+
+
+def bond_fact(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
+    """F12 = 최근 90일·앞으로의 회사채 발행 — 신고서 한 장(회차 여럿)을 한 줄로. 금액·만기·쓰임은 신고서 그대로, 합계·기간은 코드가 셈."""
+    rows = con.execute("select rcept_no, pay_date, amount, maturity, rate, uses from bonds where ticker = ? and pay_date >= ? order by pay_date desc",
+                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
+    if not rows:
+        return []
+    rno = rows[0][0]
+    mine = [r for r in rows if r[0] == rno]
+    pay = date.fromisoformat(mine[0][1])
+    total = sum(r[2] for r in mine)
+    spans = "·".join(dict.fromkeys(x for r in mine if (x := span(pay, r[3] and date.fromisoformat(r[3])))))
+    uses: dict[str, int] = {}
+    for r in mine:
+        for k, v in json.loads(r[5] or "{}").items():
+            uses[k] = uses.get(k, 0) + v
+    use_txt = " · ".join(f"{USE_PLAIN.get(k.replace(' ', ''), k)}({k}) {won(v)}" for k, v in sorted(uses.items(), key=lambda x: -x[1]))
+    rates = "·".join(dict.fromkeys(r[4] for r in mine if r[4]))
+    when = "납입 예정" if pay > today else "납입"
+    day = f"{pay.month}월 {pay.day}일"
+    text = (f"{day} 회사채 {won(total)} {when}" + (f" — 만기 {spans}" if spans else "") + (f" · 이자 연 {rates}%" if rates else "")
+            + (f" · 쓰임: {use_txt}" if use_txt else ""))  # fmt: skip
+    return [{"id": "F12", "text": text, "url": DART.format(rno), "tone": 0,
+             "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {}) | ({"쓰임": use_txt} if use_txt else {})}]
+
+
 def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     """F11 = 사업부별 영업이익 — 사업보고서 「영업부문 정보」에서 옮겨 적은 값(원 단위로 코드가 바꿔 둔 것). 큰 것 셋."""
     biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
@@ -510,7 +548,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         slots = {f"{o}부문": x["name"].split(" · ")[-1] for o, x in zip(("첫", "둘째"), top)} | {f"{o}비중": x["share"] for o, x in zip(("첫", "둘째"), top)}
         out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": DART.format(biz[1]),
                     "tone": 0, "slots": slots})  # fmt: skip
-    out += quarter_facts(con, ticker) + industry_fact(con, ticker) + segment_fact(con, ticker)
+    out += quarter_facts(con, ticker) + industry_fact(con, ticker) + segment_fact(con, ticker) + bond_fact(con, ticker, today)
     evs = con.execute("select rcept_no, date, title, code, direction from disclosures"
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
@@ -874,7 +912,7 @@ def code_note(fs: list[dict]) -> dict:
         t = say(f)
         return not (t in seen or seen.add(t))
 
-    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10"), ("F8", "F9", "F11"), ("D", "N"), "I"))
+    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10", "F12"), ("F8", "F9", "F11"), ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]

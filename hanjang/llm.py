@@ -64,8 +64,15 @@ def ask(prompt: str, task: str, payload, check, schema: dict | None = None, imag
     for _ in range(3):
         if spent["usd"] >= CAP_USD:
             raise RuntimeError(f"실행 비용 상한 ${CAP_USD} 도달")
+        if spent.get("no_credit"):  # 크레딧이 바닥나면 더 묻지 않는다 — 노트는 코드 문장으로 (매일 실행이 끝까지 돌게)
+            return None
         try:
             return check(json.loads(_openai(MODELS[prompt], system, user, schema, f"{prompt_file or prompt}:{task}")))
         except (ValueError, KeyError, TypeError):
             continue
+        except RuntimeError as err:
+            if "크레딧 소진" not in str(err):
+                raise
+            spent["no_credit"] = True  # ponytail: 화면 서버에선 다시 켤 때까지 남는다(캡처 읽기) — 채운 뒤 hanjang-web 재시작
+            return None
     return None
