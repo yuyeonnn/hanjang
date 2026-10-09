@@ -786,3 +786,48 @@ def test_book_author_photo(tmp_path):
         assert (web.STATIC / "people" / f"{key}.jpg").exists() and key in web.PEOPLE
     app, _ = _app()
     assert call_raw(app, "/static/people/graham.jpg")[1]["Content-Type"] == "image/jpeg"  # 투자자 목록에 없는 지은이도 열린다
+
+def test_private_account_needs_approved_follow():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
+    con.commit()
+    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    call(app, "/me/private", "POST", "", a)
+    assert "비공개 계정 끄기" in call(app, "/me/settings", cookie=a)[2]
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "비공개 계정이에요" in p and 'href="/f/1' not in p
+    assert call(app, "/f/1?tab=followers", cookie=b)[1]["Location"] == "/u/1"  # 목록도 못 본다
+    call(app, "/follow", "POST", "u=1", b)
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "요청됨" in p and "비공개 계정이에요" in p and '팔로워 <b class="text-on-surface">0' in p  # 수락 전엔 세지 않는다
+    n = call(app, "/me/notices", cookie=a)[2]
+    assert "팔로우를 요청했어요" in n and "수락" in n
+    call(app, "/follow/answer", "POST", "u=2&yes=1", a)
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "비공개 계정이에요" not in p and "팔로잉" in p
+    call(app, "/follow", "POST", "u=1", b)  # 언팔로우
+    call(app, "/follow", "POST", "u=1", b)  # 다시 요청
+    call(app, "/follow/answer", "POST", "u=2&yes=0", a)  # 삭제
+    assert con.execute("select count(*) from follows").fetchone()[0] == 0
+    call(app, "/follow", "POST", "u=1", b)
+    call(app, "/me/private", "POST", "", a)  # 비공개를 끄면 기다리던 요청은 수락
+    assert con.execute("select ok from follows").fetchone()[0] == 1
+
+
+def test_slow_mail_does_not_stop_other_pages(monkeypatch):
+    """부하 시험(10/10) — 요청은 잠금 하나로 차례대로 처리하는데, 로그인 메일을 보내는 몇 초 동안 사이트 전체가 멈췄다."""
+    import threading
+    import time
+
+    app, _ = _app()
+    sending, done = threading.Event(), threading.Event()
+    monkeypatch.setattr(mail, "send", lambda *a, **k: (sending.set(), done.wait(5)))  # 메일 서버가 느리다
+    t = threading.Thread(target=lambda: call(app, "/login", "POST", "email=a%40b.c&agree=1"))
+    t.start()
+    assert sending.wait(5)
+    started = time.perf_counter()
+    assert call(app, "/privacy")[0].startswith("200")  # 메일을 기다리는 동안에도 다른 화면은 열린다
+    assert time.perf_counter() - started < 1
+    done.set()
+    t.join(5)
+    assert not t.is_alive()

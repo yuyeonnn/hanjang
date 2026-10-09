@@ -91,7 +91,10 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "미국 주식 포트폴리오" in app.us_portfolio("nps") and app.us_portfolio("blackrock") == ""
     con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no, induty_code) values ('nps', '005930', '삼성전자', 'Y', 7.1, 0, '2026-10-01', 'r1', '264')")
     big = app.big(1, "nps", "", "")[2]  # 기관 페이지 — 미국 주식은 국내 목록 위에, 머리에 종목 수
-    assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("어떤 업종에 많이 가졌나") < big.index("지분이 큰 순서")  # 포트폴리오가 업종보다 위
+    assert "미국 주식 1종목" in big and big.index("가장 많이 가진 종목") < big.index("어떤 업종에 많이 가졌나") < big.index("비중 5.9%")  # 파이 → 업종 → 많이 가진 순서
+    assert "지분이 큰 순서" not in big and "최근 늘리고 줄인" not in big  # 너무 자세한 목록은 뺐다
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no, induty_code) values ('kbam', '005930', '삼성전자', 'Y', 5.2, 0, '2026-10-01', 'r2', '264')")
+    assert "5% 넘게 가진 회사</h2>" in app.big(1, "kbam", "", "")[2]  # 미국 신고가 없는 기관은 5% 목록이 전부라 남긴다
     two = web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)  # 기타는 그리지 않는다 — 상위 2종목만, 글자는 전체 중 비중
     assert two.count("<path") == 2 and ">기타<" not in two and ">50.0%</span>" in two and "기타는 빼고 상위 2종목만 그렸어요 (전체의 80%)" in two
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
@@ -103,3 +106,20 @@ def test_spread_out_portfolio_is_still_a_pie_without_other():
     many = [(f"종목{i}", 3) for i in range(30)]  # 넓게 나눈 곳도 파이 — 기타 없이 상위 5, 뺐다는 말은 눈에 띄게
     h = web.pie(many)
     assert "data-pie" in h and h.count("<path") == 5 and "기타는 빼고 상위 5종목만 그렸어요 (전체의 17%)" in h and ">기타<" not in h
+
+def test_every_holdings_list_shows_twenty():
+    from hanjang import web
+
+    con = db.connect(":memory:")
+    rows = [(k, f"{i:09d}", f"CO {i}", None, 1e9 - i, 1, 1.0, "a", "2026-06-30", "2026-08-14", "") for k in ("buffett", "nps") for i in range(25)]
+    con.executemany("insert into guru_holdings values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    app = web.App(con, "s" * 32)
+    for h in (app.guru(1, "buffett", "", "")[2], app.us_portfolio("nps")):  # 유명 투자자 · 기관 — 같은 20종목
+        assert h.count("text-[12px] text-outline tabular-nums") == 20 and "외 5종목" in h
+
+
+def test_industry_tag_is_plain_gray_text():
+    from hanjang import web
+
+    assert ">#반도체</span>" in web.ind_tag(sic="3674") and "bg-" not in web.ind_tag(sic="3674")  # 상자·배경 없이 회색 글씨
+    assert ">#ETF</span>" in web.ind_tag(sic="", issuer="ISHARES TR") and web.ind_tag() == ""

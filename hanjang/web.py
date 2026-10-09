@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -593,6 +594,16 @@ out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stro
 lay.innerHTML=out;return need>H+1?need:0}
 window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){box.style.minHeight='';var need=place(box);if(need){box.style.minHeight=need+'px';place(box)}})};
 addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
+
+
+def ind_tag(kr: str | None = None, sic: str | None = None, issuer: str = "") -> str:
+    """종목 이름 옆 회색 작은 글씨 「#반도체」 — 한국은 통계청 업종, 미국은 SEC 산업분류(짧은 이름을 아는 것만, 아니면 큰 업종). 상자·배경 없이(사용자 10/10)."""
+    name = sources.industry_label(kr) if kr else (notes.SIC_LABEL.get(sic or "") or gurus.sector(sic, issuer))
+    name = "ETF" if name and name.startswith("ETF") else name
+    return f'<span class="shrink-0 text-[12px] font-normal text-outline">#{e(name)}</span>' if name else ""
+
+
+TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게(사용자 10/10)
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -1180,10 +1191,27 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
+        # 요청은 한 번에 하나씩 — DB 연결 하나를 돌려 쓴다. 화면 하나가 수 ms 라 이 규모에선 이게 가장 빠르고 공평하다
+        # (부하 시험 10/10: 실마다 연결을 열면 초당 250건 → 60건, 느린 요청 16초). 대신 메일·AI 처럼 느린 바깥 일 동안엔 잠금을 놓는다(outside)
+        self.turn = threading.Lock()
+        self.local = threading.local()
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
+
+    @contextmanager
+    def outside(self):
+        """느린 바깥 일(로그인 메일·AI 사진 읽기, 수 초) 동안 잠금을 놓아 다른 사람의 화면이 돌게 한다.
+        이 안에서는 DB 를 쓰지 않는다 — 연결을 다른 요청이 쓰고 있다."""
+        held = getattr(self.local, "held", False)
+        if held:
+            self.turn.release()
+        try:
+            yield
+        finally:
+            if held:
+                self.turn.acquire()
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
@@ -1201,7 +1229,12 @@ class App:
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
         uid = unsign(cookie.get("s", ""), self.secret)
-        status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+        with self.turn:
+            self.local.held = True
+            try:
+                status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+            finally:
+                self.local.held = False
         kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8")]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
@@ -1319,11 +1352,20 @@ class App:
             other = int(form["u"]) if form.get("u", "").isdigit() else 0
             if other != uid and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
                 if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
-                    self.con.execute("insert into follows values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
+                    shut = self.con.execute("select private from users where id = ?", (other,)).fetchone()[0]
+                    self.con.execute("insert into follows (follower_id, followee_id, at, ok) values (?, ?, ?, ?)", (uid, other, datetime.now().isoformat(), 0 if shut else 1))
                 self.con.commit()
             back = form.get("back", "")
             ok = re.fullmatch(r"/[A-Za-z0-9_/?=&%.\-]*", back) and not back.startswith("//")  # 「/\evil.com」 → 「//evil.com」 막기
             return self.see(back if ok else f"/u/{other}" if other else "/feed")
+        if path == "/follow/answer" and method == "POST":  # 팔로우 요청 수락(1)·삭제(0)
+            other = int(form["u"]) if form.get("u", "").isdigit() else 0
+            if form.get("yes") == "1":
+                self.con.execute("update follows set ok = 1 where follower_id = ? and followee_id = ?", (other, uid))
+            else:
+                self.con.execute("delete from follows where follower_id = ? and followee_id = ? and ok = 0", (other, uid))
+            self.con.commit()
+            return self.see("/me/notices")
         if path == "/regram" and method == "POST":
             return self.regram(uid, form)
         if path == "/me/profile" and method == "POST":
@@ -1337,6 +1379,12 @@ class App:
             return self.see(f"/n/{quote(t)}")
         if path == "/feedback" and method == "POST":
             return self.feedback(uid, form)
+        if path == "/me/private" and method == "POST":  # 비공개 켜기/끄기 — 끄면 기다리던 요청은 모두 수락
+            self.con.execute("update users set private = 1 - private where id = ?", (uid,))
+            if not self.con.execute("select private from users where id = ?", (uid,)).fetchone()[0]:
+                self.con.execute("update follows set ok = 1 where followee_id = ?", (uid,))
+            self.con.commit()
+            return self.see("/me/settings")
         if path == "/me/mail" and method == "POST":
             self.con.execute("update users set mail_on = 1 - mail_on where id = ?", (uid,))
             self.con.commit()
@@ -1450,7 +1498,8 @@ class App:
             return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
         self.sent[email] = times + [now]
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
-        mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+        with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
+            mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def src(self, rno: str | None) -> str:
@@ -1552,7 +1601,8 @@ class App:
         schema = {"type": "object", "additionalProperties": False, "required": ["names"],
                   "properties": {"names": {"type": "array", "items": {"type": "string"}}}}  # fmt: skip
         try:
-            got = llm.ask("scan", "holdings", {}, lambda j: [str(x) for x in j["names"]][:40], schema, image=img)
+            with self.outside():  # AI 가 사진을 읽는 수십 초 동안 다른 화면은 돈다
+                got = llm.ask("scan", "holdings", {}, lambda j: [str(x) for x in j["names"]][:40], schema, image=img)
         except RuntimeError:
             got = None
         if not got:
@@ -1934,8 +1984,8 @@ class App:
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def settings(self, uid: int, msg: str | None = None) -> str:
-        email, created, mail_on, nick, bio = self.con.execute(
-            "select email, created_at, mail_on, nickname, bio from users where id = ?", (uid,)).fetchone()  # fmt: skip
+        email, created, mail_on, nick, bio, private = self.con.execute(
+            "select email, created_at, mail_on, nickname, bio, private from users where id = ?", (uid,)).fetchone()  # fmt: skip
         (at,) = self.con.execute("select photo_at from users where id = ?", (uid,)).fetchone()
         (held,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
         joined = date.fromisoformat(created[:10])
@@ -1947,6 +1997,12 @@ class App:
                   f'<button aria-label="주간 안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
+        lock = (f'<form method="post" action="/me/private" class="py-3.5 flex items-center justify-between gap-3"><span class="flex flex-col">'
+                '<span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><span class="material-symbols-outlined text-primary text-[18px]">lock</span>비공개 계정</span>'
+                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 리그램과 팔로워 목록을 봐요</span></span>'
+                f'<button aria-label="비공개 계정 {"끄기" if private else "켜기"}" aria-pressed="{"true" if private else "false"}" type="submit" class="flex items-center gap-2 shrink-0">'
+                f'<span class="font-label-micro text-label-micro {"text-primary" if private else "text-outline"} font-semibold">{"ON" if private else "OFF"}</span>'
+                f'<span class="w-11 h-6 rounded-full p-0.5 {"bg-primary" if private else "bg-surface-container-highest"} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {"translate-x-5" if private else "translate-x-0"}"></span></span></button></form>')  # fmt: skip
 
         def row(icon, label, value):
             return (f'<div class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
@@ -2003,7 +2059,7 @@ class App:
                  '<section class="mt-space-lg flex flex-col divide-y divide-surface-container-high/80 border-y border-surface-container-high">'
                  + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
                  + row("bookmark", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
-                 + switch + "</section>"
+                 + switch + lock + "</section>"
                  '<button class="mt-space-xl w-full py-3 rounded-lg border border-outline-variant/60 text-on-surface-variant font-body-reading-strong text-body-compact hover:bg-surface-container-low transition-colors" '
                  'onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button>'
                  '<form method="post" action="/me/delete" onsubmit="return confirm(\'탈퇴하면 이메일과 담은 종목, 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?\')">'
@@ -2015,7 +2071,7 @@ class App:
     # ---- 팔로우 · 리그램 · 피드 (뉴닉 「뉴니커」처럼 — 좋아한 글을 내 팔로워에게) ----
 
     def counts(self, uid: int) -> tuple[int, int]:
-        q = "select count(*) from follows where {} = ?"
+        q = "select count(*) from follows where {} = ? and ok = 1"
         return (self.con.execute(q.format("followee_id"), (uid,)).fetchone()[0],
                 self.con.execute(q.format("follower_id"), (uid,)).fetchone()[0])  # fmt: skip
 
@@ -2025,19 +2081,33 @@ class App:
         return (f'<span class="{size} shrink-0 overflow-hidden rounded-full bg-primary-fixed text-primary flex items-center justify-center font-label-regular text-label-regular font-semibold">'
                 f'{inside}</span>')  # fmt: skip
 
-    def follow_line(self, uid: int) -> str:
+    def follow_line(self, uid: int, see: bool = True) -> str:
+        """「팔로워 N | 팔로잉 N」 — 비공개 계정을 남이 보면 숫자만(목록으로 가는 링크 없이)."""
         fer, fing = self.counts(uid)
-        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant"><a class="hover:underline" href="/f/{uid}?tab=followers">팔로워 <b class="text-on-surface">{fer:,}</b></a>'
-                f'<span class="mx-2 text-outline-variant">|</span><a class="hover:underline" href="/f/{uid}?tab=following">팔로잉 <b class="text-on-surface">{fing:,}</b></a></p>')  # fmt: skip
+        tag = (lambda tab: f'<a class="hover:underline" href="/f/{uid}?tab={tab}">') if see else (lambda tab: "<span>")
+        end = "</a>" if see else "</span>"
+        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant">{tag("followers")}팔로워 <b class="text-on-surface">{fer:,}</b>{end}'
+                f'<span class="mx-2 text-outline-variant">|</span>{tag("following")}팔로잉 <b class="text-on-surface">{fing:,}</b>{end}</p>')  # fmt: skip
 
     def follow_button(self, uid: int, other: int, back: str) -> str:
         """목록·알림 줄 오른쪽 — 이미 팔로우하면 「팔로잉」(회색, 누르면 취소), 아니면 「팔로우」(초록). 나 자신은 없음."""
         if other == uid:
             return ""
-        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        label, on = self.follow_state(uid, other)
         cls = "bg-surface-container text-on-surface" if on else "bg-primary text-on-primary"
         return (f'<form method="post" action="/follow" class="shrink-0"><input type="hidden" name="u" value="{other}"><input type="hidden" name="back" value="{e(back)}">'
-                f'<button type="submit" class="px-4 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{"팔로잉" if on else "팔로우"}</button></form>')  # fmt: skip
+                f'<button type="submit" class="px-4 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{label}</button></form>')  # fmt: skip
+
+    def follow_state(self, uid: int, other: int) -> tuple[str, bool]:
+        """단추 글자 — 「팔로잉」(수락됨) · 「요청됨」(비공개 계정에 보낸 요청, 누르면 취소) · 「팔로우」."""
+        row = self.con.execute("select ok from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        return ("팔로잉" if row[0] else "요청됨", True) if row else ("팔로우", False)
+
+    def can_see(self, uid: int, other: int) -> bool:
+        """비공개 계정의 리그램·팔로워 목록은 본인과 수락된 팔로워만."""
+        row = self.con.execute("select private from users where id = ?", (other,)).fetchone()
+        return uid == other or not (row and row[0]) or bool(self.con.execute(
+            "select 1 from follows where follower_id = ? and followee_id = ? and ok = 1", (uid, other)).fetchone())
 
     def person_row(self, uid: int, other: int, nick: str, bio: str | None, pat: str | None, back: str, note: str = "") -> str:
         return (f'<div class="py-3 flex items-center gap-3"><a href="/u/{other}" class="flex items-center gap-3 min-w-0 flex-1">{self.face(nick, "w-12 h-12", photo_url(other, pat))}'
@@ -2050,10 +2120,12 @@ class App:
         if not row:
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요.")
         tab = tab if tab in ("followers", "following") else "followers"
+        if not self.can_see(uid, who):
+            return self.see(f"/u/{who}")
         fer, fing = self.counts(who)
         col, by = ("follower_id", "followee_id") if tab == "followers" else ("followee_id", "follower_id")
         people = self.con.execute(f"select u.id, u.nickname, u.bio, u.photo_at from follows f join users u on u.id = f.{col}"
-                                  f" where f.{by} = ? and u.nickname is not null order by f.at desc", (who,)).fetchall()  # fmt: skip
+                                  f" where f.{by} = ? and f.ok = 1 and u.nickname is not null order by f.at desc", (who,)).fetchall()  # fmt: skip
         back = f"/f/{who}?tab={tab}"
         tabs = "".join(f'<a href="/f/{who}?tab={k}" class="flex-1 text-center py-3 text-[15px] {"font-semibold text-on-surface border-b-2 border-on-surface" if k == tab else "text-on-surface-variant border-b border-surface-container-high"}">{label} {n:,}명</a>'
                        for k, label, n in (("followers", "팔로워", fer), ("following", "팔로잉", fing)))  # fmt: skip
@@ -2070,7 +2142,9 @@ class App:
         """알림 — 누가 나를 팔로우했는지, 최신 먼저. 이 화면을 열면 빨간 점이 사라진다."""
         seen = self.con.execute("select coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()[0]
         rows = self.con.execute("select u.id, u.nickname, u.bio, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
-                                " where f.followee_id = ? and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
+                                " where f.followee_id = ? and f.ok = 1 and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
+        asks = self.con.execute("select u.id, u.nickname, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
+                                " where f.followee_id = ? and f.ok = 0 order by f.at desc", (uid,)).fetchall()  # fmt: skip
         self.con.execute("update users set notices_seen = ? where id = ?", (datetime.now().isoformat(), uid))
         self.con.commit()
         items = "".join(
@@ -2078,6 +2152,16 @@ class App:
             + self.person_row(uid, i, n, b, p, "/me/notices", f"회원님을 팔로우하기 시작했어요 · {ago(at)}") + "</div>"
             for i, n, b, p, at in rows)  # fmt: skip
         none = '<p class="py-10 text-center text-[14px] text-outline">아직 알림이 없어요. 누가 팔로우하면 여기에 알려 드려요.</p>'
+
+        def answer(i, label, yes, cls):
+            return (f'<form method="post" action="/follow/answer"><input type="hidden" name="u" value="{i}"><input type="hidden" name="yes" value="{yes}">'
+                    f'<button type="submit" class="px-3 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{label}</button></form>')  # fmt: skip
+        items = "".join(
+            f'<div class="py-3 flex items-center gap-3"><a href="/u/{i}" class="flex items-center gap-3 min-w-0 flex-1">{self.face(n, "w-12 h-12", photo_url(i, p))}'
+            f'<span class="flex flex-col min-w-0"><b class="text-[15px] text-on-surface truncate">{e(n or "")}</b>'
+            f'<span class="text-[13px] text-on-surface-variant truncate">팔로우를 요청했어요 · {ago(at)}</span></span></a>'
+            + answer(i, "수락", 1, "bg-primary text-on-primary") + answer(i, "삭제", 0, "bg-surface-container text-on-surface") + "</div>"
+            for i, n, p, at in asks) + items  # fmt: skip
         inner = (top_bar(self.initial(uid)) + '<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 min-h-screen"><div class="px-margin">'
                  '<h1 class="py-3 text-[20px] font-semibold text-on-surface">알림</h1>'
                  f'<div class="flex flex-col">{items or none}</div></div></main>' + bottom_nav("me"))  # fmt: skip
@@ -2292,7 +2376,7 @@ class App:
                 f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{cards}</div></section>')  # fmt: skip
 
     def feed(self, uid: int, q: str) -> str:
-        mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
+        mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
@@ -2310,14 +2394,19 @@ class App:
         if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
         nick, bio, pat = row
-        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        label, on = self.follow_state(uid, other)
         btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
+        shut = ('<div class="mt-space-xl py-10 flex flex-col items-center gap-2 border-t border-surface-container-high text-center">'
+                '<span class="material-symbols-outlined text-outline text-[30px]">lock</span>'
+                '<b class="font-body-reading-strong text-body-compact text-on-surface">비공개 계정이에요</b>'
+                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 리그램과 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
+        see = self.can_see(uid, other)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
-                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other)}</div>'
-                 f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{"팔로잉" if on else "팔로우"}</button></form></header>'
+                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other, see)}</div>'
+                 f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True)
+                 + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2343,10 +2432,11 @@ class App:
                 '<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">국민연금·운용사 같은 기관이 5% 넘게 가진 회사들이에요. 공시로 알려진 것만 보여요.</p>'
                 f'<div class="flex flex-col divide-y divide-surface-container-high/80">{items}</div></section>')  # fmt: skip
 
-    def nps_portfolio(self) -> str:
+    def nps_portfolio(self, after_pie: str = "") -> str:
         """국민연금 주식 — 한국(국민연금 연간 공시 평가액)과 미국(같은 날 13F, 한국은행 환율로 원화)을 금액 큰 순 하나로. 파이도 그 비중."""
         rows = self.con.execute(
-            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker)"
+            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker),"
+            " coalesce(s.induty_code, (select b.induty_code from big_holdings b where b.stock_code = p.ticker limit 1)), s.sic"
             " from nps_port p left join stocks s on s.ticker = p.ticker order by p.won desc").fetchall()  # fmt: skip
         meta = self.con.execute("select asof, fx from nps_meta order by asof desc limit 1").fetchone()
         if not rows or not meta:
@@ -2359,43 +2449,46 @@ class App:
             return name if mkt == "KR" else issuer_name(name, kname)
 
         def line(i, r):
-            mkt, _, t, won, _, home, has_note = r
+            mkt, name, t, won, _, home, has_note, kr, sic = r
             tag = ('<span class="ml-1.5 px-1.5 py-px rounded text-[10px] font-semibold align-middle '
                    + ("bg-surface-container-high text-on-surface-variant\">한국" if mkt == "KR" else "bg-secondary-container text-on-secondary-container\">미국") + "</span>")
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label(r), home, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'{ind_tag(kr if mkt == "KR" else None, sic, name)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {won / total * 100:.1f}% · {e(sources.won_short(won))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">주식 포트폴리오 · 한국+미국</h2>'
-                + pie([(label(r), r[3]) for r in rows])
-                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:20], 1)) + "</div>"
-                + f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - 20:,}종목</p>'
+                + pie([(label(r), r[3]) for r in rows]) + after_pie
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:TOP_LIST], 1)) + "</div>"
+                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - TOP_LIST:,}종목</p>' if len(rows) > TOP_LIST else "")
                 + '<p class="mt-2 text-[11px] text-outline leading-relaxed">한국 주식은 국민연금이 공개한 종목별 평가액(공공데이터포털 「국민연금공단_국내주식 투자정보」), '
                 + f'미국 주식은 같은 날 미국 증권거래위원회(SEC)에 낸 보유 신고(13F)예요. 달러는 그날 한국은행 환율(1달러 {meta[1]:,.1f}원)로 바꿨어요. '
                 + f'한국 {n_kr:,}종목 · 미국 {len(rows) - n_kr:,}종목. 1년에 한 번 나오는 공시라 지금과 다를 수 있어요.</p></section>')  # fmt: skip
 
-    def us_portfolio(self, key: str) -> str:
+    def us_portfolio(self, key: str, after_pie: str = "") -> str:
         """기관의 미국 주식 — 13F 로 보유 전체가 공개된다(국내 5% 보고와 달리). 파이 + 큰 10종목."""
         rows = self.con.execute(
-            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker)"
+            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker),"
+            " coalesce(nullif(g.sic, ''), s.sic)"
             " from guru_holdings g left join stocks s on s.ticker = g.ticker where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
         if not rows:
             return ""
         total = sum(r[2] for r in rows)
 
         def line(i, r):
-            issuer, t, value, weight, _, kname, khome, has_note = r
+            issuer, t, value, weight, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">미국 주식 포트폴리오</h2>'
                 f'<p class="mt-1 text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(rows[0][4])} 기준</p>'
-                + pie([(issuer_name(r[0], r[5]), r[2]) for r in rows])
-                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:10], 1)) + "</div>"
+                + pie([(issuer_name(r[0], r[5]), r[2]) for r in rows]) + after_pie
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:TOP_LIST], 1)) + "</div>"
+                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - TOP_LIST:,}종목</p>' if len(rows) > TOP_LIST else "")
                 + '<p class="mt-2 text-[11px] text-outline leading-relaxed">미국은 큰 투자자가 분기마다 미국 주식 보유 전체를 미국 증권거래위원회(SEC)에 신고해요(13F). '
                 "분기가 끝나고 45일 안에 나와서 지금과 다를 수 있어요. 미국 밖 주식은 들어 있지 않아요.</p></section>")  # fmt: skip
 
@@ -2445,16 +2538,16 @@ class App:
                     "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
         def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note, _ = r
+            issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
                 return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
             return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
-        top = rows[:30]
+        top = rows[:TOP_LIST]
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
                 f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
@@ -2480,31 +2573,28 @@ class App:
             "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
             " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
         inds = [x for (x,) in self.con.execute("select induty_code from big_holdings where inst = ?", (key,))]
-        since = (date.today() - timedelta(days=90)).isoformat()
-        recent = sorted((r for r in rows if r[3] and r[4] >= since), key=lambda r: r[4], reverse=True)[:8]
+        industry = bars([sector(x) for x in inds], [1] * len(inds), "곳", "한국에서 5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요. 위 그림과 기준이 달라요.")
+        # 파이 → 업종 → 많이 가진 순서. 「최근 늘리고 줄인 회사」·「지분이 큰 순서」는 뺐다(너무 자세하다, 사용자 10/10 — 5% 보고는 종목 노트 맨 밑에 남아 있다)
+        port = self.nps_portfolio(industry) if key == "nps" else ""
+        port = port or self.us_portfolio(key, industry)
 
-        def row(i, r):
-            code, corp, rate, chg, d, rno, ours, home = r
+        def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
+            code, corp, rate, _, d, rno, ours, home = r
             href = f"/n/{code}" if ours else DART_VIEW.format(rno)
-            tag = (f'<span class="text-[11px] {"text-secondary" if chg > 0 else "text-tertiary"}">{"늘림" if chg > 0 else "줄임"} {abs(chg):.2f}%p</span>' if chg else "")
             return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
                     f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'
-                    f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}% {tag}</span></span>'
-                    f'<span class="text-[11px] text-outline shrink-0">{e(d[2:].replace("-", "."))}</span></a>')  # fmt: skip
+                    f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}%</span></span></a>')  # fmt: skip
 
+        kr_only = ("" if port else industry
+                   + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">5% 넘게 가진 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                   + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
+                   + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
+                   "따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
                 f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
-                + (self.nps_portfolio() or self.us_portfolio(key) if key == "nps" else self.us_portfolio(key))  # 업종보다 위 — 가장 먼저 보이게(사용자 10/10)
-                + bars([sector(x) for x in inds], [1] * len(inds), "곳", "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.")
-                + (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 늘리고 줄인 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                   + "".join(row(i, r) for i, r in enumerate(recent, 1)) + "</div></section>" if recent else "")
-                + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">지분이 큰 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
-                + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
-                "지분율은 가장 최근 보고 기준이에요. 따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
+                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + port + kr_only)  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
@@ -2605,9 +2695,10 @@ if __name__ == "__main__":
 
     class Server(ThreadingMixIn, WSGIServer):
         """연결마다 스레드 — 브라우저가 미리 열어 둔 빈 연결 하나에 서버 전체가 멈추지 않게.
-        ponytail: DB 는 연결 하나를 잠금으로 돌려 쓴다. 사용자가 늘면 요청마다 연결로"""
+        요청 처리는 App 안의 잠금 하나로 차례대로(App.turn) — 메일·AI 를 기다리는 동안만 놓는다."""
 
         daemon_threads = True
+        request_queue_size = 128  # 한꺼번에 몰린 연결을 받아 둘 줄 (기본 5 — 넘치면 연결을 끊는다)
 
     sys.stderr.reconfigure(encoding="utf-8")  # 윈도우 콘솔(cp949)에서 한글 로그가 깨지지 않게
     cfg = env()
@@ -2615,12 +2706,6 @@ if __name__ == "__main__":
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
     app = App(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False), cfg["SECRET"])
-    lock = threading.Lock()
-
-    def serial(environ, start_response):
-        with lock:
-            return app(environ, start_response)
-
     host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
-    make_server(host, port, serial, server_class=Server).serve_forever()
+    make_server(host, port, app, server_class=Server).serve_forever()

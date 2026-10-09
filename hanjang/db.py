@@ -113,7 +113,8 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("disclosures", "amount", "integer"),
                             ("articles", "photo", "text"),
                             ("users", "notices_seen", "text"),  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
-                            ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
+                            ("users", "mail_on", "integer not null default 1"),
+                            ("users", "private", "integer not null default 0"), ("follows", "ok", "integer not null default 1"),  # 비공개 계정 — 팔로우는 요청(ok 0) → 수락하면 1 (사용자 10/10)  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
                             ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"), ("guru_holdings", "sic", "text"),
