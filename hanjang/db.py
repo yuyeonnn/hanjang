@@ -49,6 +49,9 @@ create table if not exists big_holdings (
   inst text not null, stock_code text not null, corp_name text not null, corp_cls text, rate real not null,
   rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
+create table if not exists guru_holdings (
+  guru text not null, cusip text not null, issuer text not null, ticker text, value real not null, shares real not null,
+  weight real not null, accn text not null, period text not null, filed text not null, primary key (guru, cusip));
 create table if not exists filings (
   accession text primary key, ticker text not null references stocks, form text not null, date text not null, at text,
   items text, doc text, filed_us text);
