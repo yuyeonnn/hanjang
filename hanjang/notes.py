@@ -68,6 +68,7 @@ TITLE_PLAIN = (
     (r"회계법인교체", "회사 장부를 검사하는 회계법인이 바뀌었어요"),
     (r"최고경영진교체", "최고경영자(CEO)나 재무책임자(CFO)가 바뀌었어요"),
     (r"자사주매입알림\(8-K", "회사가 자기 회사 주식을 사들이는 계획을 알렸어요"),
+    (r"새주식판매알림\(8-K", "새 주식을 시장에서 팔아 돈을 모았다고 알렸어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
     (r"배당알림\(8-K", "주주에게 배당을 주기로 했어요"),
     # 거래소 경고가 먼저 — 「매매거래정지(합병…)」처럼 다른 말이 섞여도 경고를 알린다
     (r"매매거래정지해제", "멈췄던 사고팔기가 다시 열렸어요"),
@@ -156,7 +157,7 @@ TONE_RULE = ("좋게 본 것·걱정되는 것은 코드가 정한 기준으로 
              "공시 종류(자사주 매입·대형 계약 / 증자·전환사채·소송·거래정지).")
 # 예측 말투 — 지난 사실을 「~할 전망」으로 쓰면 틀린 말이고 예측이 된다 (불변식 1). 기사(N)만 근거인 문장은
 # 「기사는 ~라고 써요」로 남의 전망을 옮기는 자리라 예외
-PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것 같아|예상돼|예상됩|할 거예요|될 거예요|일 거예요|가능성이 (높|커|있)|지켜볼 만|주목할 만|기대해 볼")
+PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것 같아|예상돼|예상됩|할 거예요|될 거예요|일 거예요|가능성이 (높|커|있)|지켜볼 만|주목할 만|기대해 볼|눈여겨볼 만|앞으로[^.]{0,20}영향을 줄 수")
 # AI 가 직접 쓴 방향 낱말 — 빈칸 {F.방향} 을 안 쓰고 스스로 「늘었어요」라 쓴 경우 사실과 맞는지 본다
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
@@ -403,7 +404,8 @@ def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
         if prev and prev[1] and prev[2] is not None and prev[1] > 0:
             was = prev[2] / prev[1] * 100
             slots |= {"전년비율": f"{was:.1f}%", "전년연도": f"{prev[0]}년", "힘": power(m, was)}
-        out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100{_MARKET['per']}어치 팔아 본업으로 {slots['백원당']}{josa(slots['백원당'], '을')} 남김"
+        out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100{_MARKET['per']}어치 "
+                    + (f"팔 때마다 본업에서 {slots['손해']}씩 잃음" if "손해" in slots else f"팔아 본업으로 {slots['백원당']}{josa(slots['백원당'], '을')} 남김")
                     + (f" ({slots['전년연도']} {slots['전년비율']})" if "전년비율" in slots else ""), "url": url, "tone": 0, "slots": slots})  # fmt: skip
     rows = [r for r in fin if r[1] is not None or r[2] is not None]
     if len(rows) >= 3:
@@ -515,7 +517,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None, 
                 f["slots"].pop(k, None)
     for f in out:  # 100원당 남긴 돈도 사실 문장에 — 출처 창에 보이고, 숫자 대조(빈칸 값)도 통과하게
         if "전년백원당" in f["slots"]:
-            f["text"] += f" · {unit} 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})"
+            pv = f["slots"]["전년백원당"]
+            was = f"1년 전엔 {pv[1:]}씩 잃음" if pv.startswith("-") else f"1년 전엔 {pv} 남김"
+            f["text"] += (f" · {unit} 팔 때마다 본업에서 {f['slots']['손해']}씩 잃음({was})" if "손해" in f["slots"]
+                          else f" · {unit} 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})")
     return out
 
 

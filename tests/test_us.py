@@ -341,3 +341,16 @@ def test_fourth_review_outlook_words_units_and_span():
          "quote": "For fiscal 2027 we expect revenue of $90.0 billion."}]}
     got = us.check_outlook(j, src)
     assert [(x["low"], x["span"]) for x in got["items"]] == [(108.0, "quarter"), (90.0, "year")]  # 거래액·성장률은 매출이 아니다
+
+
+def test_fifth_review_fixes():
+    from hanjang import notes
+    mstr = ("$15.7 million of bitcoin purchases were made using net proceeds from MSTR Stock sales. Repurchase Program Updates: "
+            "Strategy announced the following update with respect to its share repurchase programs")
+    assert us.classify_8k("7.01,8.01", mstr)[:3] == ("RIGHTS_ISSUE", 2, -1)  # 주식을 팔아 산 알림은 매입이 아니다
+    assert us.classify_8k("8.01", "The Board approved a new $50 billion share repurchase program.")[0] == "BUYBACK"
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-12-31", "val": 619, "accn": "a", "filed": "2026-02-01", "form": "10-K"}]}},
+        "RevenuesNetOfInterestExpense": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-12-31", "val": 3613, "accn": "a", "filed": "2026-02-01", "form": "10-K"}]}}}}}
+    assert us.financial_rows(facts, "1231")[0]["revenue"] == 619 and us.financial_rows(facts, "1231", True)[0]["revenue"] == 3613  # 금융회사는 총수익
+    assert notes.PREDICT.search("이런 큰 계약은 앞으로 매출에 영향을 줄 수 있어요.") and notes.PREDICT.search("눈여겨볼 만해요")

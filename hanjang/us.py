@@ -155,9 +155,14 @@ def anchors(s: dict) -> dict[tuple, Period]:
     return {**s["net_income"], **s["revenue"]}
 
 
-def financial_rows(facts: dict, fye: str) -> list[dict]:
+def tags_for(fin: bool) -> dict:
+    """금융회사(SIC 60~63·6199)는 매출 칸으로 「이자 비용 뺀 총수익」을 먼저 본다 — 「Revenues」엔 이자 수익을 뺀 일부만 들어 있는 회사가 있다(소파이 10/10)."""
+    return TAGS | {"revenue": ("RevenuesNetOfInterestExpense", *[t for t in REVENUE if t != "RevenuesNetOfInterestExpense"])} if fin else TAGS
+
+
+def financial_rows(facts: dict, fye: str, fin: bool = False) -> list[dict]:
     """연간 — {fiscal_year, start, end, revenue, operating_income, net_income, eps, liabilities, equity, accn}."""
-    s = {k: series(facts, v) for k, v in TAGS.items()}
+    s = {k: series(facts, v) for k, v in tags_for(fin).items()}
     out = {}
     for (st, en), p in anchors(s).items():
         if months(p) != 12:
@@ -176,10 +181,10 @@ def financial_rows(facts: dict, fye: str) -> list[dict]:
     return [dict((k, v) for k, v in r.items() if k != "_filed") for r in sorted(out.values(), key=lambda r: r["fiscal_year"])]
 
 
-def quarter_rows(facts: dict, fye: str) -> list[dict]:
+def quarter_rows(facts: dict, fye: str, fin: bool = False) -> list[dict]:
     """분기 — 3개월 값은 그대로, 4분기는 연간 − 9개월 누적. {fiscal_year, q, start, end, revenue, operating_income, net_income, eps,
     revenue_ytd, op_ytd, accn}. 1년 전 같은 분기(prev)는 저장할 때 우리 표에서 채운다."""
-    s = {k: series(facts, v) for k, v in TAGS.items()}
+    s = {k: series(facts, v) for k, v in tags_for(fin).items()}
     by_len: dict[int, dict] = {3: {}, 9: {}, 12: {}}
     for key, p in anchors(s).items():
         if (m := months(p)) in by_len:
@@ -301,6 +306,7 @@ ITEMS = (
 TOP_EXEC = re.compile(r"Chief Executive Officer|Chief Financial Officer|\bCEO\b|\bCFO\b")
 BUYBACK = re.compile(r"(share|stock) repurchase|repurchase (program|authorization)|buyback", re.I)
 DIVIDEND = re.compile(r"(quarterly|cash|special) dividend|dividend of \$", re.I)
+SELLING = re.compile(r"proceeds from \S+ (stock|share)s? sales|at-the-market|\bATM\b (program|offering)|sold \S+ shares of (our )?(class a )?common stock", re.I)
 
 
 DELIVERY = re.compile(r"deliver(y|ies|ed)|production and deliver", re.I)
@@ -322,6 +328,8 @@ def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
                                                           or not re.search(r"net income|earnings per share|operating income", text, re.I)):
                 return code, imp, dr, "판매·인도 대수 알림 (8-K 2.02)"
             return code, imp, dr, f"{title} (8-K {i})"
+    if SELLING.search(text):  # 새 주식을 시장에서 팔았다는 알림 — 매입 낱말이 함께 있어도 주식 수는 늘어난다
+        return "RIGHTS_ISSUE", 2, -1, "새 주식 판매 알림 (8-K)"
     if BUYBACK.search(text):
         return "BUYBACK", 3, 1, "자사주 매입 알림 (8-K)"
     if DIVIDEND.search(text):
@@ -377,7 +385,7 @@ def parse_13dg(xml: str) -> dict | None:
 
 # --- 10-K 인라인 XBRL — 사업부·제품·지역 숫자 (AI 없이) ---
 
-PARTS_V = 8  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
+PARTS_V = 9  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
 AXES = {"segment": "StatementBusinessSegmentsAxis", "product": "ProductOrServiceAxis", "geo": "StatementGeographicalAxis"}
 MEMBER_KO = {
     "US": "미국", "CN": "중국", "TW": "대만", "JP": "일본", "KR": "한국", "DE": "독일", "GB": "영국", "IE": "아일랜드", "SG": "싱가포르", "CA": "캐나다",
@@ -450,7 +458,9 @@ EN_KO = {
     "Walmart US": "월마트 미국", "Walmart International": "월마트 해외", "Sams Club US": "샘스클럽 미국", "Lending": "대출",
     "Financial Services": "금융 서비스", "Technology Platform": "기술 플랫폼", "Unitedhealthcare": "유나이티드헬스케어(보험)", "Total Optum": "옵텀",
     "Optumrx": "옵텀 Rx(약국)", "Optumhealth": "옵텀 헬스(의료)", "Client Computing Group Datacenter & AI & Network & Edge": "인텔 제품(PC·데이터센터 합계)",
-    "Cloud & Software Business": "클라우드·소프트웨어", "Hardware Business": "하드웨어", "Services Business": "서비스", "Middle East": "중동", "Africa": "아프리카", "Membership": "회원비",
+    "Cloud & Software Business": "클라우드·소프트웨어", "Hardware Business": "하드웨어", "Services Business": "서비스",
+    "Canada": "캐나다", "Other International": "그 밖 해외", "Global Services": "글로벌 서비스(정비·부품)", "Commercial Airplanes": "민항기",
+    "Defense Space & Security": "방위·우주·보안", "Middle East": "중동", "Africa": "아프리카", "Membership": "회원비",
     "Western Hemisphere Excluding US": "미국 밖 서반구", "International Beverage Franchise": "해외 음료 프랜차이즈", "RU": "러시아",
     "Latin America & Canada": "중남미·캐나다", "Middle East & Africa": "중동·아프리카",
 }  # fmt: skip
@@ -771,8 +781,8 @@ def save_company(con: sqlite3.Connection, ticker: str, name: str, cik: int, sub:
     # homepage 는 로고(Brandfetch)를 찾는 데만 쓴다 — SEC 에 웹사이트가 비어 있으면(대부분) Brandfetch 의 티커 찾기 「ticker/AAPL」
 
 
-def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> tuple[int, int, int]:
-    fin = financial_rows(facts, fye)
+def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str, finance: bool = False) -> tuple[int, int, int]:
+    fin = financial_rows(facts, fye, finance)
     # 미국 연간·흐름은 받을 때마다 새로 — 앞서 잘못 잡힌 줄(아마존 「최근 12개월」)이 남지 않게. 분기는 보도자료 줄을 지키려고 두고 덮어쓴다
     con.execute("delete from financials where ticker = ?", (ticker,))
     con.execute("delete from flows where ticker = ?", (ticker,))
@@ -780,7 +790,7 @@ def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> t
                     " period_start, period_end, currency, eps) values (?, ?, ?, ?, ?, ?, ?, ?, 'US-GAAP', ?, ?, ?, ?)",
                     [(ticker, r["fiscal_year"], r["revenue"], r["operating_income"], r["net_income"], r["equity"], r["liabilities"], r["accn"],
                       r["start"], r["end"], r["currency"], r["eps"]) for r in fin])  # fmt: skip
-    qs = quarter_rows(facts, fye)
+    qs = quarter_rows(facts, fye, finance)
     kept = {(y, q): e for y, q, e in con.execute("select year, q, eps from quarters where ticker = ? and eps is not null", (ticker,))}
     for r in qs:  # 4분기 EPS 처럼 XBRL 에 없는 값은 앞서 보도자료에서 읽은 것을 지킨다
         if r["eps"] is None:
@@ -813,7 +823,7 @@ def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: 
             con.execute("insert or replace into events values (?, ?, 'EARNINGS', '실적 발표 (회사가 알린 날)', ?)", (ticker, d.isoformat(), r["accession"]))
         code, imp, dr, title = classify_8k(r["items"], text)
         # read_model 「8-K」 = 번호로 이미 분류함 — 국내 공시 AI 분류(read_disclosures)가 덮어쓰지 않게
-        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?)",
+        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at, risk_tags) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?, 'v2')",
                     (r["accession"], ticker, r["date"], title, code, imp, dr, datetime.now().isoformat()))  # fmt: skip
         n += 1
     return n
@@ -857,6 +867,7 @@ def save_13dg(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows
 def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None = None, only: list[str] | None = None) -> None:
     con, sec = con or db.connect(), sec or Edgar()
     con.execute("update insiders set kind = '임원' where kind = '임원·주요주주'")  # 10/9 첫 받기의 이름표 — 노트는 「임원」을 읽는다
+    con.execute("delete from disclosures where read_model = '8-K' and code = 'BUYBACK' and risk_tags is null")  # 10/10 앞의 판 — 「주식 판매」를 매입으로 읽었을 수 있다, 다시 읽는다
     con.execute("update disclosures set read_model = '8-K', read_at = coalesce(read_at, ?) where rcept_no like '%-%-%' and read_model is null",
                 (datetime.now().isoformat(),))  # 10/9 앞서 넣은 8-K 도 「읽음」 — AI 분류가 덮지 않게
     tk = sec.tickers()
@@ -872,7 +883,7 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
                 print(f"  {ticker} {name}: 10-K 를 내지 않는 회사(20-F) — 뺀다", file=sys.stderr)
                 continue
             save_company(con, ticker, name, cik, sub)
-            f, q, fl = save_facts(con, ticker, sec.facts(cik), sub.get("fiscalYearEnd") or "1231")
+            f, q, fl = save_facts(con, ticker, sec.facts(cik), sub.get("fiscalYearEnd") or "1231", notes.us_finance(sub.get("sic")))
             rows = filing_rows(sub, today - timedelta(days=DAYS))
             con.executemany("insert or replace into filings values (?, ?, ?, ?, ?, ?, ?, ?)",
                             [(r["accession"], ticker, r["form"], r["date"], r["at"], r["items"], r["doc"], r["filed_us"]) for r in rows])  # fmt: skip
