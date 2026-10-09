@@ -565,11 +565,11 @@ def read_outlook(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     return True
 
 
-def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None" = None) -> None:
+def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None" = None, only: list[str] | None = None) -> None:
     """AI 읽기 — 새 10-K 와 새 실적 발표만. 매일 실행에서 받기 다음에."""
     con, sec = con or db.connect(), sec or Edgar()
     n10, nout = 0, 0
-    for ticker, _ in universe():
+    for ticker, _ in [(t, n) for t, n in universe() if not only or t in only]:
         if not con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
             continue
         try:  # 한 회사가 실패해도 나머지는 읽는다 — 내일 다시
@@ -621,8 +621,9 @@ def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: 
         if needs_text(r["items"]):  # 2.02 는 첨부 보도자료가 본문이다(8-K 본문은 「첨부한다」 한 줄)
             text = (exhibit(sec, cik, r["accession"]) if "2.02" in r["items"] else html_text(sec.doc(cik, r["accession"], r["doc"])))[:20000]
         code, imp, dr, title = classify_8k(r["items"], text)
-        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction) values (?, ?, ?, ?, ?, ?, ?)",
-                    (r["accession"], ticker, r["date"], title, code, imp, dr))  # fmt: skip
+        # read_model 「8-K」 = 번호로 이미 분류함 — 국내 공시 AI 분류(read_disclosures)가 덮어쓰지 않게
+        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?)",
+                    (r["accession"], ticker, r["date"], title, code, imp, dr, datetime.now().isoformat()))  # fmt: skip
         n += 1
     return n
 
@@ -648,12 +649,14 @@ def save_13dg(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows
     return n
 
 
-def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None = None) -> None:
+def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None = None, only: list[str] | None = None) -> None:
     con, sec = con or db.connect(), sec or Edgar()
     con.execute("update insiders set kind = '임원' where kind = '임원·주요주주'")  # 10/9 첫 받기의 이름표 — 노트는 「임원」을 읽는다
+    con.execute("update disclosures set read_model = '8-K', read_at = coalesce(read_at, ?) where rcept_no like '%-%-%' and read_model is null",
+                (datetime.now().isoformat(),))  # 10/9 앞서 넣은 8-K 도 「읽음」 — AI 분류가 덮지 않게
     tk = sec.tickers()
     got = {"회사": 0, "연간": 0, "분기": 0, "흐름": 0, "공시": 0, "임원": 0}
-    for ticker, name in universe():
+    for ticker, name in [(t, n) for t, n in universe() if not only or t in only]:
         try:  # 한 회사가 실패해도(SEC 시간 초과 등) 나머지는 받는다 — 내일 다시
             if ticker not in tk:
                 print(f"  {ticker} {name}: SEC 티커 표에 없음 — universe_us.txt 를 고친다", file=sys.stderr)
@@ -687,7 +690,23 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
         except (httpx.HTTPError, ValueError, KeyError) as err:
             con.rollback()
             print(f"  {ticker} 받기 실패 {type(err).__name__} — 내일 다시", file=sys.stderr)
+    # 노트는 누가 담은 미국 종목만 쓴다(AI 비용) — 나머지는 검색·담기용으로 자료만. 국내 save_universe 는 미국을 건드리지 않는다
+    con.execute("update stocks set active = (ticker in (select ticker from holdings)) where market = 'US'")
+    con.commit()
     print(f"미국 {got} · SEC {sec.calls}콜")
+
+
+def first(ticker: str, today: date | None = None) -> bool:
+    """새로 담은 미국 종목 — 그 종목만 바로 받고 읽고 첫 노트를 쓴다(1~2분). 국내 collect.first 와 같은 일."""
+    today = today or date.today()
+    con = db.connect()
+    sec = Edgar()
+    main(today, con, sec, only=[ticker])
+    read(today, con, sec, only=[ticker])
+    con.execute("update stocks set active = 1 where ticker = ?", (ticker,))
+    con.commit()
+    notes.main([ticker], today)
+    return bool(con.execute("select 1 from notes where ticker = ?", (ticker,)).fetchone())
 
 
 if __name__ == "__main__":
