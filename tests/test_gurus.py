@@ -116,3 +116,10 @@ def test_every_holdings_list_shows_twenty():
     app = web.App(con, "s" * 32)
     for h in (app.guru(1, "buffett", "", "")[2], app.us_portfolio("nps")):  # 유명 투자자 · 기관 — 같은 20종목
         assert h.count("text-[12px] text-outline tabular-nums") == 20 and "외 5종목" in h
+
+
+def test_industry_tag_is_plain_gray_text():
+    from hanjang import web
+
+    assert ">#반도체</span>" in web.ind_tag(sic="3674") and "bg-" not in web.ind_tag(sic="3674")  # 상자·배경 없이 회색 글씨
+    assert ">#ETF</span>" in web.ind_tag(sic="", issuer="ISHARES TR") and web.ind_tag() == ""

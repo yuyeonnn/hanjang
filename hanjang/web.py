@@ -596,6 +596,13 @@ window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(funct
 addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
+def ind_tag(kr: str | None = None, sic: str | None = None, issuer: str = "") -> str:
+    """종목 이름 옆 회색 작은 글씨 「#반도체」 — 한국은 통계청 업종, 미국은 SEC 산업분류(짧은 이름을 아는 것만, 아니면 큰 업종). 상자·배경 없이(사용자 10/10)."""
+    name = sources.industry_label(kr) if kr else (notes.SIC_LABEL.get(sic or "") or gurus.sector(sic, issuer))
+    name = "ETF" if name and name.startswith("ETF") else name
+    return f'<span class="shrink-0 text-[12px] font-normal text-outline">#{e(name)}</span>' if name else ""
+
+
 TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게(사용자 10/10)
 
 
@@ -2417,7 +2424,8 @@ class App:
     def nps_portfolio(self, after_pie: str = "") -> str:
         """국민연금 주식 — 한국(국민연금 연간 공시 평가액)과 미국(같은 날 13F, 한국은행 환율로 원화)을 금액 큰 순 하나로. 파이도 그 비중."""
         rows = self.con.execute(
-            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker)"
+            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker),"
+            " coalesce(s.induty_code, (select b.induty_code from big_holdings b where b.stock_code = p.ticker limit 1)), s.sic"
             " from nps_port p left join stocks s on s.ticker = p.ticker order by p.won desc").fetchall()  # fmt: skip
         meta = self.con.execute("select asof, fx from nps_meta order by asof desc limit 1").fetchone()
         if not rows or not meta:
@@ -2430,11 +2438,12 @@ class App:
             return name if mkt == "KR" else issuer_name(name, kname)
 
         def line(i, r):
-            mkt, _, t, won, _, home, has_note = r
+            mkt, name, t, won, _, home, has_note, kr, sic = r
             tag = ('<span class="ml-1.5 px-1.5 py-px rounded text-[10px] font-semibold align-middle '
                    + ("bg-surface-container-high text-on-surface-variant\">한국" if mkt == "KR" else "bg-secondary-container text-on-secondary-container\">미국") + "</span>")
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label(r), home, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'{ind_tag(kr if mkt == "KR" else None, sic, name)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {won / total * 100:.1f}% · {e(sources.won_short(won))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
@@ -2449,17 +2458,18 @@ class App:
     def us_portfolio(self, key: str, after_pie: str = "") -> str:
         """기관의 미국 주식 — 13F 로 보유 전체가 공개된다(국내 5% 보고와 달리). 파이 + 큰 10종목."""
         rows = self.con.execute(
-            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker)"
+            "select g.issuer, g.ticker, g.value, g.weight, g.period, s.name, s.homepage, exists(select 1 from notes n where n.ticker = g.ticker),"
+            " coalesce(nullif(g.sic, ''), s.sic)"
             " from guru_holdings g left join stocks s on s.ticker = g.ticker where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
         if not rows:
             return ""
         total = sum(r[2] for r in rows)
 
         def line(i, r):
-            issuer, t, value, weight, _, kname, khome, has_note = r
+            issuer, t, value, weight, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
@@ -2517,10 +2527,10 @@ class App:
                     "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
         def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note, _ = r
+            issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
             label = issuer_name(issuer, kname)
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
                      f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
             if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
                 return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'

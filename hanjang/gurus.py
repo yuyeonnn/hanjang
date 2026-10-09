@@ -150,6 +150,16 @@ def main(today: date | None = None, con=None, sec=None) -> None:
                           ours.get(tickers.get(c)) or (sic_of(con, sec, index, name) if person else "")) for c, name, v, s in merged.values()])  # fmt: skip
         con.commit()
         n += 1
+    for key in INSTS:  # 기관은 업종을 다 찾지 않는다 — 목록에 보이는 위 30종목만(꼬리표 「#반도체」)
+        top = con.execute("select cusip, issuer from guru_holdings where guru = ? and coalesce(sic, '') = '' and ticker is null"
+                          " order by value desc limit 30", (key,)).fetchall()  # fmt: skip
+        if top and index is None:
+            index = {}
+            for c, title in sec.tickers().values():
+                index.setdefault(norm(title), c)
+        for c, issuer in top:
+            con.execute("update guru_holdings set sic = ? where guru = ? and cusip = ?", (sic_of(con, sec, index, issuer), key, c))
+        con.commit()
     print(f"유명 투자자·기관 13F — 새 신고 {n}곳 · SEC {sec.calls}콜")
 
 
