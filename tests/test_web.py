@@ -700,3 +700,13 @@ def test_follow_back_must_be_our_path():
     b = f"s={web.sign('2', SECRET)}"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/\\evil.example"), b)[1]["Location"] == "/u/1"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/f/1?tab=followers"), b)[1]["Location"] == "/f/1?tab=followers"
+
+
+def test_learn_related_tips():
+    from hanjang import learn
+
+    assert all(x in learn.BY_SLUG for v in learn.RELATED.values() for x in v)  # 잇는 글은 모두 있는 글
+    app, con = _app()
+    ck = _login(app)
+    body = call(app, "/learn/dividend", cookie=ck)[2]
+    assert "함께 읽으면 좋은 팁" in body and 'href="/learn/disclosure"' in body
