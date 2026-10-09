@@ -261,7 +261,7 @@ def money_blocks(fin: tuple | None) -> str:
             a, b = eq / (eq + li) * 100, li / (eq + li) * 100
             out.append(f'<div class="mt-space-sm font-label-regular text-label-regular text-on-surface font-semibold">빚과 내 돈 — 부채비율 {ratio:,.0f}%</div>'
                        '<div class="mt-1 h-3 w-full rounded-full overflow-hidden flex">'
-                       f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full bg-tertiary-fixed" style="width:{b:.1f}%"></span></div>'
+                       f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full" style="width:{b:.1f}%;background:#F4806A"></span></div>'
                        f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
                        f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. 업종마다 보통 수준이 달라요.</p>')  # fmt: skip
     if not out:
