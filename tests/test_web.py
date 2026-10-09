@@ -97,6 +97,12 @@ def test_calendar_month_grid_marks_red_days_and_events():
     con.execute("insert into events values ('005930', '2026-10-29', 'EARNINGS', '실적 발표', '20261007000002')")
     soon = app.calendar(uid, "2026-10", today=date(2026, 10, 7))
     assert "삼성 실적</span>" in soon and "삼성전자 실적 발표</span>" in soon and "삼성전자 <b>실적 발표</b>" in soon  # 앞으로의 일정 — 테두리 칩 · 이 달의 일정 목록
+    # 고른 날 일정 — 처음엔 오늘(10/7, 일정 없음), 10/2 칸을 누르면 그 날 공시가 보이게 미리 묶어 둔다
+    assert 'data-day="2026-10-02"' in soon and "pickDay('2026-10-07')" in soon
+    assert '<div data-list="2026-10-02" hidden>' in soon and '<div data-list="2026-10-29" hidden>' in soon and '<p data-list="none"' in soon
+    assert "pickDay('2026-11-01')" in app.calendar(uid, "2026-11", today=date(2026, 10, 7))  # 다른 달은 1일
+    con.execute("insert into ipos values ('c1', 'r9', '엘리스그룹', '2026-10-20', '2026-10-21', null, null, 70400, 1, '', '')")  # 상장일 아직 없음
+    assert '<div data-list="2026-10-20" hidden>' in app.calendar(uid, "2026-10", today=date(2026, 10, 7))
 
 
 def test_survey_saves_once_and_asks_pay_from_week_six():
@@ -511,7 +517,7 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
     con.execute("update disclosures set code='MAJOR_CONTRACT', importance=3, direction=1")
     (uid,) = con.execute("select id from users").fetchone()
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
-    assert html_.count("외 1건") == 1 and "계약 2건" in html_  # 두 건이 한 줄로
+    assert html_.count("외 1건") == 2 and "계약 2건" in html_  # 두 건이 한 줄로 (고른 날 일정 · 이 달의 일정에 한 번씩)
     assert "한국 금리 결정" in html_ and "미국 금리 결정" in html_ and "관련 높은 순" in html_ and "🇰🇷" not in html_
     assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>")  # 내 종목 공시가 시장 일정보다 위
     con.execute("insert into ipos values ('c1', 'r9', '엘리스그룹', '2026-10-07', '2026-10-08', '2026-10-13', '2026-10-16', 70400, 156428800000, '미래에셋증권', '시설자금 1,549억원')")
