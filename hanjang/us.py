@@ -2,6 +2,8 @@
 세 창구(티커 표 · 회사별 공시 목록 · XBRL 재무)와 Form 4 원문(XML)만. 키 없음, 조건은 User-Agent 와 초당 10번 아래 (data-rights §6).
 재무는 기간(start·end)으로만 판단한다 — fy/fp 칸은 「그 숫자가 실린 보고서」의 것이라 믿지 않는다. 4분기 = 연간 − 9개월 누적."""
 
+import html as htmllib
+import itertools
 import json
 import re
 import sqlite3
@@ -12,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
-from hanjang import db
+from hanjang import db, llm, notes
 from hanjang.sources import ROOT, CACHE, env
 
 UNIVERSE = ROOT / "hanjang" / "universe_us.txt"
@@ -43,9 +45,16 @@ class Edgar:
 
     def _get(self, url: str) -> httpx.Response:
         for wait in (2, 10, None):
-            r = httpx.get(url, headers={"User-Agent": self.ua, "Accept-Encoding": "gzip"}, timeout=60)
-            self.calls += 1
-            time.sleep(0.13)
+            try:
+                r = httpx.get(url, headers={"User-Agent": self.ua, "Accept-Encoding": "gzip"}, timeout=120)
+            except httpx.TransportError:  # 큰 10-K(수 MB)는 가끔 시간이 넘는다 — 쉬었다 다시
+                if not wait:
+                    raise
+                time.sleep(wait)
+                continue
+            finally:
+                self.calls += 1
+                time.sleep(0.13)
             if r.status_code in (429, 503) and wait:
                 time.sleep(wait)
                 continue
@@ -290,10 +299,14 @@ BUYBACK = re.compile(r"(share|stock) repurchase|repurchase (program|authorizatio
 DIVIDEND = re.compile(r"(quarterly|cash|special) dividend|dividend of \$", re.I)
 
 
+DELIVERY = re.compile(r"deliver(y|ies|ed)|production and deliver", re.I)
+
+
 def needs_text(items: str) -> bool:
-    """본문을 열어야 분류가 정해지나 — 무거운 번호가 없고 5.02·7.01·8.01 이 있을 때만."""
+    """본문을 열어야 분류가 정해지나 — 2.02(실적인지 판매 대수인지) · 무거운 번호 없이 5.02·7.01·8.01 만 있을 때."""
     its = set(items.split(","))
-    return not any(i in its for i, *_ in ITEMS) and bool(its & {"5.02", "7.01", "8.01"})
+    heavy = [i for i, *_ in ITEMS if i in its]
+    return heavy[:1] == ["2.02"] or (not heavy and bool(its & {"5.02", "7.01", "8.01"}))
 
 
 def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
@@ -301,6 +314,9 @@ def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
     its = set(items.split(","))
     for i, code, imp, dr, title in ITEMS:
         if i in its:
+            if i == "2.02" and DELIVERY.search(text) and (re.search(r"will be announced|when we announce", text, re.I)
+                                                          or not re.search(r"net income|earnings per share|operating income", text, re.I)):
+                return code, imp, dr, "판매·인도 대수 알림 (8-K 2.02)"
             return code, imp, dr, f"{title} (8-K {i})"
     if BUYBACK.search(text):
         return "BUYBACK", 3, 1, "자사주 매입 알림 (8-K)"
@@ -314,7 +330,8 @@ def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
 
 
 def html_text(html: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style).*?</\1>", " ", html))).replace("&#160;", " ").replace("&nbsp;", " ")
+    t = re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style|ix:header).*?</\1>", " ", html))
+    return re.sub(r"\s+", " ", htmllib.unescape(t)).strip()
 
 
 def parse_13dg(xml: str) -> dict | None:
@@ -333,6 +350,228 @@ def parse_13dg(xml: str) -> dict | None:
     m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", d)
     return {"issuer": int(issuer), "who": tag("reportingPersonName").replace("&amp;", "&"), "rate": float(rate),
             "day": f"{m[3]}-{m[1]}-{m[2]}" if m else None, "person": tag("typeOfReportingPerson")}  # fmt: skip
+
+
+# --- 10-K 인라인 XBRL — 사업부·제품·지역 숫자 (AI 없이) ---
+
+AXES = {"segment": "StatementBusinessSegmentsAxis", "product": "ProductOrServiceAxis", "geo": "StatementGeographicalAxis"}
+MEMBER_KO = {
+    "US": "미국", "CN": "중국", "TW": "대만", "JP": "일본", "KR": "한국", "DE": "독일", "GB": "영국", "IE": "아일랜드", "SG": "싱가포르", "CA": "캐나다",
+    "NonUs": "미국 밖", "OtherCountries": "그 밖 나라", "ChinaIncludingHongKong": "중국(홍콩 포함)", "Americas": "아메리카", "AmericasSegment": "아메리카",
+    "Europe": "유럽", "EuropeSegment": "유럽", "GreaterChinaSegment": "중화권", "GreaterChina": "중화권", "JapanSegment": "일본",
+    "RestOfAsiaPacificSegment": "그 밖 아시아·태평양", "AsiaPacific": "아시아·태평양", "EMEA": "유럽·중동·아프리카", "International": "해외",
+    "DataCenter": "데이터센터", "Compute": "연산", "Networking": "네트워킹", "Gaming": "게임", "ProfessionalVisualization": "전문가용 그래픽",
+    "Automotive": "자동차", "OEMAndOther": "OEM·기타", "IPhone": "아이폰", "Mac": "맥", "IPad": "아이패드", "WearablesHomeandAccessories": "웨어러블·홈·액세서리",
+    "Service": "서비스", "Services": "서비스", "Product": "제품", "Products": "제품", "Subscription": "구독", "Advertising": "광고",
+    "AutomotiveSales": "자동차 판매", "AutomotiveRegulatoryCredits": "탄소 배출권", "AutomotiveLeasing": "자동차 리스", "EnergyGenerationAndStorage": "에너지 저장",
+    "EnergyGenerationAndStorageSegment": "에너지 저장", "AutomotiveSegment": "자동차", "ServicesAndOther": "서비스·기타",
+    "ComputeAndNetworking": "연산·네트워킹", "Graphics": "그래픽", "HK": "홍콩", "OtherAsiaPacific": "그 밖 아시아·태평양", "OtherAmericas": "그 밖 아메리카",
+    "EuropeMiddleEastAndAfrica": "유럽·중동·아프리카", "Foreign": "해외", "NonUS": "미국 밖", "UnitedStates": "미국", "RestOfWorld": "그 밖 나라",
+}  # fmt: skip
+
+
+def member_name(m: str) -> str:
+    """「nvda:ProfessionalVisualizationMember」 → 「전문가용 그래픽」 — 모르는 건 영어 낱말을 띄어 쓴다."""
+    local = m.split(":")[-1]
+    local = re.sub(r"Member$", "", local)
+    if local in MEMBER_KO:
+        return MEMBER_KO[local]
+    local = re.sub(r"Segment$", "", local)
+    if local in MEMBER_KO:
+        return MEMBER_KO[local]
+    return re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", local).replace(" And ", " & ")
+
+
+def ixbrl_parts(html: str, start: str, end: str) -> dict[str, list[dict]]:
+    """그 기간(start~end)의 제품·사업부·지역별 매출(과 사업부 영업이익). {axis: [{member, name, revenue, op}]}.
+    한 축(사업부 표시 OperatingSegments 는 같이 있어도 된다)만 달린 숫자만 — 다른 축이 섞인 건(사업부×지역) 뺀다."""
+    ctx = {}
+    for cid, body in re.findall(r'<xbrli:context id="([^"]+)">(.*?)</xbrli:context>', html, re.S):
+        s, e = re.search(r"<xbrli:startDate>([^<]+)", body), re.search(r"<xbrli:endDate>([^<]+)", body)
+        mem = {d.split(":")[-1]: v.strip() for d, v in re.findall(r'dimension="([^"]+)">([^<]+)<', body)}
+        mem.pop("ConsolidationItemsAxis", None) if mem.get("ConsolidationItemsAxis", "").endswith("OperatingSegmentsMember") else None
+        if s and e and len(mem) == 1:
+            ctx[cid] = (s.group(1), e.group(1), *next(iter(mem.items())))
+    out: dict[str, dict] = {k: {} for k in AXES}
+    for attrs, raw in re.findall(r"<ix:nonFraction([^>]*)>([^<]*)<", html):
+        name = re.search(r'name="[^:"]+:([^"]+)"', attrs)
+        cref = re.search(r'contextRef="([^"]+)"', attrs)
+        if not name or not cref or cref.group(1) not in ctx:
+            continue
+        s, e, axis, member = ctx[cref.group(1)]
+        key = next((k for k, a in AXES.items() if a == axis), None)
+        if not key or (s, e) != (start, end) or not re.fullmatch(r"[\d,.]+", raw.strip()):
+            continue
+        sc = re.search(r'scale="(-?\d+)"', attrs)
+        v = float(raw.replace(",", "")) * 10 ** int(sc.group(1) if sc else 0) * (-1 if 'sign="-"' in attrs else 1)
+        field = "revenue" if name.group(1) in REVENUE else "op" if name.group(1) == "OperatingIncomeLoss" else None
+        if field:
+            out[key].setdefault(member, {"member": member, "name": member_name(member)})[field] = v
+    return {k: [r for r in v.values() if r.get("revenue") is not None or r.get("op") is not None] for k, v in out.items()}
+
+
+def finest(rows: list[dict]) -> list[dict]:
+    """겹치는 줄을 뺀다 — 「데이터센터 = 연산 + 네트워킹」「제품 = 아이폰+맥+아이패드+…」처럼 다른 줄들의 합인 줄(위 단계)은 버린다."""
+    vals = [(r, r.get("revenue") or 0) for r in rows]
+    drop = set()
+    for r, v in vals:
+        others = [x for x, xv in vals if x is not r and xv and xv < v]
+        for k in range(2, min(6, len(others)) + 1):
+            if any(abs(sum(x.get("revenue") or 0 for x in c) - v) <= v * 0.005 for c in itertools.combinations(others, k)):
+                drop.add(r["member"])
+                break
+    return [r for r in rows if r["member"] not in drop]
+
+
+def shares(rows: list[dict], total: float) -> list[dict]:
+    """매출 비중 — 코드가 나눈다. 큰 것부터 다섯, 1% 밑은 뺀다."""
+    out = [{"name": r["name"], "share": f"{r['revenue'] / total * 100:.1f}%"} for r in sorted(rows, key=lambda r: -(r.get("revenue") or 0))
+           if r.get("revenue") and r["revenue"] / total >= 0.01]  # fmt: skip
+    return out[:5]
+
+
+def item_text(html: str) -> str:
+    """10-K 본문에서 Item 1(사업) 과 Item 1A(위험) 앞부분 — 목차가 아닌 본문 쪽(그다음 Item 까지 가장 긴 것)."""
+    t = html_text(html)
+
+    def section(start, stop, cap):
+        best = ""
+        for m in re.finditer(start, t, re.I):
+            n = re.search(stop, t[m.end():], re.I)
+            chunk = t[m.end(): m.end() + (n.start() if n else cap)]
+            if len(chunk) > len(best):
+                best = chunk
+        return best[:cap]
+
+    return ("[Item 1. Business]\n" + section(r"item\s*1\.?\s*business", r"item\s*1a\.?\s*risk\s*factors", 24000)
+            + "\n[Item 1A. Risk Factors]\n" + section(r"item\s*1a\.?\s*risk\s*factors", r"item\s*1b\.?|item\s*1c\.?", 12000))  # fmt: skip
+
+
+def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
+    """가장 최근 10-K 를 한 번 읽어 둔다(같은 보고서는 다시 읽지 않는다) — business 표에 국내와 같은 모양으로.
+    what·risks = AI(숫자 없이) · segments(제품 비중)·seg(사업부 영업이익)·geo(지역 비중) = 코드."""
+    row = con.execute("select f.accession, f.doc, s.cik from filings f join stocks s using(ticker) where f.ticker = ? and f.form = '10-K'"
+                      " order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    have = con.execute("select rcept_no from business where ticker = ?", (ticker,)).fetchone()
+    if not row or (have and have[0] == row[0]):
+        return False
+    accn, doc, cik = row
+    fin = con.execute("select fiscal_year, period_start, period_end, revenue from financials where ticker = ? and rcept_no = ?"
+                      " order by fiscal_year desc limit 1", (ticker, accn)).fetchone()  # fmt: skip
+    if not fin or not fin[3]:
+        return False
+    fy, start, end, total = fin
+    html = sec.doc(cik, accn, doc)
+    parts = ixbrl_parts(html, start, end)
+    prev = con.execute("select period_start, period_end from financials where ticker = ? and fiscal_year = ?", (ticker, fy - 1)).fetchone()
+    before = ixbrl_parts(html, *prev) if prev else {k: [] for k in AXES}
+    src = item_text(html)
+    got = llm.ask("reader", "business_us", {"원문": src}, lambda j: notes.check_business(j, src), notes.BUSINESS_SCHEMA, prompt_file="business_us")
+    if not got:
+        return False
+    old = {r["member"]: r for r in before["segment"]}
+    seg_rows = [{"name": r["name"], "revenue": r.get("revenue"), "op": r.get("op"), "op_prev": old.get(r["member"], {}).get("op"),
+                 "revenue_prev": old.get(r["member"], {}).get("revenue")} for r in parts["segment"]]  # fmt: skip
+    body = got | {"segments": shares(finest(parts["product"]) or parts["segment"], total), "geo": shares(finest(parts["geo"]), total),
+                  "seg": {"year": notes.span_label(start, end), "rows": seg_rows} if sum(r["op"] is not None for r in seg_rows) >= 2 else None,
+                  "year": fy, "market": "US"}  # fmt: skip
+    con.execute("insert or replace into business values (?, ?, ?, ?, ?)",
+                (ticker, accn, json.dumps(body, ensure_ascii=False), llm.MODELS["reader"], datetime.now().isoformat()))  # fmt: skip
+    return True
+
+
+# --- 실적 보도자료(EX-99.1)의 회사 전망 — AI 가 옮기고, 숫자·인용은 코드가 원문과 대조한다 ---
+
+OUTLOOK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["period", "items"], "properties": {
+    "period": {"type": "string"}, "items": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+        "required": ["metric", "low", "high", "plus_minus", "plus_minus_unit", "unit", "quote"], "properties": {
+            "metric": {"type": "string", "enum": ["revenue", "gross_margin", "operating_expenses", "eps", "operating_income"]},
+            "low": {"type": "number"}, "high": {"type": "number"}, "plus_minus": {"type": "number"},
+            "plus_minus_unit": {"type": "string", "enum": ["percent", "bp", "same", "none"]},
+            "unit": {"type": "string", "enum": ["billion", "million", "percent", "dollars"]}, "quote": {"type": "string"}}}}}}  # fmt: skip
+METRIC_KO = {"revenue": "매출", "gross_margin": "매출총이익률", "operating_expenses": "영업비용", "eps": "주당순이익", "operating_income": "영업이익"}
+
+
+def num_in(x: float, text: str) -> bool:
+    """숫자가 원문에 그 모양 그대로 있나 — 108.0 은 「108.0」「108」, 2,310 은 「2,310」「2.31」 모두."""
+    forms = {f"{x:g}", f"{x:.1f}", f"{x:.2f}", f"{x:,.0f}", f"{x:,.1f}", f"{x:,.2f}"}
+    return any(re.search(rf"(?<![\d.]){re.escape(f)}(?![\d])", text) for f in forms)
+
+
+def check_outlook(j: dict, source: str) -> dict:
+    """인용이 원문에 글자 그대로 있고, 숫자가 그 인용 안에 있어야 한다. 하나라도 어기면 그 줄만 버린다."""
+    norm = lambda s: re.sub(r"\s+", " ", s).strip()  # noqa: E731
+    src = norm(source)
+    items = []
+    for x in j["items"]:
+        q = norm(x["quote"])
+        if len(q) < 10 or q not in src or not num_in(x["low"], q) or not num_in(x["high"], q) or (x["plus_minus"] and not num_in(x["plus_minus"], q)):
+            continue
+        items.append(x | {"quote": q})
+    return {"period": j["period"], "items": items}
+
+
+def say_outlook(x: dict) -> str:
+    """전망 한 줄 → 「1,080억 달러(±2%)」「74.0%(±0.5%p)」「16.0~18.0%」 — 코드가 단위를 바꾼다."""
+    mult = {"billion": 1e9, "million": 1e6}.get(x["unit"])
+
+    def one(v):
+        if mult:
+            return notes.usd(v * mult)
+        if x["unit"] == "dollars":
+            return f"{v:,.2f}달러"
+        s = f"{v:.2f}"  # 원문 자릿수 그대로 — 85.95 → 「85.95%」, 74.0 → 「74.0%」 (반올림해 바꾸지 않는다)
+        return f"{v:.1f}%" if s.endswith("0") else f"{s}%"
+
+    if x["low"] == x["high"]:
+        val = one(x["low"])
+    else:  # 범위 — 단위는 끝에 한 번 (「16.0~18.0%」)
+        val = f"{x['low']:.1f}~{x['high']:.1f}%" if x["unit"] == "percent" else f"{one(x['low'])}~{one(x['high'])}"
+    pm, u = x["plus_minus"], x["plus_minus_unit"]
+    if pm and u != "none":
+        val += f"(±{pm:g}%)" if u == "percent" else f"(±{pm / 100:g}%p)" if u == "bp" else f"(±{one(pm)})"
+    return val
+
+
+def exhibit(sec: "Edgar", cik: int, accn: str) -> str:
+    """8-K 첨부 EX-99.1(보도자료) 글자 — 없으면 빈 글."""
+    idx = sec._get(f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/{accn}-index.htm").text
+    ex = re.search(r'<a href="([^"]+)"[^>]*>[^<]+</a></td>\s*<td[^>]*>EX-99\.1', idx)
+    return html_text(sec._get("https://www.sec.gov" + ex.group(1)).text) if ex else ""
+
+
+def read_outlook(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
+    """가장 최근 실적 발표(8-K 2.02)의 첨부 보도자료에서 Outlook 부분만. 같은 발표는 다시 읽지 않는다. 전망이 없는 회사(애플·테슬라)는 빈 칸으로 적어 둔다."""
+    row = con.execute("select f.accession, f.date, s.cik from filings f join stocks s using(ticker) where f.ticker = ? and f.form = '8-K'"
+                      " and f.items like '%2.02%' order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    have = con.execute("select accession from outlooks where ticker = ?", (ticker,)).fetchone()
+    if not row or (have and have[0] == row[0]):
+        return False
+    accn, day, cik = row
+    text = exhibit(sec, cik, accn)
+    m = re.search(r"\b(Outlook|Guidance|Business Outlook)\b", text)
+    part = text[m.start(): m.start() + 2500] if m else ""
+    got = {"period": "", "items": []}
+    if part and re.search(r"expect|guidance|outlook", part, re.I) and re.search(r"\d", part):
+        got = llm.ask("reader", "outlook_us", {"원문": part}, lambda j: check_outlook(j, part), OUTLOOK_SCHEMA, prompt_file="outlook_us") or got
+    con.execute("insert or replace into outlooks values (?, ?, ?, ?)", (ticker, accn, day, json.dumps(got, ensure_ascii=False)))
+    return True
+
+
+def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None" = None) -> None:
+    """AI 읽기 — 새 10-K 와 새 실적 발표만. 매일 실행에서 받기 다음에."""
+    con, sec = con or db.connect(), sec or Edgar()
+    n10, nout = 0, 0
+    for ticker, _ in universe():
+        if not con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
+            continue
+        try:  # 한 회사가 실패해도 나머지는 읽는다 — 내일 다시
+            n10 += read_10k(con, sec, ticker)
+            nout += read_outlook(con, sec, ticker)
+        except (httpx.HTTPError, ValueError, KeyError) as err:
+            print(f"  {ticker} 읽기 실패 {type(err).__name__} — 내일 다시", file=sys.stderr)
+        con.commit()
+    print(f"미국 읽기 — 10-K {n10}곳 · 실적 전망 {nout}곳 · SEC {sec.calls}콜 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 # --- 저장 ---
@@ -371,7 +610,9 @@ def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: 
     for r in rows:
         if r["form"] != "8-K" or r["accession"] in have or r["date"] < (today - timedelta(days=90)).isoformat():
             continue
-        text = html_text(sec.doc(cik, r["accession"], r["doc"]))[:20000] if needs_text(r["items"]) else ""
+        text = ""
+        if needs_text(r["items"]):  # 2.02 는 첨부 보도자료가 본문이다(8-K 본문은 「첨부한다」 한 줄)
+            text = (exhibit(sec, cik, r["accession"]) if "2.02" in r["items"] else html_text(sec.doc(cik, r["accession"], r["doc"])))[:20000]
         code, imp, dr, title = classify_8k(r["items"], text)
         con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction) values (?, ?, ?, ?, ?, ?, ?)",
                     (r["accession"], ticker, r["date"], title, code, imp, dr))  # fmt: skip
@@ -406,38 +647,43 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
     tk = sec.tickers()
     got = {"회사": 0, "연간": 0, "분기": 0, "흐름": 0, "공시": 0, "임원": 0}
     for ticker, name in universe():
-        if ticker not in tk:
-            print(f"  {ticker} {name}: SEC 티커 표에 없음 — universe_us.txt 를 고친다", file=sys.stderr)
-            continue
-        cik, _ = tk[ticker]
-        sub = sec.submissions(cik)
-        if "10-K" not in sub["filings"]["recent"]["form"] and "10-Q" not in sub["filings"]["recent"]["form"]:
-            print(f"  {ticker} {name}: 10-K 를 내지 않는 회사(20-F) — 뺀다", file=sys.stderr)
-            continue
-        save_company(con, ticker, name, cik, sub)
-        f, q, fl = save_facts(con, ticker, sec.facts(cik), sub.get("fiscalYearEnd") or "1231")
-        rows = filing_rows(sub, today - timedelta(days=DAYS))
-        con.executemany("insert or replace into filings values (?, ?, ?, ?, ?, ?, ?, ?)",
-                        [(r["accession"], ticker, r["form"], r["date"], r["at"], r["items"], r["doc"], r["filed_us"]) for r in rows])  # fmt: skip
-        have = {a for (a,) in con.execute("select rcept_no from insiders where ticker = ?", (ticker,))}
-        ins = 0
-        for accn, doc, filed in form4_list(sub, today - timedelta(days=90)):
-            if accn in have:
+        try:  # 한 회사가 실패해도(SEC 시간 초과 등) 나머지는 받는다 — 내일 다시
+            if ticker not in tk:
+                print(f"  {ticker} {name}: SEC 티커 표에 없음 — universe_us.txt 를 고친다", file=sys.stderr)
                 continue
-            x = parse_form4(sec.form4(cik, accn, doc))
-            if x:
-                con.execute("insert or replace into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg, planned, price) values (?, ?, ?, ?, ?, ?, null, null, ?, ?)",
-                            (accn, ticker, x["day"] or filed, "임원", x["who"], x["bought"] - x["sold"], int(x["planned"]), x["price"]))  # fmt: skip
-                ins += 1
-        got["8-K"] = got.get("8-K", 0) + save_8k(con, sec, ticker, cik, rows, today)
-        got["5%"] = got.get("5%", 0) + save_13dg(con, sec, ticker, cik, rows)
-        con.commit()
-        got["회사"] += 1
-        for k, v in zip(("연간", "분기", "흐름", "공시", "임원"), (f, q, fl, len(rows), ins)):
-            got[k] += v
+            cik, _ = tk[ticker]
+            sub = sec.submissions(cik)
+            if "10-K" not in sub["filings"]["recent"]["form"] and "10-Q" not in sub["filings"]["recent"]["form"]:
+                print(f"  {ticker} {name}: 10-K 를 내지 않는 회사(20-F) — 뺀다", file=sys.stderr)
+                continue
+            save_company(con, ticker, name, cik, sub)
+            f, q, fl = save_facts(con, ticker, sec.facts(cik), sub.get("fiscalYearEnd") or "1231")
+            rows = filing_rows(sub, today - timedelta(days=DAYS))
+            con.executemany("insert or replace into filings values (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [(r["accession"], ticker, r["form"], r["date"], r["at"], r["items"], r["doc"], r["filed_us"]) for r in rows])  # fmt: skip
+            have = {a for (a,) in con.execute("select rcept_no from insiders where ticker = ?", (ticker,))}
+            ins = 0
+            for accn, doc, filed in form4_list(sub, today - timedelta(days=90)):
+                if accn in have:
+                    continue
+                x = parse_form4(sec.form4(cik, accn, doc))
+                if x:
+                    con.execute("insert or replace into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg, planned, price) values (?, ?, ?, ?, ?, ?, null, null, ?, ?)",
+                                (accn, ticker, x["day"] or filed, "임원", x["who"], x["bought"] - x["sold"], int(x["planned"]), x["price"]))  # fmt: skip
+                    ins += 1
+            got["8-K"] = got.get("8-K", 0) + save_8k(con, sec, ticker, cik, rows, today)
+            got["5%"] = got.get("5%", 0) + save_13dg(con, sec, ticker, cik, rows)
+            con.commit()
+            got["회사"] += 1
+            for k, v in zip(("연간", "분기", "흐름", "공시", "임원"), (f, q, fl, len(rows), ins)):
+                got[k] += v
+        except (httpx.HTTPError, ValueError, KeyError) as err:
+            con.rollback()
+            print(f"  {ticker} 받기 실패 {type(err).__name__} — 내일 다시", file=sys.stderr)
     print(f"미국 {got} · SEC {sec.calls}콜")
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     main(date.today())
+    read(date.today())

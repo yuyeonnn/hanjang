@@ -87,6 +87,12 @@ class FakeSec:
             return f"<issuerCik>{issuer:010d}</issuerCik><reportingPersonName>Vanguard Group Inc</reportingPersonName><classPercent>8.9</classPercent><eventDateRequiresFilingThisStatement>09/30/2026</eventDateRequiresFilingThisStatement><typeOfReportingPerson>IA</typeOfReportingPerson>"
         return "<p>Item 8.01 Other Events. The Board approved a new $50 billion share repurchase program.</p>"
 
+    def _get(self, url):  # 8-K 첨부(보도자료)
+        class R:
+            text = ('<a href="/ex.htm">ex.htm</a></td><td>EX-99.1</td>' if url.endswith("-index.htm")
+                    else "<p>Revenue was $46.7 billion. Net income was $26.4 billion.</p>")
+        return R()
+
     def form4(self, cik, accn, doc):
         return "<ownershipDocument><officerTitle>CEO</officerTitle><nonDerivativeTransaction><transactionCode>P</transactionCode><transactionShares><value>10</value></transactionShares></nonDerivativeTransaction></ownershipDocument>"
 
@@ -129,7 +135,9 @@ def test_8k_items_map_to_our_kinds_without_ai():
     assert us.classify_8k("2.02,9.01") == ("EARNINGS", 2, 0, "실적 발표 (8-K 2.02)")
     assert us.classify_8k("4.02,2.02") [0:3] == ("RESTATEMENT", 3, -1)  # 무거운 번호가 이긴다
     assert us.classify_8k("1.01,2.03,9.01")[0] == "MAJOR_CONTRACT" and us.classify_8k("3.01")[2] == -1
-    assert not us.needs_text("2.02,7.01,9.01") and us.needs_text("7.01,8.01,9.01") and us.needs_text("5.02")
+    assert us.needs_text("2.02,7.01,9.01") and not us.needs_text("1.01,2.03") and us.needs_text("7.01,8.01,9.01") and us.needs_text("5.02")
+    assert us.classify_8k("2.02,9.01", "announced vehicle production and deliveries for the third quarter")[3] == "판매·인도 대수 알림 (8-K 2.02)"  # 테슬라
+    assert us.member_name("nvda:ProfessionalVisualizationMember") == "전문가용 그래픽" and us.member_name("x:CloudPlatformSegmentMember") == "Cloud Platform"
     assert us.classify_8k("8.01,9.01", "declared a quarterly dividend of $0.26 per share")[:2] == ("DIVIDEND", 2)
     assert us.classify_8k("7.01", "new share repurchase program")[:3] == ("BUYBACK", 3, 1)
     assert us.classify_8k("5.02", "appointed Chief Financial Officer")[0] == "EXEC" and us.classify_8k("5.02", "director resigned")[1] == 1
@@ -159,3 +167,19 @@ def test_us_disclosures_and_insiders_become_note_facts(monkeypatch):
     d = next(f for f in fs.values() if f["id"].startswith("D") and f["slots"]["종류"] == "실적")
     assert "지난 분기 실적을 발표했어요" in d["slots"]["무슨일"] and "sec.gov" in d["url"]
     assert "시장에서 산 보고" in fs["I1"]["text"] and "Vanguard" in fs["I2"]["text"]
+
+
+def test_outlook_quotes_must_be_in_the_release_and_are_said_in_korean():
+    src = ("NVIDIA's outlook for the third quarter of fiscal 2027 is as follows: Revenue is expected to be $108.0 billion, plus or minus 2%. "
+           "GAAP and non-GAAP gross margins are expected to be 74.0%, plus or minus 50 basis points.")
+    j = {"period": "third quarter of fiscal 2027", "items": [
+        {"metric": "revenue", "low": 108.0, "high": 108.0, "plus_minus": 2, "plus_minus_unit": "percent", "unit": "billion", "quote": "Revenue is expected to be $108.0 billion, plus or minus 2%."},
+        {"metric": "gross_margin", "low": 74.0, "high": 74.0, "plus_minus": 50, "plus_minus_unit": "bp", "unit": "percent", "quote": "GAAP and non-GAAP gross margins are expected to be 74.0%, plus or minus 50 basis points."},
+        {"metric": "eps", "low": 9.9, "high": 9.9, "plus_minus": 0, "plus_minus_unit": "none", "unit": "dollars", "quote": "EPS is expected to be $9.90."}]}  # 원문에 없는 인용
+    got = us.check_outlook(j, src)
+    assert [x["metric"] for x in got["items"]] == ["revenue", "gross_margin"]
+    assert [us.say_outlook(x) for x in got["items"]] == ["1,080억 달러(±2%)", "74.0%(±0.5%p)"]
+    assert us.say_outlook({"low": 61.5, "high": 61.5, "plus_minus": 1.5, "plus_minus_unit": "same", "unit": "billion"}) == "615억 달러(±15억 달러)"
+    assert us.say_outlook({"low": 16.0, "high": 18.0, "plus_minus": 0, "plus_minus_unit": "none", "unit": "percent"}) == "16.0~18.0%"
+    assert us.say_outlook({"low": 85.95, "high": 85.95, "plus_minus": 0, "plus_minus_unit": "none", "unit": "percent"}) == "85.95%"  # 반올림하지 않는다
+    assert us.say_outlook({"low": 2.31, "high": 2.31, "plus_minus": 0, "plus_minus_unit": "none", "unit": "billion"}) == "23.1억 달러"

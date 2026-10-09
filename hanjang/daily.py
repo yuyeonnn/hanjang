@@ -41,6 +41,7 @@ def main(today: date) -> None:
     print(f"백업 {backup.backup(today)}")  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
     collect.main(today)
     us.main(today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
+    us.read(today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
     notes.main([], today, only_changed=not monday)
     etf.main(today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
     articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
