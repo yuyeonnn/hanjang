@@ -176,6 +176,15 @@ def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, 
             "</span></a></article>")  # fmt: skip
 
 
+def mini(href: str, mark: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
+    """리그램 카드 — 큰 사진 없이 내 종목 카드처럼: 로고(또는 아이콘) · 이름 · 한 줄 요약 · 두 줄 설명 (사용자 10/9: 사진이 너무 커요)."""
+    return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex flex-col gap-1.5 group">'
+            f'<span class="flex items-center gap-2">{mark}<b class="text-[15px] font-semibold text-on-surface">{e(source)}</b>'
+            f'<span class="text-[12px] text-outline">{e(day)}</span></span>'
+            f'<span class="text-[16px] leading-[24px] font-medium text-on-surface group-hover:underline">{e(title)}</span>'
+            f'<span class="text-[13px] leading-[20px] text-on-surface-variant line-clamp-2">{e(excerpt)}</span></a></article>')  # fmt: skip
+
+
 def gist(body: dict) -> str:
     """요약 한 줄 — 한 장 요약의 첫 문장, 없으면 첫 절의 첫 문장."""
     first = body.get("summary") or next((s["sentences"] for s in body.get("sections", []) if s["sentences"]), [])
@@ -1711,26 +1720,27 @@ class App:
         cards = []
         for who, nick, kind, ref, week, comment, at, pat in rows:
             if kind == "note":
-                hit = self.con.execute("select s.name, n.body, s.induty_code from stocks s join notes n on n.ticker = s.ticker and n.week = ?"
+                hit = self.con.execute("select s.name, n.body, s.homepage from stocks s join notes n on n.ticker = s.ticker and n.week = ?"
                                        " where s.ticker = ?", (week, ref)).fetchone()  # fmt: skip
                 if not hit:
                     continue
                 b = json.loads(hit[1])
-                head, sub, href, src, img = b["headline"], gist(b), f"/n/{ref}", hit[0], photos.pick(None, hit[2], hit[0])
+                head, sub, href, src, mark = notes.mend(b["headline"]), notes.mend(gist(b)), f"/n/{ref}", hit[0], logo(hit[0], hit[2], "w-7 h-7")
             else:
                 a = learn.BY_SLUG.get(ref)
                 if not a:
                     continue
-                head, sub, href, src, img = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁", "/static/photos/securities.jpg"
+                head, sub, href, src = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁"
+                mark = '<span class="w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center"><span class="material-symbols-outlined text-[16px]">menu_book</span></span>'
             d = at[:10].replace("-", ".")
             top = "" if mine else (f'<a href="/u/{who}" class="flex items-center gap-2">{self.face(nick, "w-6 h-6", photo_url(who, pat))}'
                                    f'<span class="font-label-regular text-label-regular text-on-surface-variant"><b class="text-on-surface font-semibold">{e(nick)}</b>님이 리그램</span></a>')  # fmt: skip
-            cards.append(story(href, img, head, sub, src, d, top))
+            cards.append(mini(href, mark, head, sub, src, d, top))
         if not cards:
             return ""
         body = "".join(cards)
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-                f'<div class="flex flex-col">{body}</div></section>')  # fmt: skip
+                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{body}</div></section>')  # fmt: skip
 
     def people(self, uid: int, q: str) -> str:
         if not q:
