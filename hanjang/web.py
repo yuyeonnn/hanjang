@@ -536,8 +536,8 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
     """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
-    조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
+    겹치면 위아래로 비킨다. 조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -561,28 +561,35 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     def column(right: bool) -> str:
         # 휴대폰·태블릿은 이름 밑에 %(같은 크기), 컴퓨터 화면이면 한 줄 — 긴 이름은 칸 안에서 말줄임
         rows = "".join(
-            f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
+            f'<li class="absolute inset-x-0 flex items-start gap-1.5 {"" if right else "flex-row-reverse"}" style="top:calc({50 + 48 * math.sin(m):.1f}% - 10px)">'
             f'<span data-ang="{m:.4f}" class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
             f'<span class="min-w-0 flex flex-col lg:flex-row lg:gap-1.5 {"items-start" if right else "items-end"}">'
             f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
             f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
             for _, k, pct, col, m in sorted(sides[right]))  # fmt: skip
-        return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
+        return f'<ul class="relative flex-1 min-w-0 self-stretch">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div data-pie class="relative mt-4 flex items-center gap-6 lg:gap-10">' + column(False)
+            '<div data-pie class="relative mt-2 py-6 flex items-center gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 
 
-# 파이 조각 → 이름 옆 색 네모까지 곧은 선 하나 (조각 가장자리에서 네모 앞까지, 꺾지 않고 점도 없이 — 사용자 10/10)
-PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
-var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
-var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
-box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
-var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,tx=right?q.left-o.left-4:q.right-o.left+4;
-out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>';});
-lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
+# 파이 이름 놓기 · 선 긋기. 이름(색 네모 가운데)을 조각 가장자리 높이에 두고, 겹치면 아래로 밀고, 넘치면 위로 당긴다(원 위아래 24px 여유).
+# 한쪽에 이름이 많아 원보다 높아지면 상자를 키운다(원은 가운데 그대로). 선은 조각 가장자리 → 색 네모 앞 — 거의 수평
+PIE_LINES = """<script>(function(){if(window.pieLines)return;
+function place(box){var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
+var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,H=o.height,need=0,out='';
+[true,false].forEach(function(right){var it=[].slice.call(box.querySelectorAll('[data-ang]')).filter(function(d){return (Math.cos(+d.dataset.ang)>=0)==right})
+.map(function(d){var li=d.closest('li'),a=+d.dataset.ang,off=d.offsetTop+d.offsetHeight/2,uo=li.parentNode.getBoundingClientRect().top-o.top;return {d:d,li:li,a:a,off:off,uo:uo,h:li.offsetHeight,t:cy+r*Math.sin(a)-off-uo}}).sort(function(x,y){return x.t-y.t});
+for(var i=1;i<it.length;i++)it[i].t=Math.max(it[i].t,it[i-1].t+it[i-1].h+6);
+var n=it.length;if(n){var uo=it[0].uo,over=it[n-1].t+it[n-1].h-(H-uo);if(over>0)it.forEach(function(x){x.t-=over});var under=-uo-it[0].t;if(under>0)it.forEach(function(x){x.t+=under});
+need=Math.max(need,it[n-1].t+it[n-1].h-it[0].t)}
+it.forEach(function(x){x.li.style.top=x.t+'px';var px=cx+r*Math.cos(x.a),py=cy+r*Math.sin(x.a),y=x.uo+x.t+x.off,q=x.d.getBoundingClientRect(),tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>'})});
+lay.innerHTML=out;return need>H+1?need:0}
+window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){box.style.minHeight='';var need=place(box);if(need){box.style.minHeight=need+'px';place(box)}})};
+addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
