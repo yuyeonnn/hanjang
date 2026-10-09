@@ -741,4 +741,5 @@ def test_learn_story_box():
         assert not any(notes.FORBIDDEN.search(x.replace("**", "")) for x in paras), slug
     app, con = _app()
     ck = _login(app)
-    assert "이야기로 보면" in call(app, "/learn/stock-bond", cookie=ck)[2]
+    body = call(app, "/learn/stock-bond", cookie=ck)[2]
+    assert "이야기로 보면" not in body and "실리콘밸리은행" in body  # 소제목 없이 본문으로 이어진다
