@@ -512,7 +512,7 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
     """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
     오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
-    조각에서 이름 옆 색 네모까지 꺾은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
+    조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -550,13 +550,13 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 
 
-# 파이 조각 → 이름 옆 색 네모까지 꺾은 선. 조각 가장자리 점에서 원 바깥으로 조금 나와 꺾고, 네모 앞까지 가로로
+# 파이 조각 → 이름 옆 색 네모까지 곧은 선 하나 (조각 가장자리에서 네모 앞까지, 꺾지 않고 점도 없이 — 사용자 10/10)
 PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
 var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
 var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
 box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
-var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,ex=cx+(r+10)*(right?1:-1),tx=right?q.left-o.left-4:q.right-o.left+4;
-out+='<polyline points="'+px+','+py+' '+ex+','+y+' '+tx+','+y+'" fill="none" stroke="#c0c8c4" stroke-width="1"/><circle cx="'+px+'" cy="'+py+'" r="2.2" fill="'+d.style.background+'" stroke="#fcf8fb"/>';});
+var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>';});
 lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
