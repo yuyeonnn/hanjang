@@ -850,6 +850,7 @@ def test_notices_this_week():
     body = call(app, "/me/notices", cookie=me)[2]
     assert "너닉</b>님이 리그램했어요" in body and "내 종목 <b>삼성전자</b> 새 소식" in body and "큰 계약을 맺었어요" in body
     assert app.initial(1).unread == 0  # 열면 사라진다
+    assert "나닉" in app.suggest(2)  # 활동이 없어도 추천은 비우지 않는다 — 사람이 적은 처음 (사용자 10/10)
     con.execute("insert into users (id, email, created_at) values (3, 'c@b.c', '2026-10-01')")
     con.execute("insert into holdings values (2, '005930', ?)", (now,))
     assert "많이 담은 종목" not in app.this_week()  # 두 사람뿐이면 서로의 종목이 짐작돼서 드러내지 않는다

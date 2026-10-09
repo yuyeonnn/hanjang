@@ -2432,6 +2432,7 @@ class App:
 
     def suggest(self, uid: int) -> str:
         """추천 프로필 — 최근 2주에 활발한 사람(리그램 ×2 + 좋아요 + 팔로워) 순, 이미 팔로우했거나 요청한 사람은 빼고 (사용자 10/10).
+        활발한 사람이 없어도 비우지 않는다 — 사람이 적은 처음엔 누구라도 보여야 팔로우가 시작된다.
         담은 종목으로는 고르지 않는다 — 공개하지 않은 보유 종목이 드러나므로."""
         since = (datetime.now() - timedelta(days=14)).isoformat()
         rows = self.con.execute(
@@ -2441,7 +2442,7 @@ class App:
             " (select count(*) from follows f where f.followee_id = u.id and f.ok = 1) fer"
             " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)",
             (since, since, uid, uid)).fetchall()  # fmt: skip
-        rows = sorted((r for r in rows if r[3] + r[4] + r[5]), key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
+        rows = sorted(rows, key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
         if not rows:
             return ""
 
