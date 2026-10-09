@@ -13,12 +13,19 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
 from hanjang import db, holders, learn, llm, mail, notes, policy, sources
+
+
+def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
+    from hanjang import collect
+
+    return collect.first(ticker)
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
@@ -254,7 +261,7 @@ def money_blocks(fin: tuple | None) -> str:
             a, b = eq / (eq + li) * 100, li / (eq + li) * 100
             out.append(f'<div class="mt-space-sm font-label-regular text-label-regular text-on-surface font-semibold">빚과 내 돈 — 부채비율 {ratio:,.0f}%</div>'
                        '<div class="mt-1 h-3 w-full rounded-full overflow-hidden flex">'
-                       f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full bg-tertiary-fixed" style="width:{b:.1f}%"></span></div>'
+                       f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full" style="width:{b:.1f}%;background:#F4806A"></span></div>'
                        f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
                        f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. 업종마다 보통 수준이 달라요.</p>')  # fmt: skip
     if not out:
@@ -800,6 +807,7 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
+        self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
@@ -1057,8 +1065,25 @@ class App:
                 return added, unknown, True
             self.con.execute("insert or ignore into holdings values (?, ?, ?)", (uid, t, datetime.now().isoformat()))
             added.append(self.con.execute("select name from stocks where ticker = ?", (t,)).fetchone()[0])
+            if not self.con.execute("select 1 from notes where ticker = ?", (t,)).fetchone():
+                self.start_first(t)
         self.con.commit()
         return added, unknown, False
+
+    def start_first(self, ticker: str) -> None:
+        """노트가 없는 종목을 담으면 그 종목만 바로 받아 첫 노트를 쓴다 — 따로 띄운 실에서 (화면은 기다리지 않는다).
+        같은 종목을 여러 사람이 동시에 담아도 한 번만."""
+        if ticker in self.making:
+            return
+        self.making.add(ticker)
+
+        def run():
+            try:
+                FIRST(ticker)
+            finally:
+                self.making.discard(ticker)
+
+        threading.Thread(target=run, daemon=True).start()
 
     @staticmethod
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
@@ -1114,7 +1139,8 @@ class App:
         out = []
         for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or "새로 담은 종목이에요 — 내일 아침 7시에 첫 노트가 나와요."
+            head = b.get("headline") or ("첫 노트를 만들고 있어요 — 1~2분 뒤 새로고침해 보세요." if t in self.making else
+                                          "새로 담은 종목이에요 — 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
@@ -1151,7 +1177,7 @@ class App:
                  "function esc(s){return s.replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
                  "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const hit=STOCKS.filter(s=>s.n.includes(q)||s.t.startsWith(q)).slice(0,6);"
                  "res.innerHTML=hit.map((s,i)=>"
-                 "'<form method=\"post\" action=\"/add\" class=\"group flex items-center justify-between p-2.5 rounded-lg cursor-pointer hover:bg-surface-container transition-colors\"><input type=\"hidden\" name=\"q\" value=\"'+s.t+'\"><div class=\"flex items-center gap-2 min-w-0\"><span class=\"w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-body-reading-strong text-[12px]\">'+esc(s.n[0])+'</span><div class=\"flex flex-col min-w-0\"><div class=\"flex items-center gap-1.5\"><span class=\"font-headline-sm text-headline-sm text-on-surface\">'+esc(s.n)+'</span><span class=\"font-citation-ref text-citation-ref text-outline\">'+(s.t.startsWith('ETF')?'':s.t)+'</span></div><span class=\"font-label-micro text-label-micro text-on-surface-variant truncate\">'+esc(s.l)+'</span></div></div>'"
+                 "'<form method=\"post\" action=\"/add\" onclick=\"if(event.target!==this.lastChild)this.requestSubmit()\" class=\"group flex items-center justify-between p-2.5 rounded-lg cursor-pointer hover:bg-surface-container transition-colors\"><input type=\"hidden\" name=\"q\" value=\"'+s.t+'\"><div class=\"flex items-center gap-2 min-w-0\"><span class=\"w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-body-reading-strong text-[12px]\">'+esc(s.n[0])+'</span><div class=\"flex flex-col min-w-0\"><div class=\"flex items-center gap-1.5\"><span class=\"font-headline-sm text-headline-sm text-on-surface\">'+esc(s.n)+'</span><span class=\"font-citation-ref text-citation-ref text-outline\">'+(s.t.startsWith('ETF')?'':s.t)+'</span></div><span class=\"font-label-micro text-label-micro text-on-surface-variant truncate\">'+esc(s.l)+'</span></div></div>'"
                  "+'<button class=\"px-2.5 py-1 bg-primary-container text-on-primary font-label-micro text-label-micro rounded-lg shadow-sm hover:opacity-90 active:scale-95 transition-all\" type=\"submit\">+ 담기</button>'+'</form>').join('');"
                  "fly.classList.toggle('hidden',hit.length===0);}"
                  "inp.addEventListener('input',draw);inp.addEventListener('focus',draw);"
