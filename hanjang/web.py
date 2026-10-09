@@ -627,31 +627,31 @@ def index_chart(got: dict) -> str:
     def xy(d, v):
         return f"{P + (ds.index(d) / (len(ds) - 1)) * (W - P - 4):.1f},{H - 18 - (math.log(v) - lo) / (hi - lo) * (H - 30):.1f}"
 
-    color = {"한국": "text-primary", "미국": "text-secondary"}
-    polys = "".join(f'<polyline class="{color.get(n, "text-outline")}" fill="none" stroke="currentColor" stroke-width="1.6"{' stroke-dasharray="3 2"' if n != "한국" else ""} points="{" ".join(xy(d, v) for d, v in pts)}"/>'
+    # 실선 + 색으로만 구분 — 점선은 끊겨 보이고, 화면 폭에 따라 굵기가 변하지 않게 non-scaling-stroke (사용자 10/9)
+    color = {"한국": "#154539", "미국": "#b4532a"}
+    polys = "".join(f'<polyline stroke="{color.get(n, "#717975")}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="{" ".join(xy(d, v) for d, v in pts)}"/>'
                     for n, pts in lines.items())  # fmt: skip
     years = sorted({d[:4] for d in ds if d[:4].endswith(("0", "5")) and d[5:7] == "01"})
     ticks = "".join(f'<text x="{xy(f"{y}-01-01", math.exp(lo)).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{y}</text>'
                     for y in years if f"{y}-01-01" in ds and int(y) % 10 == 0)  # fmt: skip
-    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {color.get(n, "")} border-t-2 {"border-dashed" if n != "한국" else ""} border-current"></span>{e(n)}</span>' for n in lines)
-    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">주가지수 흐름 (로그 눈금)</figcaption>'
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 h-[2px] rounded-full" style="background:{color.get(n, "#717975")}"></span>{e(n)}</span>' for n in lines)
+    return ('<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">주가지수 흐름 (로그 눈금)</figcaption>'
             f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="한국과 미국 주가지수 흐름">{polys}{ticks}</svg>'
             f'<div class="flex gap-3 font-label-micro text-label-micro text-on-surface-variant">{legend}</div></figure>')  # fmt: skip
 
 
-RATE_LOOK = {"기준금리": ("text-outline", "4 3"), "국고채 3년": ("text-primary", ""), "국고채 10년": ("text-primary", "2 2"),
-             "회사채 AA-": ("text-secondary", ""), "회사채 BBB-": ("text-tertiary", "")}  # fmt: skip
-RATE_BAR = {"text-outline": "bg-outline", "text-primary": "bg-primary", "text-secondary": "bg-secondary", "text-tertiary": "bg-tertiary"}
+# 금리 다섯 가지의 색 — 모두 실선, 색으로만 구분 (점선은 끊겨 보인다, 사용자 10/9)
+RATE_LOOK = {"기준금리": "#9aa19d", "국고채 3년": "#154539", "국고채 10년": "#5f9e88", "회사채 AA-": "#c8902e", "회사채 BBB-": "#a33a24"}
 
 
 def rate_ladder(now: dict, month: str) -> str:
     """그달 금리 사다리 — 낮은 것부터 막대. 신용·기간에 따라 이자가 어떻게 달라지는지 한눈에."""
     top = max(now.values())
     rows = "".join(f'<div class="flex items-center gap-2 py-1"><span class="w-20 font-label-regular text-label-regular text-on-surface">{e(n)}</span>'
-                   f'<div class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><div class="{RATE_BAR[RATE_LOOK[n][0]]} h-full rounded-full" style="width:{v / top * 100:.0f}%"></div></div>'
+                   f'<div class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><div class="h-full rounded-full" style="width:{v / top * 100:.0f}%;background:{RATE_LOOK[n]}"></div></div>'
                    f'<span class="w-12 text-right font-label-regular text-label-regular text-on-surface font-semibold">{v:.2f}%</span></div>'
                    for n, v in sorted(now.items(), key=lambda x: x[1]))  # fmt: skip
-    return (f'<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">{int(month[:4])}년 {int(month[5:7])}월 금리 (연, 월평균)</figcaption>'
+    return (f'<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">{int(month[:4])}년 {int(month[5:7])}월 금리 (연, 월평균)</figcaption>'
             f'{rows}<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
 
 
@@ -665,15 +665,13 @@ def rate_chart(got: dict) -> str:
     def xy(d, v):
         return f"{P + pos[d] / (len(ds) - 1) * (W - P - 4):.1f},{H - 18 - v / hi * (H - 30):.1f}"
 
-    polys = "".join(f'<polyline class="{RATE_LOOK[n][0]}" fill="none" stroke="currentColor" stroke-width="1.4"'
-                    + (f' stroke-dasharray="{RATE_LOOK[n][1]}"' if RATE_LOOK[n][1] else "") + f' points="{" ".join(xy(d, v) for d, v in pts)}"/>'
-                    for n, pts in got.items())  # fmt: skip
+    polys = "".join(f'<polyline stroke="{RATE_LOOK[n]}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="{" ".join(xy(d, v) for d, v in pts)}"/>' for n, pts in got.items())
     grid = "".join(f'<text x="2" y="{H - 18 - y / hi * (H - 30) + 3:.1f}" font-size="9" fill="currentColor" class="text-outline">{y}%</text>'
                    for y in range(0, int(hi) + 1, 5))  # fmt: skip
     ticks = "".join(f'<text x="{xy(d, 0).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{d[:4]}</text>'
                     for d in ds if d[5:7] == "01" and int(d[:4]) % 5 == 0)  # fmt: skip
-    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {RATE_LOOK[n][0]} border-t-2 {"border-dashed" if RATE_LOOK[n][1] else ""} border-current"></span>{e(n)}</span>' for n in got)
-    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">금리 흐름 (연 %, 월평균)</figcaption>'
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 h-[2px] rounded-full" style="background:{RATE_LOOK[n]}"></span>{e(n)}</span>' for n in got)
+    return ('<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">금리 흐름 (연 %, 월평균)</figcaption>'
             f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="기준금리·국고채·회사채 금리 흐름">{grid}{polys}{ticks}</svg>'
             f'<div class="flex flex-wrap gap-x-3 gap-y-1 font-label-micro text-label-micro text-on-surface-variant">{legend}</div>'
             '<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
@@ -730,7 +728,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 text-[12px] text-outline">{e(" · ".join(x for x in (industry_label(industry), md(made), f"읽음 {stats[0]:,}") if x))}</p></header>',
         price_chart(prices) if prices else "",
-        f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(notes.mend(body["headline"]))}"</p></aside>',
+        f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p></aside>',
     ]  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
@@ -1905,7 +1903,7 @@ class App:
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">{self.marked(a["lead"])}</p></aside>'
+                     f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p></aside>'
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
