@@ -23,6 +23,9 @@ from hanjang import db, holders, learn, llm, mail, notes, policy, sources
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
+    if not ticker[:1].isdigit() and not ticker.startswith("ETF"):  # 미국 티커(영문) — SEC 에서
+        from hanjang import us
+        return us.first(ticker)
     from hanjang import collect
 
     return collect.first(ticker)
@@ -244,7 +247,8 @@ def business_block(biz: dict | None, rno: str | None) -> str:
         f'<div class="flex items-center gap-2 py-1"><span class="w-[44%] text-[12px] leading-4 text-on-surface-variant">{e(s["name"])}</span>'
         f'<span class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><span class="block h-full bg-primary rounded-full" style="width:{min(float(s["share"][:-1]), 100):.1f}%"></span></span>'
         f'<span class="w-12 text-right text-[12px] font-semibold text-on-surface tabular-nums">{e(s["share"])}</span></div>' for s in biz.get("segments", []))  # fmt: skip
-    link = f'<a class="text-outline underline" href="{DART_VIEW.format(rno)}" target="_blank" rel="noopener">사업보고서 원문</a>' if rno else ""
+    url = rno if (rno or "").startswith("http") else DART_VIEW.format(rno)  # 미국은 report() 가 SEC 주소를 넘긴다
+    link = f'<a class="text-outline underline" href="{url}" target="_blank" rel="noopener">{"연차 보고서(10-K) 원문" if url.startswith("https://www.sec.gov") else "사업보고서 원문"}</a>' if rno else ""
     return chapter("무엇으로 돈을 버나요?", " ".join(e(x) for x in biz["what"]),
                    (f'<div class="mt-space-xs"><div class="font-label-micro text-label-micro text-outline mb-1">부문별 매출 비중</div>{segs}</div>' if segs else "")
                    + f'<p class="font-label-micro text-label-micro text-outline">회사가 낸 {biz.get("year", "")}년 사업보고서를 요약했어요 · {link}</p>')  # fmt: skip
@@ -807,6 +811,8 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
+    if any("sec.gov" in f.get("url", "") for f in facts):  # 미국 회사 — 원문은 SEC, 금액은 달러(원화는 한국은행 환율로 코드가 곱함)
+        how += " 미국 회사라 원문은 미국 증권거래위원회(SEC) 공시예요. 금액은 달러가 먼저, 원화는 한국은행 환율로 계산해 괄호에 적었어요."
     views, likes, liked = stats
     faces = "".join('<span class="w-7 h-7 rounded-full bg-surface-container-high border-2 border-surface flex items-end justify-center overflow-hidden -ml-2 first:ml-0">'
                     '<span class="material-symbols-outlined text-outline text-[22px] translate-y-1" style="font-variation-settings: \'FILL\' 1;">person</span></span>'
@@ -1072,19 +1078,28 @@ class App:
         # ponytail: 남의 이메일을 알면 그 계정으로 들어갈 수 있다. 지인 20명 시험이라 감수 — 공개 출시 전에 비밀번호나 카카오 로그인으로 (plan.md)
         return self.start(email, cohort)
 
+    def src(self, rno: str | None) -> str:
+        """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽."""
+        if not rno:
+            return "#"
+        if "-" not in rno:
+            return notes.DART.format(rno)
+        row = self.con.execute("select s.cik from filings f join stocks s using(ticker) where f.accession = ?", (rno,)).fetchone()
+        return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else "#"
+
     def stocks_v(self) -> str:
         return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
 
     def stocks_js(self) -> str:
         """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만)."""
-        rows = [{"t": t, "n": n, "l": "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c in
-                self.con.execute("select ticker, name, induty_code from stocks where market = 'KR' order by active desc, name")]  # 미국은 5주차에  # fmt: skip
+        rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
+                self.con.execute("select ticker, name, induty_code, market from stocks order by active desc, market, name")]  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
 
     def match(self, q: str) -> str | None:
         """이름·코드 → 종목 코드. 띄어쓰기·대소문자는 무시한다(「삼성 SDI」→ 삼성SDI)."""
         key = re.sub(r"\s+", "", q).upper()
-        row = self.con.execute("select ticker from stocks where market = 'KR' and (ticker = ? or upper(replace(name, ' ', '')) = ?) order by active desc",
+        row = self.con.execute("select ticker from stocks where (ticker = ? or upper(replace(name, ' ', '')) = ?) order by active desc",
                                (key, key)).fetchone()  # 상장사 전체 (코스닥 포함) — 노트가 없던 종목은 다음 아침에 생긴다  # fmt: skip
         return row[0] if row else None
 
@@ -1126,7 +1141,7 @@ class App:
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
         parts = [f"{len(added)}종목을 담았어요 ({', '.join(added[:5])}{' 외' if len(added) > 5 else ''})."] if added else []
         if unknown:
-            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요. 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
+            parts.append(f"「{', '.join(unknown[:5])}」은(는) 찾지 못했어요. 국내는 회사 이름이나 종목 코드 6자리, 미국은 티커(NVDA)로 다시 찾아 주세요.")
         if full:
             parts.append(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요.")
         return " ".join(parts) or "담을 종목을 찾지 못했어요."
@@ -1169,19 +1184,20 @@ class App:
     def cards(self, uid: int, msg: str | None, sort: str | None = None) -> str:
         order = "s.name" if sort == "name" else "h.added_at"
         rows = self.con.execute(
-            "select s.ticker, s.name, n.week, n.body, n.facts, s.homepage from holdings h join stocks s using(ticker)"
+            "select s.ticker, s.name, n.week, n.body, n.facts, s.homepage, s.market from holdings h join stocks s using(ticker)"
             " left join notes n on n.ticker = s.ticker and n.week ="
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
         out = []
-        for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
+        both = len({r[6] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
+        for t, name, week, body, facts, home, mkt in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
             head = b.get("headline") or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
-            out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
-                       f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span><span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
+            out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
+                       f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
                        f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p>'
                        + (f'<p class="hidden lg:block mt-1.5 text-[14px] leading-[23px] text-on-surface-variant line-clamp-3">{e(more)}</p>' if more else "") + '</a>'
@@ -1204,7 +1220,14 @@ class App:
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
                  '</header>'
-                 f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
+                 # 전체 / 국내 / 미국 — 스위치가 아니라 보기 거르기 (노트·메일은 늘 둘 다, docs/stage3-us.md)
+                 + ('<nav class="px-margin pb-1 flex gap-1.5" id="market-chips">' + "".join(
+                     f'<button type="button" data-m="{m}" class="mchip px-3 py-1 rounded-full text-[12px] font-semibold border {"bg-primary text-on-primary border-primary" if m == "all" else "border-outline-variant/60 text-on-surface-variant"}">{label}</button>'
+                     for m, label in (("all", "전체"), ("KR", "국내"), ("US", "미국")))
+                    + '</nav><script>document.querySelectorAll(".mchip").forEach(b=>b.onclick=()=>{const m=b.dataset.m;'
+                    'document.querySelectorAll(".mchip").forEach(x=>{const on=x===b;x.className=x.className.replace(/bg-primary text-on-primary border-primary|border-outline-variant[/]60 text-on-surface-variant/,on?"bg-primary text-on-primary border-primary":"border-outline-variant/60 text-on-surface-variant")});'
+                    'document.querySelectorAll("#stock-list>article").forEach(a=>a.style.display=(m==="all"||a.dataset.market===m)?"":"none")});</script>' if both else "")
+                 + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
                  '<footer class="mt-auto px-margin pt-16 pb-6 flex flex-col items-center justify-center gap-1.5 opacity-80"><p class="font-label-micro text-label-micro text-outline text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[13px]">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 상장사 전체는 /stocks.js 로 따로 (하루 캐시, 100KB 남짓)
@@ -1212,7 +1235,7 @@ class App:
                  "const STOCKS=window.STOCKS||[];"
                  "const inp=document.getElementById('stock-search-input'),fly=document.getElementById('search-flyout'),res=document.getElementById('search-results');"
                  "function esc(s){return s.replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
-                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const hit=STOCKS.filter(s=>s.n.includes(q)||s.t.startsWith(q)).slice(0,6);"
+                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const Q=q.toUpperCase();const hit=STOCKS.filter(s=>s.n.toUpperCase().includes(Q)||s.t.startsWith(Q)).slice(0,6);"
                  "res.innerHTML=hit.map((s,i)=>"
                  "'<form method=\"post\" action=\"/add\" onclick=\"if(event.target!==this.lastChild)this.requestSubmit()\" class=\"group flex items-center justify-between p-2.5 rounded-lg cursor-pointer hover:bg-surface-container transition-colors\"><input type=\"hidden\" name=\"q\" value=\"'+s.t+'\"><div class=\"flex items-center gap-2 min-w-0\"><span class=\"w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-body-reading-strong text-[12px]\">'+esc(s.n[0])+'</span><div class=\"flex flex-col min-w-0\"><div class=\"flex items-center gap-1.5\"><span class=\"font-headline-sm text-headline-sm text-on-surface\">'+esc(s.n)+'</span><span class=\"font-citation-ref text-citation-ref text-outline\">'+(s.t.startsWith('ETF')?'':s.t)+'</span></div><span class=\"font-label-micro text-label-micro text-on-surface-variant truncate\">'+esc(s.l)+'</span></div></div>'"
                  "+'<button class=\"px-2.5 py-1 bg-primary-container text-on-primary font-label-micro text-label-micro rounded-lg shadow-sm hover:opacity-90 active:scale-95 transition-all\" type=\"submit\">+ 담기</button>'+'</form>').join('');"
@@ -1297,7 +1320,7 @@ class App:
         fin = fins[0] if fins else None
         buys = self.con.execute("select date, amount from disclosures where ticker = ? and code = 'BUYBACK' and amount > 0 and date >= ?",
                                 (ticker, (date.today() - timedelta(days=365)).isoformat())).fetchall()  # fmt: skip
-        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": biz[1] if biz else None, "fin": fin, "fins": fins, "buys": buys,
+        return {"divs": divs, "biz": json.loads(biz[0]) if biz else None, "rno": (self.src(biz[1]) if "-" in biz[1] else biz[1]) if biz else None, "fin": fin, "fins": fins, "buys": buys,
                 "mid": notes.industry_mid(self.con, ticker)}
 
     # ---- 캘린더 (시안 _4) ----
@@ -1380,19 +1403,19 @@ class App:
                     _, name, code, _, rno, dr, _, _ = rs[0]
                     tint = {1: "bg-secondary-fixed text-on-secondary-fixed-variant", -1: "bg-tertiary-fixed text-on-tertiary-fixed-variant"}.get(dr, "bg-surface-container-high text-on-surface-variant")
                     many = f" {len(rs)}건" if len(rs) > 1 else ""
-                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
+                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
                                  f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}{many}</a>")  # fmt: skip
                 for rno, _, name, _, total, *_ in bond_by.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} 회사채 {e(notes.won(total))}" class="{CHIP} bg-surface-container-high text-on-surface-variant">'
+                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} 회사채 {e(notes.won(total))}" class="{CHIP} bg-surface-container-high text-on-surface-variant">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} 채권</span><span class='hidden lg:inline'>{e(name)} 회사채 {e(notes.won(total))}</span></a>")  # fmt: skip
                 for name, kind, what, rno in ahead.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(what)}" class="{CHIP} border border-primary/40 text-primary">'
+                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(what)}" class="{CHIP} border border-primary/40 text-primary">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></a>")  # fmt: skip
                 for _, kind, nat, what in macro_by.get(iso, []) if d.month == m else []:
                     chips.append(f'<span title="{e(what)}" class="{CHIP} border border-dashed border-outline-variant text-on-surface-variant">'
                                  f"<span class='lg:hidden'>{FLAG[nat]} {e(kind)}</span><span class='hidden lg:inline'>{e(what)}</span></span>")  # fmt: skip
                 for name, what, rno in ipo_by.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
+                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></a>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
                 pick = f' data-day="{iso}" onclick="if(!event.target.closest(&quot;a&quot;))pickDay(this.dataset.day)"' if d.month == m else ""  # 칩(원문 링크) 말고 칸을 누르면 그 날 일정
@@ -1409,11 +1432,11 @@ class App:
                          f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></div>'
                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(title)}</h3>'
                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(EVENT_EXPLAIN.get(code, ""))}</p>'
-                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface">{e(src)}</a></div></article>'))  # fmt: skip
+                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface">{e(src)}</a></div></article>'))  # fmt: skip
         soon = [(d, *x) for d in sorted(ahead) if d[:7] == f"{y}-{m:02d}" for x in ahead[d]]
         items += [(0, d, f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
                  f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{(dd := date.fromisoformat(d)).month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})</span> · {e(name)} <b>{e(what)}</b></span>'
-                 f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a><span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold">일정</span></span></article>')
+                 f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a><span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold">일정</span></span></article>')
                   for d, name, _, what, rno in soon]  # fmt: skip
         for rno, pay, name, t, total, mats, uses, lead in bonds:  # 내 종목 회사채 — 공시와 같은 자리
             if pay[:7] != f"{y}-{m:02d}":
@@ -1425,7 +1448,7 @@ class App:
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-semibold">회사채</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 회사채 {e(notes.won(total))}</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(채무증권)</a></article>'))  # fmt: skip
+                          f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(채무증권)</a></article>'))  # fmt: skip
         for name, a, b, listed, price, total, lead, uses, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
             d = a if a[:7] == f"{y}-{m:02d}" else listed if listed and listed[:7] == f"{y}-{m:02d}" else None
             if not d:
@@ -1437,7 +1460,7 @@ class App:
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 공모주 청약</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</a></article>', {x for x in (a, listed) if x}))  # fmt: skip
+                          f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</a></article>', {x for x in (a, listed) if x}))  # fmt: skip
         for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
             if d[:7] != f"{y}-{m:02d}":
                 continue

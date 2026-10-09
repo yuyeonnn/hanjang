@@ -227,7 +227,7 @@ def read_business(con: sqlite3.Connection, today: date, tickers: list[str] | Non
     """종목마다 지난해 사업보고서 「사업의 내용」을 한 번 읽어 둔다(같은 보고서는 다시 읽지 않는다). 읽은 수를 돌려준다."""
     year, n = today.year - 1, 0
     dart = sources.Dart()
-    rows = con.execute("select s.ticker, b.body from stocks s left join business b using(ticker) where s.active = 1").fetchall()
+    rows = con.execute("select s.ticker, b.body from stocks s left join business b using(ticker) where s.active = 1 and s.market = 'KR'").fetchall()
     for t, body in rows:
         if (tickers and t not in tickers) or (body and json.loads(body).get("year") == year):
             continue
@@ -276,7 +276,7 @@ def read_segments(con: sqlite3.Connection, today: date) -> int:
     year, n, dart = today.year - 1, 0, sources.Dart()
     for t, body in con.execute("select ticker, body from business").fetchall():
         b = json.loads(body)
-        if (b.get("seg") or {}).get("year") == year or b.get("year") != year:
+        if b.get("market") == "US" or (b.get("seg") or {}).get("year") == year or b.get("year") != year:  # 미국은 us.read_10k 가 읽는다
             continue
         rno, text = dart.business_text(t, year)
         src = (text or {}).get("segment", "")
@@ -292,7 +292,7 @@ def read_disclosures(con: sqlite3.Connection, batch: int = 100) -> tuple[int, in
     """(규칙으로 확정, AI 로 분류). 규칙은 이미 AI 가 읽은 공시에도 다시 덮어쓴다 — 규칙이 늘면 과거 공시도 고쳐진다.
     AI 가 빠뜨린 공시는 비워 두고 다음 실행에서 다시 묻는다."""
     ruled = 0
-    for rno, title in con.execute("select rcept_no, title from disclosures where read_model is not 'rule'").fetchall():
+    for rno, title in con.execute("select rcept_no, title from disclosures where read_model is not 'rule' and read_model is not '8-K'").fetchall():  # 미국 8-K 는 번호로 이미 정했다
         if got := by_rule(title):
             _save_code(con, rno, title, *got, "rule")
             ruled += 1

@@ -109,7 +109,12 @@ def test_main_saves_us_rows_hidden_from_search(monkeypatch):
     assert con.execute("select count(*) from filings where form = '8-K'").fetchone()[0] > 0
     assert con.execute("select who, change, planned from insiders where ticker = 'NVDA' limit 1").fetchone() == ("CEO", 10.0, 0)
     from hanjang import web
-    assert "NVDA" not in web.App(con, "s").stocks_js()  # 화면은 5주차 — 아직 숨긴다
+    app = web.App(con, "s")
+    assert '"t":"NVDA","n":"엔비디아","l":"미국"' in app.stocks_js() and app.match("nvda") == "NVDA" and app.match("엔비디아") == "NVDA"
+    assert con.execute("select active from stocks where ticker = 'NVDA'").fetchone() == (0,)  # 아무도 안 담았으면 노트는 안 쓴다
+    accn = con.execute("select rcept_no from disclosures where ticker = 'NVDA' limit 1").fetchone()[0]
+    assert app.src(accn).startswith("https://www.sec.gov/Archives/edgar/data/1045810/") and app.src("20261008000372").startswith("https://dart")
+    assert con.execute("select count(*) from disclosures where ticker = 'NVDA' and read_model is not '8-K'").fetchone() == (0,)  # AI 분류가 덮지 않게
 
 
 def test_us_facts_use_dollars_with_won_in_brackets_and_company_months(monkeypatch):
