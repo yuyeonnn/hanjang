@@ -25,7 +25,8 @@ def events(con: sqlite3.Connection, today: date) -> list[dict]:
     out = []
     for rno, t, d, raw, code, dr in con.execute(
             "select rcept_no, ticker, date, title, code, direction from disclosures where date >= ? and importance >= 2"
-            " and code is not null and code != 'OTHER' and rcept_no not in (select ref from articles)", (since,)):  # fmt: skip
+            " and code is not null and code != 'OTHER' and rcept_no not in (select ref from articles)"
+            " and ticker in (select ticker from stocks where market = 'KR')", (since,)):  # 미국 기사는 아직 (원문이 영어) # fmt: skip
         day = date.fromisoformat(d)
         dd = f"{day.month}월 {day.day}일"
         title = re.sub(r"\s+", " ", re.sub(r"^\[[^\]]*\]\s*", "", raw)).strip()  # 「[기재정정]」 같은 머리표는 뺀다

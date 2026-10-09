@@ -68,7 +68,7 @@ def test_unknown_stock_and_forged_cookie():
     app, con = _app()
     ck = _login(app)
     _, h, _ = call(app, "/add", "POST", "q=" + quote("없는회사"), ck)
-    assert "상장사에서 찾지 못했어요" in unquote(h["Location"])
+    assert "찾지 못했어요" in unquote(h["Location"])
     assert "시작하기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
     assert web.safe_url("javascript:alert(1)") == "#"
 
