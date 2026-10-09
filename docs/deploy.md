@@ -68,6 +68,29 @@ sudo systemctl restart hanjang-web
 | 시험 판정 숫자 (주차별 재방문 · 돈 내고도 보겠다) | `cd /srv/hanjang && sudo -u hanjang /home/hanjang/.local/bin/uv run python -m hanjang.trial trial-1` |
 | 백업 (최근 14일) | `ls /srv/hanjang/data/backup` |
 | 백업에서 되돌리기 | `sudo systemctl stop hanjang-web && cp data/backup/hanjang-YYYYMMDD.db data/hanjang.db && sudo systemctl start hanjang-web` |
+| 상태 한눈에 | https://34-44-40-196.sslip.io/health — `ok` 면 정상, 아니면 `db` · `daily` · `disk` 중 문제인 것 |
+
+## 감시와 백업 (2026-10-10)
+
+**누가 알려 주나** — 메일이 안 오면 잘 돌고 있는 것.
+
+| 무엇이 잘못되면 | 누가 · 어디로 |
+|---|---|
+| 사이트가 안 열림 · 매일 실행이 30시간 넘게 안 돎 · DB · 디스크 10% 미만 | 구글 클라우드 모니터링이 5분마다 미국·아시아·유럽에서 `/health` 를 연다 → 두 곳 넘게 5분 이상 실패하면 **psiobinq@gmail.com** (업타임 체크 `hanjang-health`, 알림 정책 「한장 — 사이트 또는 매일 실행 이상」) |
+| 매일 실행이 도중에 실패 · 서버 밖 백업 실패 · OpenAI 크레딧 소진 | 서버가 직접 운영자 Gmail(`.env` 의 `SMTP_USER`)로 |
+
+**서버 밖 백업** — 매일 실행이 백업을 만든 뒤 압축해 `gs://hanjang-backup-education-508407/` 에 올린다(같은 날 두 번이면 시각을 붙여 따로).
+- 버킷: us-central1 · 공개 차단 · **14일 지나면 저절로 삭제**(처리방침 3항과 같게).
+- 서버의 열쇠: `data/gcs-backup.json`(git 밖, 600) — 계정 `hanjang-backup@…` 은 이 버킷에 **넣기만** 된다. 서버가 털려도 백업을 읽거나 지우지 못한다. `.env` 의 `BACKUP_BUCKET` 이 없으면 건너뛴다.
+- 되돌리기(서버가 통째로 없어졌을 때) — 내 컴퓨터에서:
+  ```bash
+  gcloud storage ls gs://hanjang-backup-education-508407/
+  gcloud storage cp gs://hanjang-backup-education-508407/hanjang-YYYYMMDD-HHMMSS.db.gz . && gunzip hanjang-YYYYMMDD-HHMMSS.db.gz
+  ```
+  새 서버를 `deploy/setup.sh` 로 세운 뒤 이 파일을 `/srv/hanjang/data/hanjang.db` 로 올리고 `sudo systemctl restart hanjang-web`. 백업 안의 이메일은 개인정보다 — 다 쓰면 내 컴퓨터의 사본을 지운다.
+- 열쇠를 바꿀 때: `gcloud iam service-accounts keys create` → 서버 `data/gcs-backup.json` 교체 → 옛 열쇠 `keys delete`.
+
+**도메인을 옮기면** 감시 주소도 바꾼다 — 업타임 체크의 주소는 고칠 수 없어 새로 만든다: `gcloud monitoring uptime create hanjang-health --resource-type=uptime-url --resource-labels=host=<새 도메인>,project_id=education-508407 --protocol=https --path=/health --period=5 --timeout=10 --matcher-content=ok --matcher-type=contains-string --regions=usa-iowa,asia-pacific,europe` → 알림 정책 조건의 `check_id` 를 새 이름으로 고침 → 옛 체크(`hanjang-health-bDwzkNMaS98`) 지움.
 
 ## 6. 내 컴퓨터 (개발)
 

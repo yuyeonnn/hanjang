@@ -857,3 +857,71 @@ def test_notices_this_week():
     week = app.this_week()
     assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
     assert "NEW" in week and "시 업데이트" in week  # 한 시간 전엔 없던 종목
+
+
+def test_health_says_what_is_wrong(tmp_path, monkeypatch):
+    import os
+    import time
+
+    app, _ = _app()
+    monkeypatch.setattr(web.db, "PATH", tmp_path / "hanjang.db")
+    (tmp_path / "backup").mkdir()
+    s, h, body = call(app, "/health")  # 로그인 없이 · 백업이 없다 = 매일 실행이 안 돌았다
+    assert s.startswith("503") and body == "daily" and h["Cache-Control"] == "no-store"
+    b = tmp_path / "backup" / "hanjang-20261010.db"
+    b.write_bytes(b"x")
+    assert call(app, "/health")[2] == "ok"
+    os.utime(b, (time.time() - 31 * 3600,) * 2)  # 31시간 전 — 어제 아침 실행이 멈췄다
+    assert call(app, "/health")[0].startswith("503")
+
+
+def test_offsite_backup_is_create_only_and_skipped_without_bucket(tmp_path, monkeypatch):
+    import gzip
+
+    from hanjang import backup
+
+    f = tmp_path / "hanjang-20261010.db"
+    f.write_bytes(b"db")
+    key = tmp_path / "k.json"
+    monkeypatch.setattr(backup, "env", lambda: {})
+    assert backup.offsite(f, key) is None  # 내 컴퓨터 — 버킷이 없으면 건너뛴다
+    key.write_text("{}")
+    monkeypatch.setattr(backup, "env", lambda: {"BACKUP_BUCKET": "b"})
+    monkeypatch.setattr(backup.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "tok\n"})())
+    sent = {}
+
+    class R:
+        def raise_for_status(self): ...
+
+    monkeypatch.setattr(backup.httpx, "post", lambda url, **k: sent.update(url=url, **k) or R())
+    assert backup.offsite(f, key).startswith("gs://b/hanjang-20261010-")
+    assert sent["params"]["ifGenerationMatch"] == "0" and sent["headers"]["Authorization"] == "Bearer tok"  # 덮어쓰지 않는다
+    assert gzip.decompress(sent["content"]) == b"db"
+
+
+def test_morning_card_on_home(monkeypatch):
+    from datetime import timedelta
+    from hanjang import llm, morning
+
+    app, con = _app()
+    today = date.today()
+    lo = morning.since(today).isoformat()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('042660', '한화오션', 'x', 1), ('128940', '한미약품', 'y', 1)")
+    con.execute("insert into holdings values (1, '042660', '2026-10-01'), (1, '128940', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '042660', ?, '유상증자결정', 'RIGHTS_ISSUE', 3, -1), ('2', '128940', ?, '투자판단관련주요경영사항 (에페 품목허가 승인)', 'OTHER', 2, 0)", (lo, lo))
+    con.execute("insert into events values ('042660', ?, 'EARNINGS', '실적 발표', '3')", ((today + timedelta(days=2)).isoformat(),))
+    con.commit()
+    asked = []
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: asked.append(a[2]) or a[3]({"sentence": "에페 주사제가 팔아도 된다는 품목허가를 받았다고 알렸어요."}))
+    assert morning.prepare(con, today) == 1 and len(asked) == 1  # 코드 풀이가 있는 유상증자는 AI 를 부르지 않는다
+    assert morning.prepare(con, today) == 0 and len(asked) == 1  # 공시마다 한 번
+    body = call(app, "/", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "아침 한 장" in body and "한화오션</a>은 새 주식을 찍어 팔아" in body and "품목허가를 받았다고 알렸어요" in body
+    assert "실적 발표" in body and "유상증자 공시는 이렇게 읽어요" in body
+    try:
+        morning.check({"sentence": "매출이 30% 늘 거예요."}, "단일판매공급계약")
+        raise AssertionError
+    except ValueError:
+        pass
