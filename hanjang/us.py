@@ -377,7 +377,7 @@ def parse_13dg(xml: str) -> dict | None:
 
 # --- 10-K 인라인 XBRL — 사업부·제품·지역 숫자 (AI 없이) ---
 
-PARTS_V = 7  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
+PARTS_V = 8  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
 AXES = {"segment": "StatementBusinessSegmentsAxis", "product": "ProductOrServiceAxis", "geo": "StatementGeographicalAxis"}
 MEMBER_KO = {
     "US": "미국", "CN": "중국", "TW": "대만", "JP": "일본", "KR": "한국", "DE": "독일", "GB": "영국", "IE": "아일랜드", "SG": "싱가포르", "CA": "캐나다",
@@ -449,7 +449,8 @@ EN_KO = {
     "Value Added Services": "부가 서비스", "Product Excluding Spares": "제품", "Services & Spares": "서비스·부품", "Client Devices": "PC·기기",
     "Walmart US": "월마트 미국", "Walmart International": "월마트 해외", "Sams Club US": "샘스클럽 미국", "Lending": "대출",
     "Financial Services": "금융 서비스", "Technology Platform": "기술 플랫폼", "Unitedhealthcare": "유나이티드헬스케어(보험)", "Total Optum": "옵텀",
-    "Optumrx": "옵텀 Rx(약국)", "Optumhealth": "옵텀 헬스(의료)", "Middle East": "중동", "Africa": "아프리카", "Membership": "회원비",
+    "Optumrx": "옵텀 Rx(약국)", "Optumhealth": "옵텀 헬스(의료)", "Client Computing Group Datacenter & AI & Network & Edge": "인텔 제품(PC·데이터센터 합계)",
+    "Cloud & Software Business": "클라우드·소프트웨어", "Hardware Business": "하드웨어", "Services Business": "서비스", "Middle East": "중동", "Africa": "아프리카", "Membership": "회원비",
     "Western Hemisphere Excluding US": "미국 밖 서반구", "International Beverage Franchise": "해외 음료 프랜차이즈", "RU": "러시아",
     "Latin America & Canada": "중남미·캐나다", "Middle East & Africa": "중동·아프리카",
 }  # fmt: skip
@@ -595,12 +596,17 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
 
 OUTLOOK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["period", "items"], "properties": {
     "period": {"type": "string"}, "items": {"type": "array", "items": {"type": "object", "additionalProperties": False,
-        "required": ["metric", "low", "high", "plus_minus", "plus_minus_unit", "unit", "quote"], "properties": {
+        "required": ["metric", "span", "low", "high", "plus_minus", "plus_minus_unit", "unit", "quote"], "properties": {
             "metric": {"type": "string", "enum": ["revenue", "gross_margin", "operating_expenses", "eps", "operating_income"]},
+            "span": {"type": "string", "enum": ["quarter", "year"]},
             "low": {"type": "number"}, "high": {"type": "number"}, "plus_minus": {"type": "number"},
             "plus_minus_unit": {"type": "string", "enum": ["percent", "bp", "same", "none"]},
             "unit": {"type": "string", "enum": ["billion", "million", "percent", "dollars"]}, "quote": {"type": "string"}}}}}}  # fmt: skip
 METRIC_KO = {"revenue": "매출", "gross_margin": "매출총이익률", "operating_expenses": "영업비용", "eps": "주당순이익", "operating_income": "영업이익"}
+# 인용 문장에 이 낱말이 있어야 그 항목으로 받는다 — 우버 「Gross Bookings(총 거래액)」를 매출로, 오라클 「성장률 30~34%」를 매출로 받았다 (10/10)
+METRIC_WORD = {"revenue": r"revenue|net sales|\bsales\b", "gross_margin": r"gross margin", "operating_expenses": r"operating expenses|\bopex\b",
+               "eps": r"per share|\bEPS\b", "operating_income": r"operating income"}  # fmt: skip
+OUTLOOK_V = 2  # 전망 읽기 규칙의 판 — 올리면 이미 읽은 발표도 한 번 다시 읽는다
 
 
 def num_in(x: float, text: str) -> bool:
@@ -618,6 +624,10 @@ def check_outlook(j: dict, source: str) -> dict:
         q = norm(x["quote"])
         if len(q) < 10 or q not in src or not num_in(x["low"], q) or not num_in(x["high"], q) or (x["plus_minus"] and not num_in(x["plus_minus"], q)):
             continue
+        if not re.search(METRIC_WORD[x["metric"]], q, re.I) or (x["metric"] == "revenue" and re.search(r"bookings", q, re.I)):
+            continue  # 낱말이 안 맞는다 — 다른 숫자(거래액·성장률)를 그 항목으로 옮긴 것
+        if (x["metric"] == "gross_margin") != (x["unit"] == "percent"):
+            continue  # 매출총이익률만 % 다 — 매출·이익·EPS 가 % 면 성장률이다
         items.append(x | {"quote": q})
     return {"period": j["period"], "items": items}
 
@@ -655,8 +665,8 @@ def read_outlook(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     """가장 최근 실적 발표(8-K 2.02)의 첨부 보도자료에서 Outlook 부분만. 같은 발표는 다시 읽지 않는다. 전망이 없는 회사(애플·테슬라)는 빈 칸으로 적어 둔다."""
     row = con.execute("select f.accession, f.date, s.cik from filings f join stocks s using(ticker) where f.ticker = ? and f.form = '8-K'"
                       " and f.items like '%2.02%' order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
-    have = con.execute("select accession from outlooks where ticker = ?", (ticker,)).fetchone()
-    if not row or (have and have[0] == row[0]):
+    have = con.execute("select accession, body from outlooks where ticker = ?", (ticker,)).fetchone()
+    if not row or (have and have[0] == row[0] and json.loads(have[1]).get("v") == OUTLOOK_V):
         return False
     accn, day, cik = row
     text = exhibit(sec, cik, accn)
@@ -665,7 +675,7 @@ def read_outlook(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     got = {"period": "", "items": []}
     if part and re.search(r"expect|guidance|outlook", part, re.I) and re.search(r"\d", part):
         got = llm.ask("reader", "outlook_us", {"원문": part}, lambda j: check_outlook(j, part), OUTLOOK_SCHEMA, prompt_file="outlook_us") or got
-    con.execute("insert or replace into outlooks values (?, ?, ?, ?)", (ticker, accn, day, json.dumps(got, ensure_ascii=False)))
+    con.execute("insert or replace into outlooks values (?, ?, ?, ?)", (ticker, accn, day, json.dumps(got | {"v": OUTLOOK_V}, ensure_ascii=False)))
     return True
 
 
@@ -755,7 +765,7 @@ def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None"
 
 def save_company(con: sqlite3.Connection, ticker: str, name: str, cik: int, sub: dict) -> None:
     con.execute("insert into stocks (ticker, name, corp_code, active, market, cik, sic, fye, homepage) values (?, ?, ?, 0, 'US', ?, ?, ?, ?)"
-                " on conflict(ticker) do update set name = excluded.name, cik = excluded.cik, sic = excluded.sic, fye = excluded.fye,"
+                " on conflict(ticker) do update set name = coalesce(nullif(excluded.name, ''), stocks.name), cik = excluded.cik, sic = excluded.sic, fye = excluded.fye,"
                 " homepage = coalesce(stocks.homepage, excluded.homepage)",
                 (ticker, name, str(cik), cik, sub.get("sic"), sub.get("fiscalYearEnd"), (sub.get("website") or "").replace("https://", "").replace("http://", "").strip("/") or f"ticker/{ticker.replace('.', '-')}"))  # fmt: skip
     # homepage 는 로고(Brandfetch)를 찾는 데만 쓴다 — SEC 에 웹사이트가 비어 있으면(대부분) Brandfetch 의 티커 찾기 「ticker/AAPL」
