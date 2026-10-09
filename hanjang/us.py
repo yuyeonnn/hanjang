@@ -588,7 +588,8 @@ def save_company(con: sqlite3.Connection, ticker: str, name: str, cik: int, sub:
     con.execute("insert into stocks (ticker, name, corp_code, active, market, cik, sic, fye, homepage) values (?, ?, ?, 0, 'US', ?, ?, ?, ?)"
                 " on conflict(ticker) do update set name = excluded.name, cik = excluded.cik, sic = excluded.sic, fye = excluded.fye,"
                 " homepage = coalesce(stocks.homepage, excluded.homepage)",
-                (ticker, name, str(cik), cik, sub.get("sic"), sub.get("fiscalYearEnd"), (sub.get("website") or "").replace("https://", "").replace("http://", "").strip("/") or None))  # fmt: skip
+                (ticker, name, str(cik), cik, sub.get("sic"), sub.get("fiscalYearEnd"), (sub.get("website") or "").replace("https://", "").replace("http://", "").strip("/") or f"ticker/{ticker.replace('.', '-')}"))  # fmt: skip
+    # homepage 는 로고(Brandfetch)를 찾는 데만 쓴다 — SEC 에 웹사이트가 비어 있으면(대부분) Brandfetch 의 티커 찾기 「ticker/AAPL」
 
 
 def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> tuple[int, int, int]:
