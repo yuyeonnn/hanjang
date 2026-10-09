@@ -6,6 +6,7 @@ AI 글에 숫자가 하나라도 있거나, 사실과 반대 방향 낱말을 �
 import json
 import re
 import sqlite3
+import statistics
 import sys
 from datetime import date, datetime, timedelta
 
@@ -442,16 +443,18 @@ def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     margin = all(r[4] for r in peers)  # 매출이 다 있으면 영업이익률, 아니면(금융) ROE
     ok = (lambda r: r[4] and r[5] is not None) if margin else (lambda r: r[6] is not None and r[7] and r[7] > 0)
     val = {r[0]: (r[5] / r[4] * 100 if margin else r[6] / r[7] * 100) for r in peers if ok(r)}
+    # 비율이 ±100% 를 넘는 회사는 빼고 견준다 — 지분 이익이 영업이익으로 잡히는 지주회사(SK스퀘어 623%)는 같은 잣대가 아니다 (SK 10/9)
+    val = {t: v for t, v in val.items() if abs(v) <= 100}
     if len(val) < 3 or ticker not in val:
         return []
     order = sorted(val, key=lambda t: -val[t])
     k, n, what = order.index(ticker) + 1, len(val), "영업이익률" if margin else "ROE"
-    place = "가장 높았" if k == 1 else "가장 낮았" if k == n else f"{k}번째로 높았"
-    avg = sum(val.values()) / n
+    place = "가장 높았" if k == 1 else "가장 낮았" if k == n else f"{k}번째로 높았" if k <= n / 2 else f"{n - k + 1}번째로 낮았"  # 7곳 중 6번째 → 2번째로 낮았
+    mid = statistics.median(val.values())  # 평균은 한두 곳에 끌려간다 — 가운데 회사의 값
     others = "·".join(r[1] for r in peers if r[0] != ticker and r[0] in val)
-    return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {me[3]}년 {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 평균 {avg:.1f}% (함께 본 회사: {others})",
+    return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {me[3]}년 {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 중간값 {mid:.1f}% (함께 본 회사: {others})",
              "url": DART.format(me[8]), "tone": 0,
-             "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "평균": f"{avg:.1f}%"}}]  # fmt: skip
+             "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "중간값": f"{mid:.1f}%"}}]  # fmt: skip
 
 
 # 자금 쓰임 이름 → 쉬운 말 (이름도 함께 둔다 — 쓰기 규칙 「용어 이름과 풀이 함께」)
@@ -489,7 +492,8 @@ def bond_fact(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     text = (f"{day} 회사채 {won(total)} {when}" + (f" — 만기 {spans}" if spans else "") + (f" · 이자 연 {rates}%" if rates else "")
             + (f" · 쓰임: {use_txt}" if use_txt else ""))  # fmt: skip
     return [{"id": "F12", "text": text, "url": DART.format(rno), "tone": 0,
-             "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {}) | ({"쓰임": use_txt} if use_txt else {})}]
+             "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {})
+             | ({"쓰임": use_txt if len(uses) > 1 else f"{USE_PLAIN.get(k.replace(' ', ''), k)}({k})"} if (k := next(iter(uses), "")) else {})}]  # 쓰임이 하나면 금액을 되풀이하지 않게
 
 
 def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
@@ -758,11 +762,10 @@ def check_note(note: dict, fs: list[dict]) -> dict:
     ⑤ 좋게 본 것은 +1 사실만, 걱정되는 것은 −1 사실만 근거로 — 그런 사실이 있는데 비워 두면 탈락."""
     for key, sign in (("good", 1), ("concern", -1)):
         want = {f["id"] for f in fs if f["tone"] == sign}
-        got = note.get(key) or []
+        # 다른 쪽(중립 등) 사실을 끌어온 문장만 뺀다 — 한 문장 때문에 노트 전체를 버리지 않게 (SK 10/9: 세 번 다 떨어져 코드 글)
+        got = note[key] = [s for s in note.get(key) or [] if set(s["refs"]) <= want]
         if want and not got:
             raise ValueError(f"{key} 비었음 — 해당 사실 {sorted(want)}")
-        if any(not set(s["refs"]) <= want for s in got):
-            raise ValueError(f"{key} 에 다른 쪽 사실이 섞임")
     sents = (note["summary"] + [s for sec in note["sections"] for s in sec["sentences"]]
              + (note.get("good") or []) + (note.get("concern") or []))  # fmt: skip
     if not isinstance(note["headline"], str) or not sents:
@@ -843,6 +846,18 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     note = {"headline": head, "summary": keep(j["summary"]),
             "sections": [{"title": sec["title"], "sentences": got} for sec in j["sections"] if (got := keep(sec["sentences"]))],
             "good": keep(j["good"]), "concern": keep(j["concern"])}  # fmt: skip
+    # 회사채(F12)는 한 번만 — 「회사 사정」과 「이번 주 소식」에 같은 문장이 두 번 나오지 않게 (SK 10/9)
+    seen_bond = False
+    for sec in note["sections"]:
+        keep_ = []
+        for x in sec["sentences"]:
+            if "F12" in x["refs"]:
+                if seen_bond:
+                    continue
+                seen_bond = True
+            keep_.append(x)
+        sec["sentences"] = keep_
+    note["sections"] = [sec for sec in note["sections"] if sec["sentences"]]
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
     for key, sign in (("good", 1), ("concern", -1)):
