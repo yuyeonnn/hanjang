@@ -509,9 +509,9 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
-def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", note: str = "", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 이름·%는 조각 방향 바깥에 빙 둘러(사용자 10/10).
-    오른쪽 반의 조각은 오른쪽에, 왼쪽 반은 왼쪽에 — 한쪽에 몰리면 위아래로 벌려 겹치지 않게 하고 꺾은 선으로 조각과 잇는다.
+def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
+    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 이름 목록(사용자 10/10: 선을 그은 원형 배치는 어수선).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로. 색 네모로 조각과 잇는다.
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -522,40 +522,31 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
     cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
-    W, H, cx, cy, r, gap = 360, 240, 180, 120, 82, 34  # 그림 크기 · 원 · 이름 사이 최소 간격
-    slices, marks, a = [], [], -math.pi / 2  # 12시 방향에서 시계 방향으로
+    slices, sides, a = [], {True: [], False: []}, -math.pi / 2  # 12시 방향에서 시계 방향으로
     for (k, pct), col in zip(parts, cols):
         b = a + pct / 100 * 2 * math.pi
-        x1, y1, x2, y2 = cx + r * math.cos(a), cy + r * math.sin(a), cx + r * math.cos(b), cy + r * math.sin(b)
-        slices.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{col}"/>' if pct >= 99.99 else
-                      f'<path d="M{cx} {cy} L{x1:.1f} {y1:.1f} A{r} {r} 0 {1 if b - a > math.pi else 0} 1 {x2:.1f} {y2:.1f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="2"/>')  # fmt: skip
+        x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
+        slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= 99.99 else
+                      f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>')  # fmt: skip
         m = (a + b) / 2
-        marks.append([k, pct, col, m, cy + (r + 18) * math.sin(m), math.cos(m) >= 0])
+        sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col))
         a = b
-    for right in (True, False):  # 한쪽 이름들을 위에서부터 차례로 — 붙으면 아래로 밀고, 넘치면 다 같이 위로
-        side = sorted((x for x in marks if x[5] == right), key=lambda x: x[4])
-        for i in range(1, len(side)):
-            side[i][4] = max(side[i][4], side[i - 1][4] + gap)
-        if side and (over := side[-1][4] - (H - 14)) > 0:
-            for x in side:
-                x[4] -= over
-        for i in range(len(side) - 2, -1, -1):
-            side[i][4] = min(side[i][4], side[i + 1][4] - gap)
-    texts = []
-    for k, pct, col, m, y, right in marks:
-        px, py = cx + r * math.cos(m), cy + r * math.sin(m)
-        ex = cx + (r + 16) * (1 if right else -1)
-        tx = ex + (8 if right else -8)
-        anchor = "start" if right else "end"
-        name = k if len(k) <= (13 if k.isascii() else 8) else k[: 12 if k.isascii() else 7] + "…"
-        texts.append(f'<polyline points="{px:.1f},{py:.1f} {ex:.1f},{y:.1f} {tx - (3 if right else -3):.1f},{y:.1f}" fill="none" stroke="#c0c8c4" stroke-width="1"/>'
-                     f'<circle cx="{px:.1f}" cy="{py:.1f}" r="2" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>'
-                     f'<text x="{tx:.1f}" y="{y - 3:.1f}" text-anchor="{anchor}" font-size="11" fill="#404945">{e(name)}</text>'
-                     f'<text x="{tx:.1f}" y="{y + 12:.1f}" text-anchor="{anchor}" font-size="14" font-weight="700" fill="#1b1b1d">{pct:.1f}%</text>')  # fmt: skip
+
+    def column(right: bool) -> str:
+        # 휴대폰은 이름 밑에 %(같은 크기), 넓으면 한 줄 — 긴 이름은 칸 안에서 말줄임
+        rows = "".join(
+            f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
+            f'<span class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
+            f'<span class="min-w-0 flex flex-col sm:flex-row sm:gap-1.5 {"items-start" if right else "items-end"}">'
+            f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
+            f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
+            for _, k, pct, col in sorted(sides[right]))  # fmt: skip
+        return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
+
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            f'<svg viewBox="0 0 {W} {H}" class="mt-2 w-full max-w-[460px] mx-auto block" role="img" aria-label="{e(title)}">'
-            f'{"".join(slices)}{"".join(texts)}</svg>'
-            + (f'<p class="mt-1 text-center text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
+            '<div class="mt-4 flex items-center gap-3 sm:gap-5">' + column(False)
+            + f'<svg viewBox="0 0 100 100" class="w-28 h-28 sm:w-40 sm:h-40 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
+            + column(True) + "</div></section>")  # fmt: skip
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -2191,7 +2182,7 @@ class App:
 
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">미국 주식 포트폴리오</h2>'
                 f'<p class="mt-1 text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(rows[0][4])} 기준</p>'
-                + pie([(issuer_name(r[0], r[5]), r[2]) for r in rows], note="금액이 큰 다섯 종목이에요. 나머지는 기타에 모았어요.")
+                + pie([(issuer_name(r[0], r[5]), r[2]) for r in rows])
                 + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:10], 1)) + "</div>"
                 + '<p class="mt-2 text-[11px] text-outline leading-relaxed">미국은 큰 투자자가 분기마다 미국 주식 보유 전체를 미국 증권거래위원회(SEC)에 신고해요(13F). '
                 "분기가 끝나고 45일 안에 나와서 지금과 다를 수 있어요. 미국 밖 주식은 들어 있지 않아요.</p></section>")  # fmt: skip
@@ -2237,7 +2228,7 @@ class App:
         period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
         total = sum(r[2] for r in rows)
         sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
-        top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows], note="금액이 큰 다섯 종목이에요. 나머지는 기타에 모았어요.")
+        top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows])
         pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
                     "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
