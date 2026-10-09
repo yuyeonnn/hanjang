@@ -227,3 +227,14 @@ def test_first_note_for_us_stock_skips_dart(monkeypatch):
     monkeypatch.setattr(notes, "main", lambda tickers, today: wrote.extend(tickers))
     collect.first("AAPL", date(2026, 10, 10))
     assert wrote == ["AAPL"]
+
+
+def test_dates_the_company_announced_are_read_and_past_dates_skipped():
+    tsla = ("Tesla vehicle deliveries ... What : Tesla Q3 2026 Financial Results and Q&A Webcast When : Wednesday, October 21, 2026 "
+            "Time : 4:30 p.m. Central Time")
+    assert us.future_day(us.EARNINGS_DAY, tsla, date(2026, 10, 2), 60) == date(2026, 10, 21)
+    past = "We reported second quarter financial results on July 23, 2026. Revenue was $28.2 billion."
+    assert us.future_day(us.EARNINGS_DAY, past, date(2026, 10, 2), 60) is None  # 지난 실적 이야기는 일정이 아니다
+    proxy = ("NOTICE OF 2027 ANNUAL MEETING OF STOCKHOLDERS The 2027 Annual Meeting of Stockholders of NVIDIA Corporation will be held "
+             "virtually on Wednesday, June 23, 2027 at 9:00 a.m. Pacific Time.")
+    assert us.future_day(us.AGM_DAY, proxy, date(2027, 5, 1), 120) == date(2027, 6, 23)

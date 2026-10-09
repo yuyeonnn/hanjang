@@ -329,6 +329,25 @@ def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
     return "OTHER", 1, 0, f"그 밖의 알림 (8-K {items.replace(',9.01', '')})"
 
 
+MONTHS = {m: i for i, m in enumerate(("January", "February", "March", "April", "May", "June", "July", "August", "September",
+                                      "October", "November", "December"), 1)}  # fmt: skip
+_DAY = r"(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*)?(" + "|".join(MONTHS) + r")\s+(\d{1,2}),\s*(20\d\d)"
+EARNINGS_DAY = re.compile(r"(?:financial results|earnings|results)[^.]{0,200}?(?:\bon\b|When\s*:)\s*" + _DAY, re.I)
+AGM_DAY = re.compile(r"annual meeting of (?:stockholders|shareholders)[^.]{0,300}?(?:\bon\b|\bheld\b[^.]{0,40}?\bon\b|Date\s*(?:and Time)?\s*:)\s*" + _DAY, re.I)
+
+
+def future_day(pat: re.Pattern, text: str, after: date, within: int) -> date | None:
+    """글 속 날짜 가운데 공시 날짜 뒤(within 일 안)로 처음 나오는 것 — 「10월 21일에 실적을 발표한다」. 지난 날짜(지난 실적 이야기)는 건너뛴다."""
+    for m in pat.finditer(text):
+        try:
+            d = date(int(m[3]), MONTHS[m[1].capitalize()], int(m[2]))
+        except (ValueError, KeyError):
+            continue
+        if after < d <= after + timedelta(days=within):
+            return d
+    return None
+
+
 def html_text(html: str) -> str:
     t = re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style|ix:header).*?</\1>", " ", html))
     return re.sub(r"\s+", " ", htmllib.unescape(t)).strip()
@@ -619,14 +638,32 @@ def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: 
         if r["form"] != "8-K" or r["accession"] in have or r["date"] < (today - timedelta(days=90)).isoformat():
             continue
         text = ""
-        if needs_text(r["items"]):  # 2.02 는 첨부 보도자료가 본문이다(8-K 본문은 「첨부한다」 한 줄)
-            text = (exhibit(sec, cik, r["accession"]) if "2.02" in r["items"] else html_text(sec.doc(cik, r["accession"], r["doc"])))[:20000]
+        if needs_text(r["items"]):  # 2.02·7.01·8.01 은 첨부 보도자료가 본문이다(8-K 본문은 「첨부한다」 한 줄)
+            text = html_text(sec.doc(cik, r["accession"], r["doc"]))[:6000] if "2.02" not in r["items"] else ""
+            if set(r["items"].split(",")) & {"2.02", "7.01", "8.01"}:
+                text += " " + exhibit(sec, cik, r["accession"])[:20000]
+        if (d := future_day(EARNINGS_DAY, text, date.fromisoformat(r["date"]), 60)):  # 「Q3 실적은 10월 21일에」 — 회사가 알린 날만(짐작하지 않는다)
+            con.execute("insert or replace into events values (?, ?, 'EARNINGS', '실적 발표 (회사가 알린 날)', ?)", (ticker, d.isoformat(), r["accession"]))
         code, imp, dr, title = classify_8k(r["items"], text)
         # read_model 「8-K」 = 번호로 이미 분류함 — 국내 공시 AI 분류(read_disclosures)가 덮어쓰지 않게
         con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?)",
                     (r["accession"], ticker, r["date"], title, code, imp, dr, datetime.now().isoformat()))  # fmt: skip
         n += 1
     return n
+
+
+def save_agm(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: list[dict]) -> int:
+    """주총 소집 공고(DEF 14A)에서 정기 주총 날짜 — 가장 최근 한 장, 한 번만 연다."""
+    r = next((r for r in sorted(rows, key=lambda r: r["date"], reverse=True) if r["form"] == "DEF 14A"), None)
+    if not r or con.execute("select 1 from events where rcept_no = ?", (r["accession"],)).fetchone() or \
+            con.execute("select 1 from skipped where accession = ?", (r["accession"],)).fetchone():
+        return 0
+    d = future_day(AGM_DAY, html_text(sec.doc(cik, r["accession"], r["doc"]))[:60000], date.fromisoformat(r["date"]) - timedelta(days=1), 120)
+    if not d:
+        con.execute("insert or ignore into skipped values (?, ?)", (r["accession"], ticker))  # 날짜를 못 찾은 공고는 다시 열지 않는다
+        return 0
+    con.execute("insert or replace into events values (?, ?, 'AGM', '정기 주주총회', ?)", (ticker, d.isoformat(), r["accession"]))
+    return 1
 
 
 def save_13dg(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: list[dict]) -> int:
@@ -684,6 +721,7 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
                     ins += 1
             got["8-K"] = got.get("8-K", 0) + save_8k(con, sec, ticker, cik, rows, today)
             got["5%"] = got.get("5%", 0) + save_13dg(con, sec, ticker, cik, rows)
+            got["주총"] = got.get("주총", 0) + save_agm(con, sec, ticker, cik, rows)
             con.commit()
             got["회사"] += 1
             for k, v in zip(("연간", "분기", "흐름", "공시", "임원"), (f, q, fl, len(rows), ins)):

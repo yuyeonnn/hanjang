@@ -1513,22 +1513,22 @@ class App:
                     _, name, code, _, rno, dr, _, _ = rs[0]
                     tint = {1: "bg-secondary-fixed text-on-secondary-fixed-variant", -1: "bg-tertiary-fixed text-on-tertiary-fixed-variant"}.get(dr, "bg-surface-container-high text-on-surface-variant")
                     many = f" {len(rs)}건" if len(rs) > 1 else ""
-                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
-                                 f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}{many}</a>")  # fmt: skip
+                    chips.append(f'<span title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))}</span><span class='hidden lg:inline'>{e(name)}</span> {e(EVENT_SHORT.get(code, ''))}{many}</span>")  # fmt: skip
                 for rno, _, name, _, total, *_ in bond_by.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} 회사채 {e(notes.won(total))}" class="{CHIP} bg-surface-container-high text-on-surface-variant">'
-                                 f"<span class='lg:hidden'>{e(short_name(name))} 채권</span><span class='hidden lg:inline'>{e(name)} 회사채 {e(notes.won(total))}</span></a>")  # fmt: skip
+                    chips.append(f'<span title="{e(name)} 회사채 {e(notes.won(total))}" class="{CHIP} bg-surface-container-high text-on-surface-variant">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))} 채권</span><span class='hidden lg:inline'>{e(name)} 회사채 {e(notes.won(total))}</span></span>")  # fmt: skip
                 for name, kind, what, rno in ahead.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} {e(what)}" class="{CHIP} border border-primary/40 text-primary">'
-                                 f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></a>")  # fmt: skip
+                    chips.append(f'<span title="{e(name)} {e(what)}" class="{CHIP} border border-primary/40 text-primary">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))} {AHEAD_SHORT.get(kind, '')}</span><span class='hidden lg:inline'>{e(name)} {e(what)}</span></span>")  # fmt: skip
                 for _, kind, nat, what in macro_by.get(iso, []) if d.month == m else []:
                     chips.append(f'<span title="{e(what)}" class="{CHIP} border border-dashed border-outline-variant text-on-surface-variant">'
                                  f"<span class='lg:hidden'>{FLAG[nat]} {e(kind)}</span><span class='hidden lg:inline'>{e(what)}</span></span>")  # fmt: skip
                 for name, what, rno in ipo_by.get(iso, []) if d.month == m else []:
-                    chips.append(f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
-                                 f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></a>")  # fmt: skip
+                    chips.append(f'<span title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
+                                 f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></span>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
-                pick = f' data-day="{iso}" onclick="if(!event.target.closest(&quot;a&quot;))pickDay(this.dataset.day)"' if d.month == m else ""  # 칩(원문 링크) 말고 칸을 누르면 그 날 일정
+                pick = f' data-day="{iso}" onclick="pickDay(this.dataset.day)"' if d.month == m else ""  # 칸 어디를 눌러도(칩 포함) 그날 일정 — 칩은 원문 링크가 아니다(사용자 10/10: 누르면 원문으로 넘어가 힘들다) 일정
                 cells.append(f'<div{pick} class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 rounded-lg flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else "cursor-pointer hover:bg-surface-container-low"}">{cell}</div>')
         items = []
         for rs in mine:

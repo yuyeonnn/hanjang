@@ -92,7 +92,8 @@ def test_calendar_month_grid_marks_red_days_and_events():
     red = '<span class="font-label-micro text-label-micro lg:text-[14px] text-tertiary font-semibold">'
     assert '<span class="font-label-micro text-label-micro lg:text-[14px] text-on-surface font-medium">9</span><span class="text-[8px] lg:text-[11px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">한글날' in html_  # 공휴일은 시안대로 검정
     assert red + "4</span>" in html_  # 일요일
-    assert "<span class='lg:hidden'>삼성</span><span class='hidden lg:inline'>삼성전자</span> 자사주</a>" in html_ and "오늘</span>" in html_
+    assert "<span class='lg:hidden'>삼성</span><span class='hidden lg:inline'>삼성전자</span> 자사주</span>" in html_ and "오늘</span>" in html_
+    assert 'target="_blank" rel="noopener" title=' not in html_  # 칸 안 칩은 원문 링크가 아니다 — 누르면 그날 일정 (사용자 10/10)
     assert "자기주식취득결정 (자사주 매입)" in html_ and "이번 달 주목할 공시 1건" in html_
     assert "2026년 10월" in app.calendar(uid, "nonsense", today=date(2026, 10, 7))  # 이상한 값은 이번 달
     con.execute("insert into events values ('005930', '2026-10-29', 'EARNINGS', '실적 발표', '20261007000002')")
