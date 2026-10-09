@@ -260,14 +260,14 @@ def html(m: dict) -> str:
            + "</section>")  # fmt: skip
 
     lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요."
-    # 접힌 카드 한 장(눌러서 펼침). 해 아이콘·날짜 한 줄 + 이야기 한 줄만 (사용자 10/10)
-    card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" '
-            'class="group mt-space-md w-full text-left rounded-2xl border border-surface-container-high bg-surface-container-lowest '
-            'shadow-[0_10px_24px_-12px_rgba(21,69,57,0.45)] hover:shadow-[0_14px_30px_-12px_rgba(21,69,57,0.55)] hover:-translate-y-0.5 transition-all px-4 py-3.5 flex items-center gap-3">'
-            f'<span class="flex-1 min-w-0 flex flex-col gap-1"><span class="flex items-center gap-1 text-[12px] font-semibold text-primary">'
+    # 접힌 카드 — 흰 상자 대신 위아래 두 줄(실선+점선) 사이에 글만, 읽기 팁 머리글과 같은 모양 (사용자 10/10). 누르면 펼침
+    top = '<span class="block border-t-2 border-primary"></span><span class="block mt-[3px] border-t-2 border-dotted border-primary"></span>'
+    bottom = '<span class="block border-t-2 border-dotted border-primary"></span><span class="block mt-[3px] border-t-2 border-primary"></span>'
+    card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" class="group block w-full mt-space-lg mb-space-xl text-center">'
+            + top + '<span class="block py-4 px-2"><span class="flex items-center justify-center gap-1 text-[12px] font-semibold text-primary">'
             f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
-            f'<span class="text-[15px] font-semibold text-on-surface truncate">{e(lead)}</span></span>'
-            '<span class="material-symbols-outlined shrink-0 text-primary transition-transform group-hover:translate-x-0.5">chevron_right</span></button>')  # fmt: skip
+            f'<span class="mt-1.5 flex items-center justify-center gap-0.5 text-[17px] font-bold text-primary"><span class="truncate">{e(lead)}</span>'
+            '<span class="material-symbols-outlined shrink-0 text-[20px] transition-transform group-hover:translate-x-0.5">chevron_right</span></span></span>' + bottom + '</button>')  # fmt: skip
     # 위에 뜨는 카드 — 뒤 화면은 가리지 않고(사용자 10/10) 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
              'class="w-[calc(100%-32px)] max-w-[448px] max-h-[82vh] p-0 rounded-3xl bg-surface-container-lowest border border-primary/10 backdrop:bg-transparent overflow-hidden '
