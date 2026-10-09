@@ -504,7 +504,7 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
                    f'<span class="hidden sm:inline w-9 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>'
                    for (k, (v, n)), col in zip(parts, DONUT))  # fmt: skip
     return ('<section class="mt-space-xl"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
-            f'<div class="mt-3 flex h-4 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'
+            f'<div class="mt-3 flex h-2.5 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'  # 막대는 얇게 (사용자 10/10: 조금만 줄여)
             f'<ul class="mt-4 grid grid-cols-2 gap-x-5 gap-y-2.5">{keys}</ul>'
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
