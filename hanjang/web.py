@@ -529,14 +529,15 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
                    f'<span class="hidden sm:inline w-9 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>'
                    for (k, (v, n)), col in zip(parts, DONUT))  # fmt: skip
     return ('<section class="mt-space-xl"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
-            f'<div class="mt-3 flex h-4 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'
+            f'<div class="mt-3 flex h-2.5 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'  # 막대는 얇게 (사용자 10/10: 조금만 줄여)
             f'<ul class="mt-4 grid grid-cols-2 gap-x-5 gap-y-2.5">{keys}</ul>'
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 이름 목록(사용자 10/10: 선을 그은 원형 배치는 어수선).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로. 색 네모로 조각과 잇는다.
+    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
+    조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -554,24 +555,34 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
         slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= 99.99 else
                       f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>')  # fmt: skip
         m = (a + b) / 2
-        sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col))
+        sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col, m))
         a = b
 
     def column(right: bool) -> str:
-        # 휴대폰은 이름 밑에 %(같은 크기), 넓으면 한 줄 — 긴 이름은 칸 안에서 말줄임
+        # 휴대폰·태블릿은 이름 밑에 %(같은 크기), 컴퓨터 화면이면 한 줄 — 긴 이름은 칸 안에서 말줄임
         rows = "".join(
             f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
-            f'<span class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
-            f'<span class="min-w-0 flex flex-col sm:flex-row sm:gap-1.5 {"items-start" if right else "items-end"}">'
+            f'<span data-ang="{m:.4f}" class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
+            f'<span class="min-w-0 flex flex-col lg:flex-row lg:gap-1.5 {"items-start" if right else "items-end"}">'
             f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
             f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
-            for _, k, pct, col in sorted(sides[right]))  # fmt: skip
+            for _, k, pct, col, m in sorted(sides[right]))  # fmt: skip
         return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div class="mt-4 flex items-center gap-3 sm:gap-5">' + column(False)
-            + f'<svg viewBox="0 0 100 100" class="w-28 h-28 sm:w-40 sm:h-40 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
-            + column(True) + "</div></section>")  # fmt: skip
+            '<div data-pie class="relative mt-4 flex items-center gap-6 lg:gap-10">' + column(False)
+            + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
+            + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
+
+
+# 파이 조각 → 이름 옆 색 네모까지 곧은 선 하나 (조각 가장자리에서 네모 앞까지, 꺾지 않고 점도 없이 — 사용자 10/10)
+PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
+var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
+var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
+box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
+var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>';});
+lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -2373,6 +2384,20 @@ class App:
         """「**핵심 말**」 → 진한 초록 굵은 글씨. 나머지는 그대로 이스케이프."""
         return re.sub(r"\*\*(.+?)\*\*", r'<strong class="font-semibold text-primary">\1</strong>', e(text))
 
+    @staticmethod
+    def related(slug: str) -> str:
+        """글 아래 「함께 읽으면 좋은 팁」 — 이어 읽을 글 세 편 (사용자 10/10)."""
+        items = [learn.BY_SLUG[x] for x in learn.RELATED.get(slug, []) if x in learn.BY_SLUG]
+        if not items:
+            return ""
+        return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-sm text-headline-sm text-on-surface mb-1">함께 읽으면 좋은 팁</h2>'
+                '<div class="flex flex-col divide-y divide-surface-container-high/80">'
+                + "".join(f'<a href="/learn/{e(x["slug"])}" class="py-3 flex items-center justify-between gap-space-sm group"><span class="flex flex-col min-w-0">'
+                          f'<span class="text-[12px] text-primary font-semibold">{e(x["cat"])}</span>'
+                          f'<span class="font-body-reading-strong text-body-reading-strong text-on-surface group-hover:underline">{e(x["title"])}</span></span>'
+                          '<span class="material-symbols-outlined text-primary text-[18px]">chevron_right</span></a>' for x in items)
+                + "</div></section>")  # fmt: skip
+
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
         end = ('<p class="font-label-micro text-label-micro text-outline text-center py-space-lg">설명을 위한 글이에요. 특정 종목이나 상품을 추천하지 않아요.</p></div></main>'
@@ -2401,6 +2426,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
+                     + self.related(slug)
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
         groups = "".join(

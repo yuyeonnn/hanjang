@@ -721,3 +721,13 @@ def test_installable_app_pieces_are_public(monkeypatch):
     monkeypatch.setattr(web, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
     s, _, body = call(app, "/.well-known/assetlinks.json")
     assert json.loads(body)[0]["target"] == {"namespace": "android_app", "package_name": "kr.hanjang.app", "sha256_cert_fingerprints": ["AA:BB"]}
+
+
+def test_learn_related_tips():
+    from hanjang import learn
+
+    assert all(x in learn.BY_SLUG for v in learn.RELATED.values() for x in v)  # 잇는 글은 모두 있는 글
+    app, con = _app()
+    ck = _login(app)
+    body = call(app, "/learn/dividend", cookie=ck)[2]
+    assert "함께 읽으면 좋은 팁" in body and 'href="/learn/disclosure"' in body
