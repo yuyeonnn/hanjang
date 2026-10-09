@@ -3,6 +3,7 @@
 새 13F 가 나온 투자자만 보유 표를 다시 받는다. 13F 에는 티커가 없어 CUSIP 으로 우리 종목과 맞춘다(cusip_us.txt).
 정치인 주식 거래 신고(STOCK Act)는 미국 법이 상업적 사용을 막아 뺐다 — 전문가 확인 뒤에 (사용자 10/10)."""
 
+import io
 import re
 from datetime import date
 from pathlib import Path
@@ -22,6 +23,10 @@ GURUS = {
     "lilu": ("리 루 · 히말라야 캐피털", 1709323, "리 루가 이끄는 운용사예요. 찰리 멍거가 높이 평가한 투자자로 알려져 있어요.", None),
     "soros": ("조지 소로스 · 소로스 펀드", 1029160, "조지 소로스가 세운 운용사예요.", None),
 }  # fmt: skip
+# 큰손 포트폴리오 기관(holders.BIG 키) 가운데 미국에 13F 를 내는 곳 → CIK 들. 여럿이면 합친다(캐피털그룹은 세 부문이 따로 낸다)
+# 삼성자산운용(뉴욕)은 2016년이 마지막이라 뺐다. 미래에셋은 미국 ETF 법인(글로벌 X)의 신고
+INSTS = {"nps": [1608046], "blackrock": [2012383], "capital": [1422848, 1422849, 1562230], "miraeam": [1705339],
+         "silchester": [1506409], "pzena": [1027796]}  # fmt: skip
 CUSIPS = Path(__file__).parent / "cusip_us.txt"
 
 
@@ -35,19 +40,20 @@ def cusip_map() -> dict[str, str]:
     return out
 
 
-def parse(xml: str) -> list[tuple[str, str, int, int]]:
+def parse(xml: str | bytes) -> list[tuple[str, str, int, int]]:
     """13F 정보표 → [(CUSIP, 회사 이름, 금액 달러, 주식 수)]. 같은 CUSIP 은 더한다(운용 담당이 나뉘어 여러 줄).
-    풋·콜(옵션)과 채권(PRN)은 뺀다 — 주식을 가진 것이 아니다."""
-    xml = re.sub(r'\sxmlns(:\w+)?="[^"]+"', "", xml)
-    xml = re.sub(r'\s\w+:\w+="[^"]*"', "", re.sub(r"<(/?)\w+:", r"<\1", xml))  # 이름공간 머리말(ns1:)과 xsi:schemaLocation 같은 속성
+    풋·콜(옵션)과 채권(PRN)은 뺀다 — 주식을 가진 것이 아니다. 한 줄씩 읽고 버린다 — 블랙록 표는 23MB 라 한 번에 펼치면 서버(1GB)가 버겁다."""
     got: dict[str, list] = {}
-    for it in ElementTree.fromstring(xml).iter("infoTable"):
-        if it.findtext("putCall") or it.findtext("shrsOrPrnAmt/sshPrnamtType") != "SH":
+    for _, it in ElementTree.iterparse(io.BytesIO(xml.encode() if isinstance(xml, str) else xml)):
+        if it.tag.rsplit("}", 1)[-1] != "infoTable":
             continue
-        c = it.findtext("cusip").strip().upper()
-        row = got.setdefault(c, [it.findtext("nameOfIssuer").strip(), 0, 0])
-        row[1] += int(float(it.findtext("value") or 0))
-        row[2] += int(float(it.findtext("shrsOrPrnAmt/sshPrnamt") or 0))
+        f = {x.tag.rsplit("}", 1)[-1]: (x.text or "").strip() for x in it.iter()}  # 이름공간(ns1:)을 뗀 이름 → 값
+        it.clear()
+        if f.get("putCall") or f.get("sshPrnamtType") != "SH":
+            continue
+        row = got.setdefault(f["cusip"].upper(), [f["nameOfIssuer"], 0, 0])
+        row[1] += int(float(f.get("value") or 0))
+        row[2] += int(float(f.get("sshPrnamt") or 0))
     # 2023년부터 금액은 달러지만 옛 습관대로 천 달러로 내는 곳이 있다(듀케인) — 1주 값이 대부분 1달러 아래면 천 달러로 본다
     # ponytail: 한 주 값 가운뎃값으로 가른다 — 동전주만 든 투자자가 생기면 신고서 표지(primary_doc)를 보도록
     prices = sorted(v / s for _, v, s in got.values() if s)
@@ -62,11 +68,11 @@ def latest(sec: us.Edgar, cik: int) -> tuple[str, str, str] | None:
     return (r["accessionNumber"][i], r["reportDate"][i], r["filingDate"][i]) if i is not None else None
 
 
-def table(sec: us.Edgar, cik: int, accn: str) -> str:
+def table(sec: us.Edgar, cik: int, accn: str) -> bytes:
     folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}"
     names = [x["name"] for x in sec._get(f"{folder}/index.json").json()["directory"]["item"]]
     xml = next(n for n in names if n.endswith(".xml") and n != "primary_doc.xml")
-    return sec._get(f"{folder}/{xml}").text
+    return sec._get(f"{folder}/{xml}").content
 
 
 # 업종 — SEC 산업분류(SIC) 네 자리를 국내 도넛과 같은 큰 업종으로. 위에서부터 먼저 맞는 것
@@ -118,28 +124,33 @@ def main(today: date | None = None, con=None, sec=None) -> None:
     con, sec, n = con or db.connect(), sec or us.Edgar(), 0
     tickers, index = cusip_map(), None
     ours = dict(con.execute("select ticker, sic from stocks where market = 'US'").fetchall())
-    for key, (_, cik, _, _) in GURUS.items():
-        got = latest(sec, cik)
-        if not got or con.execute("select 1 from guru_holdings where guru = ? and accn = ? and sic is not null", (key, got[0])).fetchone():
+    for key, ciks in [(k, [v[1]]) for k, v in GURUS.items()] + list(INSTS.items()):
+        each = [(cik, g) for cik in ciks if (g := latest(sec, cik))]
+        if not each:
+            continue
+        got = ("+".join(g[0] for _, g in each), max(g[1] for _, g in each), max(g[2] for _, g in each))  # 여러 부문이면 접수 번호를 잇는다
+        if con.execute("select 1 from guru_holdings where guru = ? and accn = ? and sic is not null", (key, got[0])).fetchone():
             continue  # 새 신고가 없으면 그대로 (업종을 아직 안 붙인 옛 줄이면 다시)
-        if index is None:  # 정규화한 이름 → CIK. 같은 이름이 여럿이면 처음 것(티커 표는 시가총액 큰 순)
+        person = key in GURUS  # 업종 도넛은 유명 투자자만 — 기관(블랙록 수천 종목)까지 업종을 찾으면 SEC 를 수천 번 부른다
+        if person and index is None:  # 정규화한 이름 → CIK. 같은 이름이 여럿이면 처음 것(티커 표는 시가총액 큰 순)
             index = {}
             for c, title in sec.tickers().values():
                 index.setdefault(norm(title), c)
         merged: dict[str, list] = {}  # 우리 종목은 티커로 합친다 — 알파벳 A·C 가 두 줄로 나오지 않게
-        for c, name, v, s in parse(table(sec, cik, got[0])):
-            row = merged.setdefault(tickers.get(c, c), [c, name, 0, 0])
-            row[2] += v
-            row[3] += s
+        for cik, g in each:
+            for c, name, v, s in parse(table(sec, cik, g[0])):
+                row = merged.setdefault(tickers.get(c, c), [c, name, 0, 0])
+                row[2] += v
+                row[3] += s
         total = sum(v for _, _, v, _ in merged.values()) or 1
         con.execute("delete from guru_holdings where guru = ?", (key,))
         con.executemany("insert into guru_holdings (guru, cusip, issuer, ticker, value, shares, weight, accn, period, filed, sic)"
                         " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [(key, c, name, tickers.get(c), v, s, v / total * 100, *got,
-                          ours.get(tickers.get(c)) or sic_of(con, sec, index, name)) for c, name, v, s in merged.values()])  # fmt: skip
+                          ours.get(tickers.get(c)) or (sic_of(con, sec, index, name) if person else "")) for c, name, v, s in merged.values()])  # fmt: skip
         con.commit()
         n += 1
-    print(f"유명 투자자 13F — 새 신고 {n}곳 · SEC {sec.calls}콜")
+    print(f"유명 투자자·기관 13F — 새 신고 {n}곳 · SEC {sec.calls}콜")
 
 
 if __name__ == "__main__":
