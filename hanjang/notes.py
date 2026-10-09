@@ -972,6 +972,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(았|었)(?:으로|로)(?=[,\s])", r"\1고", text)
     text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
     text = re.sub(r"(\d년)년", r"\1", text)
+    text = re.sub(r"(\d주)이에요", lambda m: m[1] + "예요", text)  # 「433만 2,118주이에요」
     text = re.sub(r"달러이(에요|라서|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)

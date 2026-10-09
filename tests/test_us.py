@@ -195,3 +195,35 @@ def test_outlook_quotes_must_be_in_the_release_and_are_said_in_korean():
 def test_parts_must_cover_most_of_revenue():
     a, b = [{"revenue": 12}, {"revenue": 9}], [{"revenue": 60}, {"revenue": 40}]
     assert us.covering(100, a, b) is b and us.covering(100, a) == []
+
+
+def test_us_note_page_has_no_won_charts_and_says_sec(monkeypatch):
+    from hanjang import notes, web
+    monkeypatch.setattr(us, "universe", lambda: [("NVDA", "엔비디아")])
+    con = db.connect(":memory:")
+    us.main(date(2026, 10, 9), con, FakeSec())
+    con.execute("insert into macro values ('ECOS:731Y003:0000003', '2026-10-08', 1338.5)")
+    fs = notes.facts(con, "NVDA", date(2026, 10, 9))
+    note = notes.code_note(fs)
+    con.execute("insert into notes values ('NVDA', '2026-10-05', ?, ?, 'code', 'now')", (json.dumps(fs), json.dumps(note)))
+    app = web.App(con, "s")
+    r = app.report("NVDA")
+    assert r["us"] and r["fin"] is None and r["divs"] == []
+    html_ = web.render_note("엔비디아", "NVDA", "2026-10-05", note, "code", fs, report=r)
+    assert "한눈에 보기" not in html_ and "2,159억원" not in html_ and "2,159억 달러" in html_
+    assert "DART) 원문이 열려요" not in html_ and "SEC) 공시 원문이 열려요" in html_
+    assert notes.mend("합계 433만 2,118주이에요.") == "합계 433만 2,118주예요."
+
+
+def test_first_note_for_us_stock_skips_dart(monkeypatch):
+    """미국 종목을 담으면 DART 에 묻지 않고 바로 노트 — 자료는 매일 실행(us.main)이 이미 받아 둔다."""
+    from hanjang import collect, notes, sources
+
+    con = db.connect(":memory:")
+    con.execute("insert into stocks (ticker, name, corp_code, active, market) values ('AAPL', '애플', '320193', 0, 'US')")
+    monkeypatch.setattr(db, "connect", lambda *a: con)
+    monkeypatch.setattr(sources, "Dart", lambda: (_ for _ in ()).throw(AssertionError("DART 를 부르면 안 된다")))
+    wrote = []
+    monkeypatch.setattr(notes, "main", lambda tickers, today: wrote.extend(tickers))
+    collect.first("AAPL", date(2026, 10, 10))
+    assert wrote == ["AAPL"]

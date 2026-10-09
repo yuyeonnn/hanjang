@@ -911,7 +911,26 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
               "function closeCitation(ev){if(ev.target.id==='citation-dialog')hideCitation();}</script>")  # fmt: skip
     inner = (head + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-safe bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-space-xl">'
              + "".join(parts) + dialog + "</div></main>")  # fmt: skip
+    if report.get("us"):
+        inner = us_words(inner)
     return page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+
+US_WORDS = (  # 노트 화면의 국내(DART) 안내 → 미국(SEC) 안내. 노트 본문(AI 글)은 건드리지 않는다
+    (re.compile(r"회사가 낸 \d+년 사업보고서를 요약했어요"), "회사가 SEC 에 낸 최근 연차 보고서(10-K)를 요약했어요"),
+    (re.compile(r"· DART 기준 자동 분류"), "· SEC 8-K 번호로 자동 분류"),
+    (re.compile(r"임원 보고에는 회사에서 받은 주식\(보상\)도 들어가요\. 누가 늘리고 줄였는지는"),
+     "미국은 시장에서 실제로 사고판 거래만 셌어요(회사에서 받은 보상 주식은 뺐어요). 누가 사고팔았는지는"),
+    (re.compile(r"회사가 사업보고서에 스스로 적은 위험"), "회사가 연차 보고서(10-K)에 스스로 적은 위험"),
+    (re.compile(r"금융감독원 전자공시\(DART\) 원문이 열려요"), "미국 증권거래위원회(SEC) 공시 원문이 열려요"),
+    (re.compile(r"소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요\. 기사 본문은 받지 않아요\. "), ""),
+)
+
+
+def us_words(html_: str) -> str:
+    for pat, new in US_WORDS:
+        html_ = pat.sub(new, html_)
+    return html_
 
 
 FLAG = {"KR": "한", "US": "미"}  # 국기 이모지는 윈도우에서 「KR」 글자로 나와서 쓰지 않는다
@@ -1399,6 +1418,11 @@ class App:
                                          if sources.price_dev() else None, report=self.report(ticker))  # fmt: skip
 
     def report(self, ticker: str) -> dict:
+        if self.con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
+            # 미국 — 「한눈에 보기」 그림·배당 막대는 원 단위·DART 서식이라 넘기지 않는다(달러 숫자에 「원」이 붙었다, 10/10). 같은 숫자는 본문에 있다
+            biz = self.con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
+            return {"divs": [], "biz": json.loads(biz[0]) if biz else None, "rno": self.src(biz[1]) if biz else None,
+                    "fin": None, "fins": None, "buys": [], "mid": {}, "us": True}  # fmt: skip
         divs = self.con.execute("select fiscal_year, dps, total, payout from dividends where ticker = ? order by fiscal_year", (ticker,)).fetchall()
         biz = self.con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
         fins = self.con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities from financials"
@@ -1511,7 +1535,7 @@ class App:
             d, name, code, title, rno, dr, t, _ = rs[0]
             dd = date.fromisoformat(d)
             label, chip = TONE_TAG.get(dr or 0, TONE_TAG[0])
-            src = "DART 공시: " + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
+            src = ("SEC 공시: " if "-" in rno else "DART 공시: ") + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
             title = clean_title(title, code) + (f" 외 {len(rs) - 1}건" if len(rs) > 1 else "")
             items.append((1, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
                          f'<span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · {e(name)} ({e(t)})</span>'
@@ -2140,6 +2164,8 @@ class App:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 윈도우 콘솔(cp949)이 「—」를 못 찍어 뒤에서 도는 첫 노트 쓰기가 멈췄다 (10/10)
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     import threading
     from socketserver import ThreadingMixIn
     from wsgiref.simple_server import WSGIServer, make_server
