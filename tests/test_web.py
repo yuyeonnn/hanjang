@@ -439,10 +439,10 @@ def test_big_holders_list_and_page():
     assert holders.who("국민연금공단") == "nps" and holders.who("홍길동") is None
 
 
-def test_donut_by_industry():
-    d = web.donut(["반도체", "반도체", "화학", None])
-    assert "4</span>" in d and "반도체" in d and "50%" in d and "기타" in d and "25%" in d
-    assert web.donut([]) == ""
+def test_industry_bars():
+    d = web.bars(["반도체", "반도체", "화학", None], [1, 1, 1, 1], "곳")
+    assert "width:50.00%" in d and ">반도체</span>" in d and ">50%</span>" in d and ">기타</span>" in d and ">25%</span>" in d and "2곳</span>" in d
+    assert web.bars([], []) == ""
 
     assert web.sector("264") == "전자·반도체" and web.sector("64992") == "금융" and web.sector("7150") == "지주회사" and web.sector(None) is None
 

@@ -333,7 +333,7 @@ def business_block(biz: dict | None, rno: str | None) -> str:
 
 
 def ring(parts: list[tuple[float, str]], size: str = "w-20 h-20") -> str:
-    """둘레 100 짜리 원 — (비율%, 색) 조각들을 이어 그린다. donut() 과 같은 수법."""
+    """둘레 100 짜리 원 — (비율%, 색) 조각들을 이어 그린다. dasharray 가 곧 %."""
     acc, out = 0.0, []
     for pct, col in parts:
         out.append(f'<circle cx="21" cy="21" r="15.915" fill="none" stroke="{col}" stroke-width="7" '
@@ -479,14 +479,8 @@ def sector(code: str | None) -> str | None:
 DONUT = ("#154539", "#2a5649", "#40695c", "#5b8172", "#7b9a8d", "#9db5aa", "#c0d1c9", "#e1e9e5")  # 진한 초록부터 — 한장 색
 
 
-def donut(labels: list[str | None], weights: list[float] | None = None, unit: str = "곳",
-          note: str = "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.") -> str:
-    """큰손 한눈에 — 가진 회사들이 어떤 업종에 몰려 있나. 많은 7개 큰 업종 + 기타.
-    국내 기관은 곳 수로 센다 — 지분율은 「그 회사 주식 중 몇 %」라서 더하면 뜻이 없다.
-    미국 유명 투자자는 금액(weights)으로 — 13F 금액은 한 사람의 돈이라 더하면 포트폴리오 비중이다."""
-    if not labels:
-        return ""
-    w = weights or [1] * len(labels)
+def groups(labels: list[str | None], w: list[float]) -> list[tuple[str, tuple[float, int]]]:
+    """업종별 (합, 곳 수) — 큰 7개 + 나머지는 기타 하나로."""
     cnt: dict[str, list] = {}
     for x, v in zip(labels, w):
         k = cnt.setdefault(x or "기타", [0, 0])
@@ -494,29 +488,30 @@ def donut(labels: list[str | None], weights: list[float] | None = None, unit: st
         k[1] += 1
     top = sorted(((k, v) for k, v in cnt.items() if k != "기타"), key=lambda kv: -kv[1][0])[:7]
     rest = [sum(v) for v in zip(*(cnt[k] for k in cnt if k not in dict(top)))] or [0, 0]
-    parts = top + ([("기타", rest)] if rest[1] else [])
-    total, r, c = sum(w), 15.915, 2 * 3.14159 * 15.915  # 둘레 100 짜리 원 — dasharray 가 곧 %
-    acc, rings, keys = 0.0, [], []
-    for (k, (v, n)), col in zip(parts, DONUT):
-        pct = v / total * 100
-        rings.append(f'<circle cx="21" cy="21" r="{r}" fill="none" stroke="{col}" stroke-width="7" '
-                     f'stroke-dasharray="{pct:.2f} {100 - pct:.2f}" stroke-dashoffset="{25 - acc:.2f}"/>')  # fmt: skip
-        keys.append(f'<li class="flex items-center gap-2 py-1"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:{col}"></span>'
-                    f'<span class="flex-1 text-[13px] text-on-surface truncate">{e(k)}</span>'
-                    f'<span class="text-[13px] font-semibold text-on-surface tabular-nums">{pct:.0f}%</span>'
-                    f'<span class="w-12 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>')  # fmt: skip
-        acc += pct
-    return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
-            '<div class="mt-2 flex items-center gap-4"><div class="relative w-36 h-36 shrink-0">'
-            f'<svg viewBox="0 0 42 42" class="w-full h-full -rotate-0">{"".join(rings)}</svg>'
-            f'<div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[20px] font-bold text-on-surface leading-none">{len(labels)}</span>'
-            f'<span class="text-[11px] text-outline mt-0.5">{unit}</span></div></div>'
-            f'<ul class="flex-1 min-w-0">{"".join(keys)}</ul></div>'
-            f'<p class="mt-1 text-[11px] text-outline">{e(note)}</p></section>')  # fmt: skip
+    return top + ([("기타", rest)] if rest[1] else [])
+
+
+def bars(labels: list[str | None], weights: list[float], unit: str = "종목", note: str = "") -> str:
+    """업종 — 가로로 긴 막대 하나를 비율대로 나누고, 밑에 두 줄씩 이름. 도넛보다 크기 차이가 한눈에 (사용자 10/10)."""
+    if not labels:
+        return ""
+    parts, total = groups(labels, weights), sum(weights) or 1
+    segs = "".join(f'<span class="h-full" style="width:{v / total * 100:.2f}%;background:{col}" title="{e(k)} {v / total * 100:.0f}%"></span>'
+                   for (k, (v, _)), col in zip(parts, DONUT))  # fmt: skip
+    keys = "".join(f'<li class="flex items-center gap-2 min-w-0"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:{col}"></span>'
+                   f'<span class="flex-1 text-[13px] text-on-surface truncate">{e(k)}</span>'
+                   f'<span class="text-[13px] font-semibold text-on-surface tabular-nums">{v / total * 100:.0f}%</span>'
+                   f'<span class="hidden sm:inline w-9 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>'
+                   for (k, (v, n)), col in zip(parts, DONUT))  # fmt: skip
+    return ('<section class="mt-space-xl"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
+            f'<div class="mt-3 flex h-4 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'
+            f'<ul class="mt-4 grid grid-cols-2 gap-x-5 gap-y-2.5">{keys}</ul>'
+            + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", note: str = "", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 조각 안에 %(작은 조각은 빼고), 오른쪽에 이름.
+    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 이름·%는 조각 방향 바깥에 빙 둘러(사용자 10/10).
+    오른쪽 반의 조각은 오른쪽에, 왼쪽 반은 왼쪽에 — 한쪽에 몰리면 위아래로 벌려 겹치지 않게 하고 꺾은 선으로 조각과 잇는다.
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -526,27 +521,41 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     parts = [(k, v / total * 100) for k, v in items[:n]]
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
-    slices, labels, keys, a = [], [], [], -math.pi / 2  # 12시 방향에서 시계 방향으로
-    for i, ((k, pct), col) in enumerate(zip(parts, DONUT if parts[-1][0] != "기타" else DONUT[: len(parts) - 1] + DONUT[-1:])):
+    cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
+    W, H, cx, cy, r, gap = 360, 240, 180, 120, 82, 34  # 그림 크기 · 원 · 이름 사이 최소 간격
+    slices, marks, a = [], [], -math.pi / 2  # 12시 방향에서 시계 방향으로
+    for (k, pct), col in zip(parts, cols):
         b = a + pct / 100 * 2 * math.pi
-        x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
-        d = (f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= 99.99 else
-             f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1.2"/>')
-        slices.append(d)
-        if pct >= 7:  # 작은 조각엔 숫자를 넣지 않는다 — 오른쪽 목록에 있다
-            m = (a + b) / 2
-            ink = "#fff" if i < 4 and k != "기타" else "#1b1b1d"
-            labels.append(f'<text x="{50 + 30 * math.cos(m):.1f}" y="{50 + 30 * math.sin(m):.1f}" text-anchor="middle" dominant-baseline="central" '
-                          f'font-size="{11 if pct >= 25 else 8}" font-weight="700" fill="{ink}">{pct:.0f}%</text>')  # fmt: skip
-        keys.append(f'<li class="flex items-center gap-2 py-1"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:{col}"></span>'
-                    f'<span class="flex-1 text-[13px] text-on-surface truncate">{e(k)}</span>'
-                    f'<span class="text-[13px] font-semibold text-on-surface tabular-nums">{pct:.1f}%</span></li>')  # fmt: skip
+        x1, y1, x2, y2 = cx + r * math.cos(a), cy + r * math.sin(a), cx + r * math.cos(b), cy + r * math.sin(b)
+        slices.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{col}"/>' if pct >= 99.99 else
+                      f'<path d="M{cx} {cy} L{x1:.1f} {y1:.1f} A{r} {r} 0 {1 if b - a > math.pi else 0} 1 {x2:.1f} {y2:.1f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="2"/>')  # fmt: skip
+        m = (a + b) / 2
+        marks.append([k, pct, col, m, cy + (r + 18) * math.sin(m), math.cos(m) >= 0])
         a = b
+    for right in (True, False):  # 한쪽 이름들을 위에서부터 차례로 — 붙으면 아래로 밀고, 넘치면 다 같이 위로
+        side = sorted((x for x in marks if x[5] == right), key=lambda x: x[4])
+        for i in range(1, len(side)):
+            side[i][4] = max(side[i][4], side[i - 1][4] + gap)
+        if side and (over := side[-1][4] - (H - 14)) > 0:
+            for x in side:
+                x[4] -= over
+        for i in range(len(side) - 2, -1, -1):
+            side[i][4] = min(side[i][4], side[i + 1][4] - gap)
+    texts = []
+    for k, pct, col, m, y, right in marks:
+        px, py = cx + r * math.cos(m), cy + r * math.sin(m)
+        ex = cx + (r + 16) * (1 if right else -1)
+        tx = ex + (8 if right else -8)
+        anchor = "start" if right else "end"
+        name = k if len(k) <= (13 if k.isascii() else 8) else k[: 12 if k.isascii() else 7] + "…"
+        texts.append(f'<polyline points="{px:.1f},{py:.1f} {ex:.1f},{y:.1f} {tx - (3 if right else -3):.1f},{y:.1f}" fill="none" stroke="#c0c8c4" stroke-width="1"/>'
+                     f'<circle cx="{px:.1f}" cy="{py:.1f}" r="2" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>'
+                     f'<text x="{tx:.1f}" y="{y - 3:.1f}" text-anchor="{anchor}" font-size="11" fill="#404945">{e(name)}</text>'
+                     f'<text x="{tx:.1f}" y="{y + 12:.1f}" text-anchor="{anchor}" font-size="14" font-weight="700" fill="#1b1b1d">{pct:.1f}%</text>')  # fmt: skip
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div class="mt-2 flex items-center gap-4"><svg viewBox="0 0 100 100" class="w-36 h-36 shrink-0" role="img" '
-            f'aria-label="{e(title)}">{"".join(slices)}{"".join(labels)}</svg>'
-            f'<ul class="flex-1 min-w-0">{"".join(keys)}</ul></div>'
-            + (f'<p class="mt-1 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
+            f'<svg viewBox="0 0 {W} {H}" class="mt-2 w-full max-w-[460px] mx-auto block" role="img" aria-label="{e(title)}">'
+            f'{"".join(slices)}{"".join(texts)}</svg>'
+            + (f'<p class="mt-1 text-center text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -2229,7 +2238,7 @@ class App:
         total = sum(r[2] for r in rows)
         sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
         top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows], note="금액이 큰 다섯 종목이에요. 나머지는 기타에 모았어요.")
-        pie_ = donut([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
+        pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
                     "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
         def row(i, r):
@@ -2282,7 +2291,7 @@ class App:
                 f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳</span></div></header>'
                 f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
-                + donut([sector(x) for x in inds])
+                + bars([sector(x) for x in inds], [1] * len(inds), "곳", "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.")
                 + (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 늘리고 줄인 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                    + "".join(row(i, r) for i, r in enumerate(recent, 1)) + "</div></section>" if recent else "")
                 + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">지분이 큰 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'

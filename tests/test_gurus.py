@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from hanjang import db, gurus
@@ -82,10 +83,14 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "사진: <a" in html_ and "위키미디어 공용" in html_  # 페이지 맨 아래 사진 출처
     assert app.route("GET", "/static/people/buffett.jpg", {}, {}, None)[2][:2] == bytes([0xFF, 0xD8])  # JPEG
     assert "/static/people/burry.jpg" not in web.guru_face("burry")  # 자유 이용 사진이 없으면 글자 동그라미
-    assert "가장 많이 가진 종목" in html_ and ">56%</text>" in html_ and ">American Express Co</span>" in html_  # 파이 — 애플 660억/1,170억
+    assert "가장 많이 가진 종목" in html_ and ">56.4%</text>" in html_ and ">애플</text>" in html_ and ">American Exp…</text>" in html_  # 파이 둘레 이름 — 애플 660억/1,170억
+    assert 'text-anchor="start"' in html_ and 'text-anchor="end"' in html_  # 오른쪽 반·왼쪽 반에 나눠 둔다
     # 기관(국민연금)의 미국 주식 — 기관 페이지에 파이·10종목, 노트 맨 밑엔 유명 투자자 다음에
     con.execute("insert into guru_holdings values ('nps', '037833100', 'APPLE INC', 'AAPL', 9e9, 1, 5.9, 'x', '2026-06-30', '2026-08-13', '')")
     assert [r[0] for r in app.owners("AAPL")[2]] == ["워런 버핏 · 버크셔 해서웨이", "국민연금"] and "미국 주식의 5.9%" in app.owners("AAPL")[2][1][3]
     assert "미국 주식 포트폴리오" in app.us_portfolio("nps") and app.us_portfolio("blackrock") == ""
-    assert web.pie([("가", 50), ("나", 30), ("다", 20)], n=2).count("<path") == 3 and ">기타</span>" in web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)
+    assert web.pie([("가", 50), ("나", 30), ("다", 20)], n=2).count("<path") == 3 and ">기타</text>" in web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)
+    many = web.pie([(f"종목{i}", 10 - i) for i in range(6)] + [("나머지", 200)])  # 작은 조각 다섯이 오른쪽 위에 몰려도 이름은 34 이상 떨어진다
+    ys = sorted(float(y) for y in re.findall(r'<text x="[\d.]+" y="([\d.]+)" text-anchor="start" font-size="11"', many))
+    assert len(ys) >= 4 and min(b - a for a, b in zip(ys, ys[1:])) >= 33.9
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
