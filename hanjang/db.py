@@ -50,6 +50,8 @@ create table if not exists big_holdings (
   rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
 create table if not exists sics (cik integer primary key, sic text not null);
+create table if not exists nps_port (asof text not null, market text not null, name text not null, ticker text, won real not null, stake real);
+create table if not exists nps_meta (asof text primary key, fx real not null, accn text not null);
 create table if not exists guru_holdings (
   guru text not null, cusip text not null, issuer text not null, ticker text, value real not null, shares real not null,
   weight real not null, accn text not null, period text not null, filed text not null, primary key (guru, cusip));
