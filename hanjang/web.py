@@ -252,7 +252,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
         roe = f" 대신 자기 돈으로 1년에 얼마를 벌었는지(ROE {ni / eq * 100:.1f}%)를 봐요." if ni is not None and eq and eq > 0 else ""
         return ('<div class="py-space-md my-space-xs border-b border-outline-variant/30"><div class="font-label-regular text-label-regular text-on-surface font-semibold">금융회사는 잣대가 달라요</div>'
                 '<p class="mt-1 text-[13px] leading-relaxed text-on-surface-variant">고객이 맡긴 돈이 「빚」으로 잡혀 부채비율이 원래 수백~천 %이고, 사고판 금액이 「매출」로 잡혀 100원당 남긴 돈이 작게 나와요. '
-                f'그래서 이 두 그림은 싣지 않아요.{e(roe)}</p></div>')  # fmt: skip
+                f'그래서 이 두 그림은 싣지 않아요.{e(roe)}</p>'
+                '<a class="mt-1 inline-block text-[12px] text-primary underline" href="/learn/sector-finance">금융회사는 어떻게 봐요? →</a></div>')  # fmt: skip
     out = []
     if rev and rev > 0 and oi is not None and ni is not None:
         rows = [("매출 — 판 돈", rev, "bg-primary"), ("영업이익 — 본업으로 남긴 돈", oi, "bg-secondary"), ("순이익 — 세금·이자까지 내고 남은 돈", ni, "bg-secondary/60")]
@@ -262,7 +263,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
             f'<span class="w-11 text-right text-[12px] font-semibold tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{"적자" if v < 0 else f"{v / rev * 100:.0f}원"}</span></div>'
             for k, v, col in rows)  # fmt: skip
         usual = (f'<p class="text-[11px] text-outline mt-0.5">같은 업종({e(mid["업종"])}) {mid["곳수"]}곳 보통(중간값): 영업이익 {mid["백원당"]:.0f}원'
-                 f'{" — 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""}</p>' if mid.get("백원당") is not None else "")  # fmt: skip
+                 f'{" — 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""} · <a class="text-primary underline" href="/learn/sector-margin">업종마다 달라요</a></p>'
+                 if mid.get("백원당") is not None else "")  # fmt: skip
         out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold">{y}년, 100원 팔면 얼마 남았나</div>{bars}{usual}')
         if eq and eq > 0 and li is not None:
             ratio = li / eq * 100
@@ -273,7 +275,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
                        f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
                        f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. '
                        + (f'같은 업종({e(mid["업종"])}) 보통(중간값)은 {mid["부채비율"]:,.0f}%예요. ' if mid.get("부채비율") is not None else "")
-                       + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}.' if mid.get("빚이유") else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
+                       + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}. <a class="text-primary underline" href="/learn/sector-debt">더 보기</a>' if mid.get("빚이유")
+                          else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
                        + '</p>')  # fmt: skip
     if not out:
         return ""
