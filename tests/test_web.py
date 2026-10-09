@@ -831,3 +831,43 @@ def test_slow_mail_does_not_stop_other_pages(monkeypatch):
     done.set()
     t.join(5)
     assert not t.is_alive()
+
+
+def test_health_says_what_is_wrong(tmp_path, monkeypatch):
+    import os
+    import time
+
+    app, _ = _app()
+    monkeypatch.setattr(web.db, "PATH", tmp_path / "hanjang.db")
+    (tmp_path / "backup").mkdir()
+    s, h, body = call(app, "/health")  # 로그인 없이 · 백업이 없다 = 매일 실행이 안 돌았다
+    assert s.startswith("503") and body == "daily" and h["Cache-Control"] == "no-store"
+    b = tmp_path / "backup" / "hanjang-20261010.db"
+    b.write_bytes(b"x")
+    assert call(app, "/health")[2] == "ok"
+    os.utime(b, (time.time() - 31 * 3600,) * 2)  # 31시간 전 — 어제 아침 실행이 멈췄다
+    assert call(app, "/health")[0].startswith("503")
+
+
+def test_offsite_backup_is_create_only_and_skipped_without_bucket(tmp_path, monkeypatch):
+    import gzip
+
+    from hanjang import backup
+
+    f = tmp_path / "hanjang-20261010.db"
+    f.write_bytes(b"db")
+    key = tmp_path / "k.json"
+    monkeypatch.setattr(backup, "env", lambda: {})
+    assert backup.offsite(f, key) is None  # 내 컴퓨터 — 버킷이 없으면 건너뛴다
+    key.write_text("{}")
+    monkeypatch.setattr(backup, "env", lambda: {"BACKUP_BUCKET": "b"})
+    monkeypatch.setattr(backup.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "tok\n"})())
+    sent = {}
+
+    class R:
+        def raise_for_status(self): ...
+
+    monkeypatch.setattr(backup.httpx, "post", lambda url, **k: sent.update(url=url, **k) or R())
+    assert backup.offsite(f, key).startswith("gs://b/hanjang-20261010-")
+    assert sent["params"]["ifGenerationMatch"] == "0" and sent["headers"]["Authorization"] == "Bearer tok"  # 덮어쓰지 않는다
+    assert gzip.decompress(sent["content"]) == b"db"

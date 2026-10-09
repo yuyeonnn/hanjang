@@ -49,7 +49,12 @@ def notify(con: sqlite3.Connection, week: str) -> int:
 
 def main(today: date) -> None:
     monday = today.weekday() == 0
-    print(f"백업 {backup.backup(today)}")  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
+    saved = backup.backup(today)  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
+    print(f"백업 {saved}")
+    try:
+        print(f"서버 밖 백업 {backup.offsite(saved)}")
+    except Exception as err:  # 서버 밖에 못 올려도 오늘 노트는 쓴다 — 운영자에게만 알린다
+        alert(err, "서버 밖 백업 실패")
     collect.main(today)
     us.main(today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     us.read(today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
@@ -65,11 +70,11 @@ def main(today: date) -> None:
         mail.send(to, "[한장] OpenAI 크레딧 소진 — 오늘 노트는 코드 문장으로", "platform.openai.com 결제(Billing)에서 크레딧을 채우면 다음 실행부터 AI 글로 돌아와요.")
 
 
-def alert(err: BaseException) -> None:
+def alert(err: BaseException, what: str = "매일 실행 실패") -> None:
     """실패하면 운영자(보내는 Gmail 계정)에게 바로 알린다 — 서버 로그를 매일 들여다보지 않아도 되게. 메일이 안 오면 잘 돈 것."""
     to = sources.env().get("SMTP_USER")
     if to:
-        mail.send(to, f"[한장] 매일 실행 실패 — {type(err).__name__}", "".join(traceback.format_exception(err)))
+        mail.send(to, f"[한장] {what} — {type(err).__name__}", "".join(traceback.format_exception(err)))
 
 
 if __name__ == "__main__":

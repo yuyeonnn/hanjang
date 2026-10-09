@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import threading
@@ -1282,6 +1283,8 @@ class App:
             return "200 OK", [("Content-Type", "application/manifest+json"), ("Cache-Control", "public, max-age=86400")], MANIFEST
         if path == "/sw.js":  # 서비스 워커 — 맨 위 주소에 있어야 사이트 전체를 맡는다
             return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "no-cache")], SW
+        if path == "/health":  # 바깥 감시(구글 클라우드 모니터링)가 5분마다 연다 — 안 되면 운영자 메일
+            return self.health()
         if path == "/robots.txt":  # 공개 페이지(로그인·처리방침·계산 방법)만 검색에 — 나머지는 어차피 로그인 화면
             return "200 OK", [("Content-Type", "text/plain; charset=utf-8")], "User-agent: *\nAllow: /\n"
         if path == "/offline":
@@ -1446,6 +1449,22 @@ class App:
                  "emailInput.addEventListener('input',(ev)=>{clearBtn.classList.toggle('hidden',ev.target.value.length===0);});"
                  "function clearInput(){emailInput.value='';clearBtn.classList.add('hidden');emailInput.focus();}</script></main>")  # fmt: skip
         return page("로그인", "bg-surface font-body-reading text-on-surface pt-safe pb-safe flex flex-col min-h-screen", inner)
+
+    def health(self, now: float | None = None):
+        """화면 서버가 대답하고 · DB 가 열리고 · 매일 실행이 30시간 안에 돌았고(그때 백업을 만든다) · 디스크가 10% 넘게 남았나.
+        문제가 있으면 503 과 무엇이 문제인지 한 낱말씩 (사용자 정보는 싣지 않는다)."""
+        bad = []
+        try:
+            self.con.execute("select 1 from users limit 1").fetchall()
+        except sqlite3.Error:
+            bad.append("db")
+        backups = list((db.PATH.parent / "backup").glob("hanjang-*.db"))
+        if not backups or (now or time.time()) - max(p.stat().st_mtime for p in backups) > 30 * 3600:
+            bad.append("daily")
+        disk = shutil.disk_usage(db.PATH.parent)
+        if disk.free < disk.total * 0.1:
+            bad.append("disk")
+        return ("503 Service Unavailable" if bad else "200 OK"), [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")], " ".join(bad) or "ok"
 
     def assetlinks(self):
         pkg, sha = env().get("TWA_PACKAGE", ""), env().get("TWA_SHA256", "")
