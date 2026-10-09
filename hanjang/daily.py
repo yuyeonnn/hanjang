@@ -8,7 +8,7 @@ import sys
 import traceback
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, etf, holders, llm, mail, notes, sources
+from hanjang import articles, backup, collect, db, etf, holders, llm, mail, notes, sources, us
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -40,6 +40,7 @@ def main(today: date) -> None:
     monday = today.weekday() == 0
     print(f"백업 {backup.backup(today)}")  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
     collect.main(today)
+    us.main(today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     notes.main([], today, only_changed=not monday)
     etf.main(today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
     articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
