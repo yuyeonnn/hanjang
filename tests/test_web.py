@@ -928,19 +928,19 @@ def test_morning_card_on_home(monkeypatch):
         pass
 
 
-def test_personas_only_for_demo():
-    """둘러보기 예시 사람들 — 둘러보기 계정에게만 보이고, 실제 사용자에겐 추천·찾기·순위·프로필 어디에도 없다 (사용자 10/10)."""
+def test_personas_seen_by_everyone_with_label():
+    """예시 사람들 — 모두에게 보이고(사용자 10/10) 「예시 계정」 표시가 붙는다. 다시 깔아도 겹치지 않고 실제 사용자를 먼저 팔로우하지 않는다."""
     from hanjang import personas
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉')")
     assert personas.seed(con) == len(personas.PEOPLE)
-    assert personas.seed(con) == len(personas.PEOPLE)  # 다시 깔아도 겹치지 않는다
+    assert personas.seed(con) == len(personas.PEOPLE)
     demo = con.execute("select id from users where email = ?", (personas.DEMO_EMAIL,)).fetchone()[0]
     first = con.execute("select id from users where email = ?", ("chip" + personas.DOMAIN,)).fetchone()[0]
-    assert "반도체일기" in app.this_week(True) or "삼성전자" in app.this_week(True)
-    assert app.this_week(False) == ""  # 실제 사용자 순위엔 안 센다
-    assert "숫자읽는밤" in app.suggest(demo) and "반도체일기" not in app.suggest(1) and "숫자읽는밤" not in app.suggest(1)
     me = f"s={web.sign('1', SECRET)}"
-    assert call(app, f"/u/{first}", cookie=me)[0].startswith("404") and "반도체일기" not in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
-    assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]  # 둘러보기 피드엔 예시 사람들의 리그램이 흐른다
-    assert not con.execute("select 1 from follows where follower_id = 1 or followee_id = 1").fetchone()  # 실제 사용자와 이어지지 않는다
+    assert "삼성전자" in app.this_week() and "반도체일기" in app.suggest(1) and "예시 계정" in app.suggest(1)
+    body = call(app, f"/u/{first}", cookie=me)[2]
+    assert "반도체일기" in body and "예시 계정" in body
+    assert "반도체일기" in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
+    assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
+    assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
