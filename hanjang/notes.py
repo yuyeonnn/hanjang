@@ -22,6 +22,8 @@ EVENT_KO = {
     "MAJOR_CONTRACT": "대형 계약", "EARNINGS": "실적", "DIVIDEND": "배당", "LAWSUIT": "소송",
     "MA": "합병·인수", "HOLDER_CHANGE": "대주주 지분 변동", "CLINICAL": "임상",
     "TRADING_HALT": "거래정지·관리", "OTHER": "기타",
+    # 미국 8-K 에만 있는 종류 (us.ITEMS)
+    "DEBT": "빚(차입·채권 발행)", "WRITE_DOWN": "구조조정·손상", "RESTATEMENT": "재무제표 정정", "AUDITOR": "회계법인 교체", "EXEC": "최고경영진 교체",
 }  # fmt: skip
 # 주주에게 반가운(+1)/걸리는(−1) 쪽 — 퀀트점프 S7 제목판 부호 그대로. 없으면 0
 DIRECTION = {"RIGHTS_ISSUE": -1, "CB_BW": -1, "LAWSUIT": -1, "TRADING_HALT": -1,
@@ -49,6 +51,23 @@ TITLE_RULES = (
 # 공시 제목 → 「무슨 일인지」 쉬운 말 (우리가 쓴 고정 문장, 숫자 없음). 첫 번째로 맞는 것을 쓴다.
 # AI 가 「자사주 매입 공시」라는 이름만 반복하지 않고 뜻을 풀어 쓰게 하려고 사실에 붙인다
 TITLE_PLAIN = (
+    # 미국 8-K (us.classify_8k 의 제목)
+    (r"예전재무제표를믿지말라", "예전에 낸 재무제표에 잘못이 있어 믿지 말라고 회사가 알렸어요 — 숫자를 다시 고쳐 낼 예정이에요"),
+    (r"파산절차", "법원에 파산 보호 절차를 신청했어요"),
+    (r"상장유지경고", "거래소가 상장을 이어 갈 기준을 채우지 못했다고 알렸어요"),
+    (r"큰손상차손", "갖고 있던 자산의 값이 크게 떨어졌다고 보고 장부에서 깎았어요"),
+    (r"사업정리비용", "사업을 줄이거나 정리하면서 큰 비용이 생긴다고 알렸어요"),
+    (r"경영권변동", "회사를 지배하는 주체가 바뀌었어요"),
+    (r"새주식발행\(8-K", "새 주식을 발행했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
+    (r"인수합병완료", "다른 회사를 사들이거나 합치는 일을 마쳤어요"),
+    (r"실적발표\(8-K", "지난 분기 실적을 발표했어요(보도자료가 함께 붙어 있어요)"),
+    (r"큰계약체결", "회사에 중요한 계약을 맺었어요"),
+    (r"큰계약해지", "회사에 중요한 계약이 끝났어요"),
+    (r"큰빚\(차입", "돈을 크게 빌리거나 채권을 냈어요"),
+    (r"회계법인교체", "회사 장부를 검사하는 회계법인이 바뀌었어요"),
+    (r"최고경영진교체", "최고경영자(CEO)나 재무책임자(CFO)가 바뀌었어요"),
+    (r"자사주매입알림\(8-K", "회사가 자기 회사 주식을 사들이는 계획을 알렸어요"),
+    (r"배당알림\(8-K", "주주에게 배당을 주기로 했어요"),
     # 거래소 경고가 먼저 — 「매매거래정지(합병…)」처럼 다른 말이 섞여도 경고를 알린다
     (r"매매거래정지해제", "멈췄던 사고팔기가 다시 열렸어요"),
     (r"매매거래정지", "거래소가 이 회사 주식의 사고팔기를 잠시 멈췄어요"),
@@ -803,7 +822,23 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
                        (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
     out = []
     ex = [r for r in rows if r[2] == "임원" and r[4]]
-    if ex:
+    planned = dict(con.execute("select rcept_no, planned from insiders where ticker = ? and planned is not null", (ticker,)))
+    if ex and planned:  # 미국 — Form 4 에서 장내 매수(P)·매도(S)만 남겼다(보상·옵션 행사·세금 납부는 뺐다). 그래서 「샀·팔았」이 사실이다
+        span = f"최근 {EVENT_DAYS}일"
+        sold, bought = [r for r in ex if r[4] < 0], [r for r in ex if r[4] > 0]
+        plan = [r for r in sold if planned.get(r[0])]
+        slots, parts = {"기간": span}, []
+        if sold:
+            slots |= {"판보고": f"{len(sold)}건", "판주식": f"{korean_num(round(abs(sum(r[4] for r in sold))))}주"}
+            if plan:  # 0건이면 말하지 않는다
+                slots["계획"] = "전부" if len(plan) == len(sold) else f"{len(plan)}건"
+            parts.append(f"시장에서 판 보고 {slots['판보고']}(합계 {slots['판주식']}"
+                         + (f", {'모두' if slots['계획'] == '전부' else '그중 ' + slots['계획'] + '은'} 미리 정해 둔 계획에 따라" if plan else "") + ")")
+        if bought:
+            slots |= {"산보고": f"{len(bought)}건", "산주식": f"{korean_num(round(sum(r[4] for r in bought)))}주"}
+            parts.append(f"시장에서 산 보고 {slots['산보고']}(합계 {slots['산주식']})")
+        out.append({"id": "I1", "text": f"{span} 임원 장내 거래 보고 — " + " · ".join(parts), "url": link(ex[0][0]), "tone": 0, "slots": slots})
+    elif ex:
         span = f"최근 {EVENT_DAYS}일"
         slots, parts = {"기간": span, "건수": f"{len(ex)}건"}, []
         for key, word, side in (("늘린", "늘린", [r for r in ex if r[4] > 0]), ("줄인", "줄인", [r for r in ex if r[4] < 0])):
@@ -817,7 +852,14 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
         d = date.fromisoformat(d)
         day = f"{d.month}월 {d.day}일"
         way = f", 직전 보고보다 보유 주식 {korean_num(abs(chg))}주 {'늘림' if chg > 0 else '줄임'}" if chg else ""
+        rc = con.execute("select rate_chg from insiders where rcept_no = ?", (rno,)).fetchone()[0] if planned and not chg else None
+        if rc:  # 미국 — 직전 같은 보고자보다 비율이 몇 %p
+            way = f", 직전 보고보다 {abs(rc):.1f}%p {'늘림' if rc > 0 else '줄임'}"
         slots = {"날짜": day, "누가": who} | ({"비율": f"{rate:.2f}%"} if rate is not None else {})
+        if rate is not None and rate < 5:  # 5% 밑으로 내려가며 내는 마지막 보고 (뱅가드 0.0%)
+            out.append({"id": f"I{k}", "text": f"{day} {who}의 대량보유 보고 — 보유 비율이 5% 밑으로 내려갔다고 알림({rate:.2f}%)", "url": link(rno), "tone": 0,
+                        "slots": slots | {"방향": "5% 밑으로 줄였"}})  # fmt: skip
+            continue
         if chg:
             slots |= {"주식": f"{korean_num(abs(chg))}주", "방향": "늘렸" if chg > 0 else "줄였"}
         out.append({"id": f"I{k}", "text": f"{day} {who}의 5% 이상 대량보유 보고 — 보유 비율 {rate:.2f}%{way}" if rate is not None

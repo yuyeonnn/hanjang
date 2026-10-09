@@ -68,6 +68,11 @@ class Edgar:
     def facts(self, cik: int) -> dict:
         return self._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json").json()
 
+    def doc(self, cik: int, accession: str, primary: str) -> str:
+        """공시 원문 한 장 — primaryDocument 에서 보기용 xsl 폴더(「xslF345X06/」「xslSCHEDULE_13G_X02/」)를 뗀 파일."""
+        name = primary.split("/")[-1]
+        return self._get(f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}/{name}").text
+
     def form4(self, cik: int, accession: str, primary: str) -> str:
         """Form 4 원문 XML — primaryDocument 「xslF345X06/wk-form4_….xml」에서 보기용 xsl 폴더를 뗀 파일."""
         name = primary.split("/")[-1]
@@ -261,6 +266,75 @@ def parse_form4(xml: str) -> dict | None:
             "planned": tag("aff10b5One") in ("1", "true"), "day": tag("transactionDate") or tag("periodOfReport")}  # fmt: skip
 
 
+# --- 8-K → 한장 공시 분류 (AI 없이 번호로) ---
+
+# 번호 → (분류, 중요도, 방향, 제목). 한 8-K 에 번호가 여럿이면 표에서 먼저 나오는 것(더 무거운 것)이 이긴다. 9.01(첨부 목록)은 뜻이 없다
+ITEMS = (
+    ("4.02", "RESTATEMENT", 3, -1, "예전 재무제표를 믿지 말라는 알림"),
+    ("1.03", "TRADING_HALT", 3, -1, "파산 절차 신청"),
+    ("3.01", "TRADING_HALT", 3, -1, "거래소의 상장 유지 경고"),
+    ("2.06", "WRITE_DOWN", 3, -1, "큰 손상차손"),
+    ("2.05", "WRITE_DOWN", 3, -1, "사업 정리 비용"),
+    ("5.01", "HOLDER_CHANGE", 3, 0, "경영권 변동"),
+    ("3.02", "RIGHTS_ISSUE", 3, -1, "새 주식 발행"),
+    ("2.01", "MA", 2, 0, "인수·합병 완료"),
+    ("2.02", "EARNINGS", 2, 0, "실적 발표"),
+    ("1.01", "MAJOR_CONTRACT", 2, 0, "큰 계약 체결"),
+    ("1.02", "MAJOR_CONTRACT", 2, 0, "큰 계약 해지"),
+    ("2.03", "DEBT", 2, 0, "큰 빚(차입·채권 발행)"),
+    ("4.01", "AUDITOR", 2, 0, "회계법인 교체"),
+)
+# 본문을 읽어야 무게가 정해지는 번호 — 5.02(임원 교체: CEO·CFO 만 소식으로) · 7.01/8.01(그 밖: 자사주·배당이면 소식으로)
+TOP_EXEC = re.compile(r"Chief Executive Officer|Chief Financial Officer|\bCEO\b|\bCFO\b")
+BUYBACK = re.compile(r"(share|stock) repurchase|repurchase (program|authorization)|buyback", re.I)
+DIVIDEND = re.compile(r"(quarterly|cash|special) dividend|dividend of \$", re.I)
+
+
+def needs_text(items: str) -> bool:
+    """본문을 열어야 분류가 정해지나 — 무거운 번호가 없고 5.02·7.01·8.01 이 있을 때만."""
+    its = set(items.split(","))
+    return not any(i in its for i, *_ in ITEMS) and bool(its & {"5.02", "7.01", "8.01"})
+
+
+def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
+    """(분류, 중요도, 방향, 제목). 중요도 1 은 노트에 싣지 않는다(국내와 같다)."""
+    its = set(items.split(","))
+    for i, code, imp, dr, title in ITEMS:
+        if i in its:
+            return code, imp, dr, f"{title} (8-K {i})"
+    if BUYBACK.search(text):
+        return "BUYBACK", 3, 1, "자사주 매입 알림 (8-K)"
+    if DIVIDEND.search(text):
+        return "DIVIDEND", 2, 0, "배당 알림 (8-K)"
+    if "5.02" in its and TOP_EXEC.search(text):
+        return "EXEC", 2, 0, "최고경영진 교체 (8-K 5.02)"
+    if "5.07" in its:
+        return "OTHER", 1, 0, "주총 표결 결과 (8-K 5.07)"
+    return "OTHER", 1, 0, f"그 밖의 알림 (8-K {items.replace(',9.01', '')})"
+
+
+def html_text(html: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style).*?</\1>", " ", html))).replace("&#160;", " ").replace("&nbsp;", " ")
+
+
+def parse_13dg(xml: str) -> dict | None:
+    """새 서식(2024-12 부터 XML) 13D·13G → {issuer, who, rate, day, person}. person = IN(개인)·CO(회사)·IA(운용사)…"""
+    def tag(*names):
+        for n in names:
+            m = re.search(rf"<{n}>\s*([^<]*?)\s*</{n}>", xml)
+            if m:
+                return m.group(1).strip()
+        return ""
+
+    issuer, rate = tag("issuerCik", "issuerCIK"), tag("classPercent", "percentOfClass")
+    if not issuer or not re.fullmatch(r"[\d.]+", rate or ""):
+        return None
+    d = tag("eventDateRequiresFilingThisStatement", "dateOfEvent")
+    m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", d)
+    return {"issuer": int(issuer), "who": tag("reportingPersonName").replace("&amp;", "&"), "rate": float(rate),
+            "day": f"{m[3]}-{m[1]}-{m[2]}" if m else None, "person": tag("typeOfReportingPerson")}  # fmt: skip
+
+
 # --- 저장 ---
 
 
@@ -290,8 +364,45 @@ def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> t
     return len(fin), len(qs), len(fl)
 
 
+def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: list[dict], today: date) -> int:
+    """최근 90일 8-K → disclosures(국내 공시와 같은 표 — 노트·캘린더가 그대로 읽는다). 이미 넣은 것은 다시 열지 않는다."""
+    have = {r for (r,) in con.execute("select rcept_no from disclosures where ticker = ?", (ticker,))}
+    n = 0
+    for r in rows:
+        if r["form"] != "8-K" or r["accession"] in have or r["date"] < (today - timedelta(days=90)).isoformat():
+            continue
+        text = html_text(sec.doc(cik, r["accession"], r["doc"]))[:20000] if needs_text(r["items"]) else ""
+        code, imp, dr, title = classify_8k(r["items"], text)
+        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction) values (?, ?, ?, ?, ?, ?, ?)",
+                    (r["accession"], ticker, r["date"], title, code, imp, dr))  # fmt: skip
+        n += 1
+    return n
+
+
+def save_13dg(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: list[dict]) -> int:
+    """5% 보고 — 새 XML 서식만, **이 회사가 대상인 것만**(공시 목록엔 이 회사가 남의 회사에 대해 낸 보고도 섞여 있다).
+    개인(IN)이면 이름 대신 「개인 주주」. 직전 같은 보고자 비율과의 차이는 코드가 센다."""
+    have = {r for (r,) in con.execute("select rcept_no from insiders where ticker = ? and kind = '5%'", (ticker,))}
+    seen_other = {r for (r,) in con.execute("select accession from skipped where ticker = ?", (ticker,))}
+    n = 0
+    for r in sorted(rows, key=lambda r: r["date"]):
+        if not r["form"].startswith("SCHEDULE 13") or r["accession"] in have or r["accession"] in seen_other:
+            continue
+        x = parse_13dg(sec.doc(cik, r["accession"], r["doc"]))
+        if not x or x["issuer"] != cik:
+            con.execute("insert or ignore into skipped values (?, ?)", (r["accession"], ticker))
+            continue
+        who = "개인 주주" if x["person"] == "IN" else x["who"]
+        prev = con.execute("select rate from insiders where ticker = ? and kind = '5%' and who = ? order by date desc limit 1", (ticker, who)).fetchone()
+        con.execute("insert or replace into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg) values (?, ?, ?, '5%', ?, null, ?, ?)",
+                    (r["accession"], ticker, x["day"] or r["date"], who, x["rate"], round(x["rate"] - prev[0], 2) if prev else None))  # fmt: skip
+        n += 1
+    return n
+
+
 def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None = None) -> None:
     con, sec = con or db.connect(), sec or Edgar()
+    con.execute("update insiders set kind = '임원' where kind = '임원·주요주주'")  # 10/9 첫 받기의 이름표 — 노트는 「임원」을 읽는다
     tk = sec.tickers()
     got = {"회사": 0, "연간": 0, "분기": 0, "흐름": 0, "공시": 0, "임원": 0}
     for ticker, name in universe():
@@ -316,8 +427,10 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
             x = parse_form4(sec.form4(cik, accn, doc))
             if x:
                 con.execute("insert or replace into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg, planned, price) values (?, ?, ?, ?, ?, ?, null, null, ?, ?)",
-                            (accn, ticker, x["day"] or filed, "임원·주요주주", x["who"], x["bought"] - x["sold"], int(x["planned"]), x["price"]))  # fmt: skip
+                            (accn, ticker, x["day"] or filed, "임원", x["who"], x["bought"] - x["sold"], int(x["planned"]), x["price"]))  # fmt: skip
                 ins += 1
+        got["8-K"] = got.get("8-K", 0) + save_8k(con, sec, ticker, cik, rows, today)
+        got["5%"] = got.get("5%", 0) + save_13dg(con, sec, ticker, cik, rows)
         con.commit()
         got["회사"] += 1
         for k, v in zip(("연간", "분기", "흐름", "공시", "임원"), (f, q, fl, len(rows), ins)):
