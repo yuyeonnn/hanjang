@@ -489,7 +489,8 @@ def bond_fact(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     text = (f"{day} 회사채 {won(total)} {when}" + (f" — 만기 {spans}" if spans else "") + (f" · 이자 연 {rates}%" if rates else "")
             + (f" · 쓰임: {use_txt}" if use_txt else ""))  # fmt: skip
     return [{"id": "F12", "text": text, "url": DART.format(rno), "tone": 0,
-             "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {}) | ({"쓰임": use_txt} if use_txt else {})}]
+             "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {})
+             | ({"쓰임": use_txt if len(uses) > 1 else f"{USE_PLAIN.get(k.replace(' ', ''), k)}({k})"} if (k := next(iter(uses), "")) else {})}]  # 쓰임이 하나면 금액을 되풀이하지 않게
 
 
 def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
@@ -754,11 +755,10 @@ def check_note(note: dict, fs: list[dict]) -> dict:
     ⑤ 좋게 본 것은 +1 사실만, 걱정되는 것은 −1 사실만 근거로 — 그런 사실이 있는데 비워 두면 탈락."""
     for key, sign in (("good", 1), ("concern", -1)):
         want = {f["id"] for f in fs if f["tone"] == sign}
-        got = note.get(key) or []
+        # 다른 쪽(중립 등) 사실을 끌어온 문장만 뺀다 — 한 문장 때문에 노트 전체를 버리지 않게 (SK 10/9: 세 번 다 떨어져 코드 글)
+        got = note[key] = [s for s in note.get(key) or [] if set(s["refs"]) <= want]
         if want and not got:
             raise ValueError(f"{key} 비었음 — 해당 사실 {sorted(want)}")
-        if any(not set(s["refs"]) <= want for s in got):
-            raise ValueError(f"{key} 에 다른 쪽 사실이 섞임")
     sents = (note["summary"] + [s for sec in note["sections"] for s in sec["sentences"]]
              + (note.get("good") or []) + (note.get("concern") or []))  # fmt: skip
     if not isinstance(note["headline"], str) or not sents:
@@ -839,6 +839,18 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     note = {"headline": head, "summary": keep(j["summary"]),
             "sections": [{"title": sec["title"], "sentences": got} for sec in j["sections"] if (got := keep(sec["sentences"]))],
             "good": keep(j["good"]), "concern": keep(j["concern"])}  # fmt: skip
+    # 회사채(F12)는 한 번만 — 「회사 사정」과 「이번 주 소식」에 같은 문장이 두 번 나오지 않게 (SK 10/9)
+    seen_bond = False
+    for sec in note["sections"]:
+        keep_ = []
+        for x in sec["sentences"]:
+            if "F12" in x["refs"]:
+                if seen_bond:
+                    continue
+                seen_bond = True
+            keep_.append(x)
+        sec["sentences"] = keep_
+    note["sections"] = [sec for sec in note["sections"] if sec["sentences"]]
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
     if note["good"]:

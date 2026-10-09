@@ -74,8 +74,11 @@ def test_tone_is_decided_by_code_and_enforced():
     note = _note("매출이 늘었어요.")
     with pytest.raises(ValueError, match="concern"):  # 걱정 사실이 있는데 비워 두면 탈락
         notes.check_note(note, list(fs.values()))
-    with pytest.raises(ValueError, match="섞임"):  # 좋은 사실을 걱정 칸에
+    with pytest.raises(ValueError, match="concern 비었음"):  # 좋은 사실만 걱정 칸에 — 그 문장을 빼면 비어서 탈락
         notes.check_note({**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}]}, list(fs.values()))
+    mixed = {**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "영업 적자예요.", "refs": ["F2"]}]}
+    notes.check_note(mixed, list(fs.values()))
+    assert [x["refs"] for x in mixed["concern"]] == [["F2"]]  # 섞인 문장만 빠지고 노트는 산다
     notes.check_note({**note, "concern": [{"text": "영업 적자예요.", "refs": ["F2"]}]}, list(fs.values()))
 
 
@@ -498,6 +501,9 @@ def test_bond_fact_sums_one_filing_and_names_its_use():
     assert f["text"] == "10월 21일 회사채 1,500억원 납입 예정 — 만기 2년·3년 · 이자 연 3.52% · 쓰임: 빚 갚기(채무상환자금) 1,300억원 · 회사 운영(운영자금) 200억원"
     assert f["id"] == "F12" and f["tone"] == 0 and f["slots"]["금액"] == "1,500억원"
     assert any(x["id"] == "F12" for x in notes.facts(con, "005930", date(2026, 10, 9)))
+    assert "1,300억원" in f["slots"]["쓰임"]  # 쓰임이 여럿이면 금액까지
+    con.execute("delete from bonds where tm = '2'")
+    assert notes.bond_fact(con, "005930", date(2026, 10, 9))[0]["slots"]["쓰임"] == "빚 갚기(채무상환자금)"  # 하나면 이름만
     assert notes.bond_fact(con, "005930", date(2027, 3, 1)) == []  # 90일 지나면 빠진다
 
 
