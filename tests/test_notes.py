@@ -74,8 +74,11 @@ def test_tone_is_decided_by_code_and_enforced():
     note = _note("매출이 늘었어요.")
     with pytest.raises(ValueError, match="concern"):  # 걱정 사실이 있는데 비워 두면 탈락
         notes.check_note(note, list(fs.values()))
-    with pytest.raises(ValueError, match="섞임"):  # 좋은 사실을 걱정 칸에
+    with pytest.raises(ValueError, match="concern 비었음"):  # 좋은 사실만 걱정 칸에 — 그 문장을 빼면 비어서 탈락
         notes.check_note({**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}]}, list(fs.values()))
+    mixed = {**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "영업 적자예요.", "refs": ["F2"]}]}
+    notes.check_note(mixed, list(fs.values()))
+    assert [x["refs"] for x in mixed["concern"]] == [["F2"]]  # 섞인 문장만 빠지고 노트는 산다
     notes.check_note({**note, "concern": [{"text": "영업 적자예요.", "refs": ["F2"]}]}, list(fs.values()))
 
 
@@ -504,6 +507,9 @@ def test_bond_fact_sums_one_filing_and_names_its_use():
     assert f["text"] == "10월 21일 회사채 1,500억원 납입 예정 — 만기 2년·3년 · 이자 연 3.52% · 쓰임: 빚 갚기(채무상환자금) 1,300억원 · 회사 운영(운영자금) 200억원"
     assert f["id"] == "F12" and f["tone"] == 0 and f["slots"]["금액"] == "1,500억원"
     assert any(x["id"] == "F12" for x in notes.facts(con, "005930", date(2026, 10, 9)))
+    assert "1,300억원" in f["slots"]["쓰임"]  # 쓰임이 여럿이면 금액까지
+    con.execute("delete from bonds where tm = '2'")
+    assert notes.bond_fact(con, "005930", date(2026, 10, 9))[0]["slots"]["쓰임"] == "빚 갚기(채무상환자금)"  # 하나면 이름만
     assert notes.bond_fact(con, "005930", date(2027, 3, 1)) == []  # 90일 지나면 빠진다
 
 
@@ -531,3 +537,15 @@ def test_empty_concern_is_filled_by_code_and_code_headline_is_plain():
     note = notes.fill_note(j, fs)
     assert [s["refs"] for s in note["concern"]] == [["F2"], ["D1"]]
     assert "유상증자" not in notes.code_headline(fs) and "(9월 14일)" in notes.code_headline(fs)
+
+
+def test_industry_uses_median_and_skips_ratios_beyond_100pct():
+    con = db.connect(":memory:")
+    co = [("A1", 100, 2), ("A2", 100, 9), ("A3", 100, 12), ("A4", 100, 13), ("SQ", 100, 623)]  # SQ: 지분 이익이 영업이익(623%)
+    collect.save_universe(con, [(t, t) for t, *_ in co], {})
+    con.execute("update stocks set induty_code = '64992'")
+    collect.save_financials(con, [sources.Financial(t, 2025, rev, op, 1, 10, 10, "r") for t, rev, op in co])
+    [f] = notes.industry_fact(con, "A1")
+    assert "4곳 가운데" in f["text"] and "중간값 10.5%" in f["text"] and "SQ" not in f["text"] and f["slots"]["중간값"] == "10.5%"
+    assert notes.industry_fact(con, "SQ") == []  # 같은 잣대가 아닌 회사는 견주지 않는다
+    assert "2번째로 높았" in notes.industry_fact(con, "A3")[0]["text"] and "가장 낮았" in f["text"]
