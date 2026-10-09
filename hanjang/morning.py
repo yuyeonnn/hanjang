@@ -240,16 +240,14 @@ def html(m: dict) -> str:
            f'<p class="mt-2 text-[15px] font-semibold text-on-surface">{e(head)}</p>'
            f'<p class="mt-1 font-body-reading text-body-reading text-on-surface leading-relaxed">{e(body)}</p>'
            + (f'<a class="mt-1 inline-block font-label-regular text-label-regular text-primary" href="{e(more[1])}">{e(more[0])} →</a>' if more else "") + "</div>")  # fmt: skip
-    lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요. 이번 주 일정과 꿀팁을 담았어요."
-    chips = [f"새 공시 {len(m['news']) + m['more']}곳" if m["news"] else "새 공시 없음"] + ([f"이번 주 일정 {len(m['week'])}개"] if m["week"] else []) + ["꿀팁 하나"]
-    chip = "".join(f'<span class="px-2 py-0.5 rounded-full bg-primary-fixed/50 text-[11px] font-semibold text-primary">{e(c)}</span>' for c in chips)
-    # 접힌 카드 한 장(눌러서 펼침) → 위에 뜨는 카드(<dialog>, ✕·바깥 누르면 닫힘) — 사용자 10/10: 「진짜 카드 한 장」 느낌, 입체감
+    lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요."
+    # 접힌 카드 한 장(눌러서 펼침) → 위에 뜨는 카드(<dialog>, ✕·바깥 누르면 닫힘). 접힌 카드는 해 아이콘·날짜 한 줄 + 이야기 한 줄만 (사용자 10/10)
     card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" '
             'class="group mt-space-md w-full text-left rounded-2xl border border-surface-container-high bg-surface-container-lowest '
-            'shadow-[0_10px_24px_-12px_rgba(21,69,57,0.45)] hover:shadow-[0_14px_30px_-12px_rgba(21,69,57,0.55)] hover:-translate-y-0.5 transition-all px-4 py-4 flex items-center gap-3">'
-            '<span class="w-11 h-11 shrink-0 rounded-xl bg-primary text-on-primary flex items-center justify-center shadow-sm"><span class="material-symbols-outlined">wb_sunny</span></span>'
-            f'<span class="flex-1 min-w-0 flex flex-col gap-0.5"><span class="text-[12px] font-semibold text-primary">아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
-            f'<span class="text-[15px] font-semibold text-on-surface line-clamp-2">{e(lead)}</span><span class="mt-1 flex flex-wrap gap-1.5">{chip}</span></span>'
+            'shadow-[0_10px_24px_-12px_rgba(21,69,57,0.45)] hover:shadow-[0_14px_30px_-12px_rgba(21,69,57,0.55)] hover:-translate-y-0.5 transition-all px-4 py-3.5 flex items-center gap-3">'
+            f'<span class="flex-1 min-w-0 flex flex-col gap-1"><span class="flex items-center gap-1 text-[12px] font-semibold text-primary">'
+            f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
+            f'<span class="text-[15px] font-semibold text-on-surface truncate">{e(lead)}</span></span>'
             '<span class="material-symbols-outlined shrink-0 text-primary transition-transform group-hover:translate-x-0.5">chevron_right</span></button>')  # fmt: skip
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
              'class="w-[calc(100%-32px)] max-w-[460px] max-h-[85vh] p-0 rounded-2xl bg-surface-container-lowest shadow-2xl backdrop:bg-transparent overflow-y-auto">'
