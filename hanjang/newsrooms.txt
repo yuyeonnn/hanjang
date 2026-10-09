@@ -1,9 +1,7 @@
-# 회사 뉴스룸 RSS — 회사가 배포하려고 직접 내보내는 글 (제목·요약문·링크만 받는다). 손으로 갱신 — 피드가 있는 회사만
+# 회사 뉴스룸 RSS — 회사가 배포하려고 직접 내보내는 글 (제목·요약문·링크만 받는다). 손으로 갱신 — 피드가 있고 **이용 정책이 허락하는** 회사만
+# 2026-10-10 정책 확인 (docs/data-rights.md §5.2). 뺀 곳: 포스코·LG화학(CCL 비영리·개인), LG에너지솔루션(상업 금지), 고려아연(정책 못 찾음)
+# SK하이닉스는 「출처 표기 시 자유 배포, 상업 목적 불가」 — 무료일 때만. 유료화하면 뺀다
 # 종목코드 주소
 005930 https://news.samsung.com/kr/feed
 000660 https://news.skhynix.co.kr/feed/
-005490 https://newsroom.posco.com/kr/feed/
-051910 https://blog.lgchem.com/feed/
-373220 https://news.lgensol.com/feed/
 017670 https://news.sktelecom.com/feed
-010130 https://www.koreazinc.co.kr/feed/

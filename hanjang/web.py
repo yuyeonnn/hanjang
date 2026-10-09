@@ -41,6 +41,7 @@ SCAN_HOURLY = 10
 DEMO_EMAIL = "demo@hanjang.local"  # 둘러보기 계정 — .env DEMO=1 일 때만. 보기만 된다
 DEMO_STOCKS = ("005930", "000660", "105560", "010140")  # 한 사람이 한 시간에 캡처를 읽힐 수 있는 횟수 (AI 비용)
 LINK_TTL = 15 * 60  # 로그인 링크 15분
+LOGIN_GAP, LOGIN_HOURLY = 60, 5  # 같은 주소로 링크는 1분에 한 번, 한 시간에 다섯 번까지 (메일 폭탄·발송 계정 정지 막기)
 e = html.escape
 
 
@@ -71,8 +72,8 @@ def check_login(token: str, secret: str, now: float) -> str | None:
 
 # --- 시안 공통 머리 (Stitch 시안의 <head> 그대로) ---
 
-HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}body{word-break:keep-all;overflow-wrap:anywhere;}p,h1,h2,h3,li,span{text-wrap:pretty;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-container": "#2e6e4e", "secondary-fixed": "#aef1c9", "outline-variant": "#c0c8c4", "tertiary": "#741f11", "on-background": "#1b1b1d", "surface-container-low": "#f6f3f5", "on-tertiary-fixed-variant": "#802919", "surface-container-lowest": "#ffffff", "surface-container": "#f0edef", "surface-dim": "#dcd9dc", "outline": "#717975", "primary-fixed": "#bceddc", "primary-container": "#2f5d50", "error": "#ba1a1a", "error-container": "#ffdad6", "on-error": "#ffffff", "tertiary-fixed": "#ffdad3", "surface-bright": "#fcf8fb", "surface": "#fcf8fb", "on-primary-fixed-variant": "#204f42", "background": "#fcf8fb", "primary-fixed-dim": "#a0d1c0", "primary": "#154539", "surface-variant": "#e4e2e4", "on-secondary": "#ffffff", "on-primary-fixed": "#002019", "secondary-container": "#abeec6", "surface-tint": "#396759", "on-primary": "#ffffff", "surface-container-highest": "#e4e2e4", "tertiary-fixed-dim": "#ffb4a5", "on-tertiary": "#ffffff", "on-secondary-fixed-variant": "#095134", "on-tertiary-fixed": "#3f0400", "on-surface": "#1b1b1d", "inverse-primary": "#a0d1c0", "secondary": "#296a4a", "tertiary-container": "#933625", "inverse-on-surface": "#f3f0f2", "on-error-container": "#93000a", "on-secondary-fixed": "#002112", "on-surface-variant": "#404945", "inverse-surface": "#303032", "on-tertiary-container": "#ffb8aa", "on-primary-container": "#a3d4c3", "surface-container-high": "#eae7ea", "secondary-fixed-dim": "#93d5ae" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-md": "0.875rem", "margin": "1rem", "space-xs": "0.25rem", "space-xl": "2rem", "space-lg": "1.25rem", "gutter": "0.75rem", "space-sm": "0.5rem" }, "fontFamily": { "headline-lg": ["Newsreader"], "label-regular": ["Be Vietnam Pro"], "body-reading-strong": ["Be Vietnam Pro"], "label-micro": ["Be Vietnam Pro"], "headline-sm": ["Be Vietnam Pro"], "citation-ref": ["Be Vietnam Pro"], "body-reading": ["Be Vietnam Pro"], "display-editorial": ["Newsreader"], "headline-md": ["Be Vietnam Pro"], "body-compact": ["Be Vietnam Pro"] }, "fontSize": { "headline-lg": ["24px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "label-regular": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}], "body-reading-strong": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "label-micro": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "citation-ref": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "body-reading": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "display-editorial": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "body-compact": ["14px", {"lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400"}] } } } };</script>"""
+HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@400,0..1&amp;display=block" rel="stylesheet"><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}body{word-break:keep-all;overflow-wrap:anywhere;}p,h1,h2,h3,li,span{text-wrap:pretty;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-container": "#2e6e4e", "secondary-fixed": "#aef1c9", "outline-variant": "#c0c8c4", "tertiary": "#741f11", "on-background": "#1b1b1d", "surface-container-low": "#f6f3f5", "on-tertiary-fixed-variant": "#802919", "surface-container-lowest": "#ffffff", "surface-container": "#f0edef", "surface-dim": "#dcd9dc", "outline": "#68706c", "primary-fixed": "#bceddc", "primary-container": "#2f5d50", "error": "#ba1a1a", "error-container": "#ffdad6", "on-error": "#ffffff", "tertiary-fixed": "#ffdad3", "surface-bright": "#fcf8fb", "surface": "#fcf8fb", "on-primary-fixed-variant": "#204f42", "background": "#fcf8fb", "primary-fixed-dim": "#a0d1c0", "primary": "#154539", "surface-variant": "#e4e2e4", "on-secondary": "#ffffff", "on-primary-fixed": "#002019", "secondary-container": "#abeec6", "surface-tint": "#396759", "on-primary": "#ffffff", "surface-container-highest": "#e4e2e4", "tertiary-fixed-dim": "#ffb4a5", "on-tertiary": "#ffffff", "on-secondary-fixed-variant": "#095134", "on-tertiary-fixed": "#3f0400", "on-surface": "#1b1b1d", "inverse-primary": "#a0d1c0", "secondary": "#296a4a", "tertiary-container": "#933625", "inverse-on-surface": "#f3f0f2", "on-error-container": "#93000a", "on-secondary-fixed": "#002112", "on-surface-variant": "#404945", "inverse-surface": "#303032", "on-tertiary-container": "#ffb8aa", "on-primary-container": "#a3d4c3", "surface-container-high": "#eae7ea", "secondary-fixed-dim": "#93d5ae" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-md": "0.875rem", "margin": "1rem", "space-xs": "0.25rem", "space-xl": "2rem", "space-lg": "1.25rem", "gutter": "0.75rem", "space-sm": "0.5rem" }, "fontFamily": { "headline-lg": ["Newsreader"], "label-regular": ["Be Vietnam Pro"], "body-reading-strong": ["Be Vietnam Pro"], "label-micro": ["Be Vietnam Pro"], "headline-sm": ["Be Vietnam Pro"], "citation-ref": ["Be Vietnam Pro"], "body-reading": ["Be Vietnam Pro"], "display-editorial": ["Newsreader"], "headline-md": ["Be Vietnam Pro"], "body-compact": ["Be Vietnam Pro"] }, "fontSize": { "headline-lg": ["24px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "label-regular": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}], "body-reading-strong": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "label-micro": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "citation-ref": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "body-reading": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "display-editorial": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "body-compact": ["14px", {"lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400"}] } } } };</script>"""
 
 
 # 카카오톡·문자로 링크를 보낼 때 뜨는 미리보기 카드 — 어느 쪽을 보내도 같은 소개 (로그인 같은 화면 이름은 빼고)
@@ -100,8 +101,32 @@ STAY = ("<script>document.addEventListener('submit',async ev=>{const f=ev.target
         "catch(err){f.submit();}});</script>")
 
 
+# 홈 화면에 추가 · 플레이스토어 포장(TWA) — 앱 정보 한 장과 서비스 워커. 서비스 워커는 화면을 저장해 두지 않는다(노트는 늘 새것):
+# 인터넷이 끊겼을 때만 미리 받아 둔 「연결이 끊겼어요」 화면을 보여 준다 (흰 화면·브라우저 오류 대신 — 앱 심사가 보는 것)
+MANIFEST = json.dumps({
+    "name": "한장 — 내 주식, 쉬운 글 한 장", "short_name": "한장", "lang": "ko", "start_url": "/", "scope": "/", "id": "/",
+    "display": "standalone", "background_color": "#fcf8fb", "theme_color": "#154539",
+    "description": "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다.", "categories": ["finance", "education"],
+    "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+              {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+              {"src": "/static/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+}, ensure_ascii=False)  # fmt: skip
+SW = ("const C='hanjang-1';self.addEventListener('install',ev=>{ev.waitUntil(caches.open(C).then(c=>c.add('/offline')));self.skipWaiting();});"
+      "self.addEventListener('activate',ev=>{ev.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});"
+      "self.addEventListener('fetch',ev=>{if(ev.request.mode==='navigate')ev.respondWith(fetch(ev.request).catch(()=>caches.match('/offline')));});")
+OFFLINE = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+           '<title>연결이 끊겼어요 · 한장</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
+           'background:#fcf8fb;color:#1b1b1d;font-family:system-ui,sans-serif;word-break:keep-all;text-align:center}main{padding:24px;max-width:360px}'
+           'h1{font-size:20px;color:#154539}p{color:#404945;line-height:1.7}button{margin-top:12px;padding:12px 20px;border:0;border-radius:8px;background:#154539;color:#fff;font-size:15px}</style></head>'
+           '<body><main><h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
+           '<button onclick="location.reload()">다시 열기</button></main></body></html>')  # fmt: skip
+PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#154539">'
+            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png"><link rel="icon" href="/static/icon-192.png" type="image/png">'
+            "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
+
+
 def page(title: str, body_attr: str, inner: str) -> str:
-    return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{share_tags()}<title>{e(title)} · 한장</title></head>'
+    return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{share_tags()}{PWA_TAGS}<title>{e(title)} · 한장</title></head>'
             f'<body class="{body_attr}">{inner}{STAY}</body></html>')  # fmt: skip
 
 
@@ -511,8 +536,8 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
     """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
-    조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
+    겹치면 위아래로 비킨다. 조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -523,7 +548,9 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
     cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
-    slices, sides, a = [], {True: [], False: []}, -math.pi / 2  # 12시 방향에서 시계 방향으로
+    # 원을 돌려 큰 종목들이 3시 방향을 가운데로 모이게 — 작은 조각이 한 귀퉁이에 몰려 선이 쏟아지지 않게(국민연금, 사용자 10/10)
+    top = sum(p for k, p in parts if k != "기타")
+    slices, sides, a = [], {True: [], False: []}, -top / 100 * math.pi
     for (k, pct), col in zip(parts, cols):
         b = a + pct / 100 * 2 * math.pi
         x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
@@ -536,28 +563,35 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     def column(right: bool) -> str:
         # 휴대폰·태블릿은 이름 밑에 %(같은 크기), 컴퓨터 화면이면 한 줄 — 긴 이름은 칸 안에서 말줄임
         rows = "".join(
-            f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
+            f'<li class="absolute inset-x-0 flex items-start gap-1.5 {"" if right else "flex-row-reverse"}" style="top:calc({50 + 48 * math.sin(m):.1f}% - 10px)">'
             f'<span data-ang="{m:.4f}" class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
             f'<span class="min-w-0 flex flex-col lg:flex-row lg:gap-1.5 {"items-start" if right else "items-end"}">'
             f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
             f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
             for _, k, pct, col, m in sorted(sides[right]))  # fmt: skip
-        return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
+        return f'<ul class="relative flex-1 min-w-0 self-stretch">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div data-pie class="relative mt-4 flex items-center gap-6 lg:gap-10">' + column(False)
+            '<div data-pie class="relative mt-2 py-6 flex items-center gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 
 
-# 파이 조각 → 이름 옆 색 네모까지 곧은 선 하나 (조각 가장자리에서 네모 앞까지, 꺾지 않고 점도 없이 — 사용자 10/10)
-PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
-var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
-var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
-box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
-var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,tx=right?q.left-o.left-4:q.right-o.left+4;
-out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>';});
-lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
+# 파이 이름 놓기 · 선 긋기. 이름(색 네모 가운데)을 조각 가장자리 높이에 두고, 겹치면 아래로 밀고, 넘치면 위로 당긴다(원 위아래 24px 여유).
+# 한쪽에 이름이 많아 원보다 높아지면 상자를 키운다(원은 가운데 그대로). 선은 조각 가장자리 → 색 네모 앞 — 거의 수평
+PIE_LINES = """<script>(function(){if(window.pieLines)return;
+function place(box){var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
+var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,H=o.height,need=0,out='';
+[true,false].forEach(function(right){var it=[].slice.call(box.querySelectorAll('[data-ang]')).filter(function(d){return (Math.cos(+d.dataset.ang)>=0)==right})
+.map(function(d){var li=d.closest('li'),a=+d.dataset.ang,off=d.offsetTop+d.offsetHeight/2,uo=li.parentNode.getBoundingClientRect().top-o.top;return {d:d,li:li,a:a,off:off,uo:uo,h:li.offsetHeight,t:cy+r*Math.sin(a)-off-uo}}).sort(function(x,y){return x.t-y.t});
+for(var i=1;i<it.length;i++)it[i].t=Math.max(it[i].t,it[i-1].t+it[i-1].h+6);
+var n=it.length;if(n){var uo=it[0].uo,over=it[n-1].t+it[n-1].h-(H-uo);if(over>0)it.forEach(function(x){x.t-=over});var under=-uo-it[0].t;if(under>0)it.forEach(function(x){x.t+=under});
+need=Math.max(need,it[n-1].t+it[n-1].h-it[0].t)}
+it.forEach(function(x){x.li.style.top=x.t+'px';var px=cx+r*Math.cos(x.a),py=cy+r*Math.sin(x.a),y=x.uo+x.t+x.off,q=x.d.getBoundingClientRect(),tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>'})});
+lay.innerHTML=out;return need>H+1?need:0}
+window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){box.style.minHeight='';var need=place(box);if(need){box.style.minHeight=need+'px';place(box)}})};
+addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -956,7 +990,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + (('<div class="pt-space-sm pb-1 flex flex-col gap-1.5"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
                          + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"]) + "</div></div>")
                         if body.get("keywords") else "")
-                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
+                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸이 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
@@ -1020,7 +1054,7 @@ US_WORDS = (  # 노트 화면의 국내(DART) 안내 → 미국(SEC) 안내. 노
      "미국은 시장에서 실제로 사고판 거래만 셌어요(회사에서 받은 보상 주식은 뺐어요). 누가 사고팔았는지는"),
     (re.compile(r"회사가 사업보고서에 스스로 적은 위험"), "회사가 연차 보고서(10-K)에 스스로 적은 위험"),
     (re.compile(r"금융감독원 전자공시\(DART\) 원문이 열려요"), "미국 증권거래위원회(SEC) 공시 원문이 열려요"),
-    (re.compile(r"소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요\. 기사 본문은 받지 않아요\. "), ""),
+    (re.compile(r"소식은 회사 뉴스룸이 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요\. 기사 본문은 받지 않아요\. "), ""),
 )
 
 
@@ -1046,7 +1080,8 @@ class App:
         self.con, self.secret, self.clock = con, secret, clock
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
-        self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
+        self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
+        self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
@@ -1104,7 +1139,19 @@ class App:
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "people" / path[15:]).read_bytes()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
-        if path in ("/privacy", "/method"):  # 로그인 없이 열린다
+        if path in ("/static/icon-192.png", "/static/icon-512.png", "/static/icon-maskable.png", "/static/apple-touch-icon.png"):  # 홈 화면 아이콘
+            return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=604800")], (STATIC / path[8:]).read_bytes()
+        if path == "/manifest.webmanifest":  # 「홈 화면에 추가」 · 플레이스토어 포장(TWA)의 재료
+            return "200 OK", [("Content-Type", "application/manifest+json"), ("Cache-Control", "public, max-age=86400")], MANIFEST
+        if path == "/sw.js":  # 서비스 워커 — 맨 위 주소에 있어야 사이트 전체를 맡는다
+            return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "no-cache")], SW
+        if path == "/robots.txt":  # 공개 페이지(로그인·처리방침·계산 방법)만 검색에 — 나머지는 어차피 로그인 화면
+            return "200 OK", [("Content-Type", "text/plain; charset=utf-8")], "User-agent: *\nAllow: /\n"
+        if path == "/offline":
+            return "200 OK", [], OFFLINE
+        if path == "/.well-known/assetlinks.json":  # 안드로이드 앱(TWA)이 이 사이트 것임을 증명 — 서명 키 지문을 .env 에 넣으면 열린다
+            return self.assetlinks()
+        if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
             email = check_login(query.get("t", ""), self.secret, self.clock())
@@ -1217,9 +1264,13 @@ class App:
 
     # ---- 로그인 (시안 _2) ----
 
-    def login_page(self, error: str = "", cohort: str = "") -> str:
+    def login_page(self, sent: str | None = None, error: str = "", cohort: str = "") -> str:
         hidden = f'<input type="hidden" name="c" value="{cohort}">' if COHORT.fullmatch(cohort) else ""
-        box = f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else ""
+        box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
+            '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
+            f'<span class="font-body-reading-strong text-body-compact text-on-surface truncate" id="target-email-preview">{e(sent)}</span></div>'
+            '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크를 보냈어요. 15분 안에 메일함 속 링크를 눌러 주세요.</p><div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
+            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
@@ -1231,9 +1282,9 @@ class App:
                  '<button aria-label="이메일 지우기" class="hidden absolute right-3 text-outline hover:text-on-surface p-1 transition-colors" id="clear-btn" onclick="clearInput()" type="button"><span class="material-symbols-outlined text-lg">cancel</span></button></div>'
                  '<label class="flex items-start gap-2 mt-3 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="agree" required type="checkbox" value="1">'
                  '<span>[필수] 이메일 수집·이용에 동의해요 — <a class="text-primary underline" href="/privacy" target="_blank">개인정보 처리방침</a></span></label>'
-                 f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">시작하기</span><span class="material-symbols-outlined text-base">arrow_forward</span></button>'
-                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">비밀번호 없이 이메일만으로 바로 시작돼요. 받는 개인정보는 이메일 하나뿐이에요.</p>'
-                 '</form>'
+                 f'<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm hover:opacity-95 active:scale-[0.99] transition-all mt-3 flex items-center justify-center gap-2" id="submit-btn" type="submit"><span class="">{"링크 다시 받기" if sent else "시작하기"}</span><span class="material-symbols-outlined text-base">{"refresh" if sent else "arrow_forward"}</span></button>'
+                 '<p class="font-label-regular text-label-regular text-outline text-center mt-3 leading-relaxed">비밀번호 없이, 메일로 온 링크를 누르면 시작돼요. 받는 개인정보는 이메일 하나뿐이에요.</p>'
+                 '<a class="block text-center mt-2 font-label-regular text-label-regular text-primary underline underline-offset-2" href="/help/login">로그인 링크가 안 와요</a></form>'
                  + ('<a class="mt-3 w-full py-3 rounded-lg border border-outline-variant/70 text-on-surface font-body-reading-strong text-body-compact flex items-center justify-center gap-1" href="/demo">'
                     '<span class="material-symbols-outlined text-[18px]">visibility</span>로그인 없이 둘러보기</a>' if env().get("DEMO") == "1" else "")
                  + box + '</div>'
@@ -1243,6 +1294,14 @@ class App:
                  "emailInput.addEventListener('input',(ev)=>{clearBtn.classList.toggle('hidden',ev.target.value.length===0);});"
                  "function clearInput(){emailInput.value='';clearBtn.classList.add('hidden');emailInput.focus();}</script></main>")  # fmt: skip
         return page("로그인", "bg-surface font-body-reading text-on-surface pt-safe pb-safe flex flex-col min-h-screen", inner)
+
+    def assetlinks(self):
+        pkg, sha = env().get("TWA_PACKAGE", ""), env().get("TWA_SHA256", "")
+        if not (pkg and sha):
+            return "404 Not Found", [], self.simple("없음", "없는 화면이에요.")
+        body = [{"relation": ["delegate_permission/common.handle_all_urls"],
+                 "target": {"namespace": "android_app", "package_name": pkg, "sha256_cert_fingerprints": [x.strip() for x in sha.split(",")]}}]
+        return "200 OK", [("Content-Type", "application/json")], json.dumps(body)
 
     def is_demo(self, uid: int) -> bool:
         row = self.con.execute("select email from users where id = ?", (uid,)).fetchone()
@@ -1280,9 +1339,15 @@ class App:
             return "200 OK", [], self.login_page()
         if not agreed:
             return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 시작할 수 있어요.", cohort=cohort)
-        # 메일 확인 없이 바로 들어간다 — 처음이면 닉네임 화면, 이미 있으면 내 종목 (사용자 10/8: 메일함에 갔다 오는 번거로움이 크다).
-        # ponytail: 남의 이메일을 알면 그 계정으로 들어갈 수 있다. 지인 20명 시험이라 감수 — 공개 출시 전에 비밀번호나 카카오 로그인으로 (plan.md)
-        return self.start(email, cohort)
+        # 누구든 메일로 온 링크를 눌러야 들어온다 — 남의 이메일을 넣어 남의 계정에 들어가거나, 남의 이메일로 가입하지 못하게 (공개 출시 준비 10/10)
+        now = self.clock()
+        times = [t for t in self.sent.get(email, []) if now - t < 3600]
+        if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
+            return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
+        self.sent[email] = times + [now]
+        link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
+        mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+        return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def src(self, rno: str | None) -> str:
         """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽."""
@@ -2107,7 +2172,7 @@ class App:
                  f'<a class="mt-space-sm flex items-center justify-between rounded-xl border border-outline-variant/50 px-space-md py-3" href="/n/{e(t)}">'
                  f'<span class="flex items-center gap-2">{logo(name, self.con.execute("select homepage from stocks where ticker = ?", (t,)).fetchone()[0], "w-8 h-8")}'
                  f'<span class="text-[14px] font-semibold text-on-surface">{e(name)} 분석 보고서 보기</span></span><span class="material-symbols-outlined text-outline">chevron_right</span></a>'
-                 '<p class="mt-space-md text-[11px] text-outline leading-relaxed">공시 원문·사업보고서·재무·언론사 RSS 요약문을 바탕으로 AI가 쓴 글이에요. 숫자는 코드가 원문과 대조했어요. 작은 번호를 누르면 원문이 열려요. 사라·팔아라는 뜻이 아니에요.</p>'
+                 '<p class="mt-space-md text-[11px] text-outline leading-relaxed">공시 원문·사업보고서·재무·회사 뉴스룸 요약문을 바탕으로 AI가 쓴 글이에요. 숫자는 코드가 원문과 대조했어요. 작은 번호를 누르면 원문이 열려요. 사라·팔아라는 뜻이 아니에요.</p>'
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(b["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2307,7 +2372,8 @@ class App:
 
     def doc(self, path: str, uid: int | None) -> str:
         contact = env().get("PRIVACY_CONTACT", "")
-        title, parts = {"/privacy": ("개인정보 처리방침", policy.privacy(contact)), "/method": ("계산 방법", policy.method())}[path]  # fmt: skip
+        title, parts = {"/privacy": ("개인정보 처리방침", policy.privacy(contact)), "/method": ("계산 방법", policy.method()),
+                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact))}[path]  # fmt: skip
         body = "".join(
             f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
             + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)

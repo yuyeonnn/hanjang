@@ -657,17 +657,9 @@ def parse_ecos(body: dict, series_id: str) -> list[tuple[date, float]]:
 # --- 소식: 회사 뉴스룸 RSS + 언론사 RSS 의 제목·요약문·링크만 (data-rights §5) ---
 # 언론사·회사가 배포용으로 직접 내보내는 피드다. 기사 본문은 받지도 저장하지도 않는다 — 글은 AI 가 제목·요약문만 보고 새로 쓴다.
 
-PRESS_FEEDS = {  # 2026-10-08 열리는 것 확인 — 경제·산업·증권면. 같은 기사가 여러 피드에 나와도 url 이 열쇠라 한 번만 저장된다
-    "https://www.yna.co.kr/rss/economy.xml": "연합뉴스", "https://www.yna.co.kr/rss/industry.xml": "연합뉴스",
-    "https://www.yna.co.kr/rss/market.xml": "연합뉴스",
-    "https://www.hankyung.com/feed/economy": "한국경제", "https://www.hankyung.com/feed/finance": "한국경제",
-    "https://www.mk.co.kr/rss/30100041/": "매일경제", "https://www.mk.co.kr/rss/50200011/": "매일경제",
-    "https://biz.chosun.com/arc/outboundfeeds/rss/?outputType=xml": "조선비즈",
-    "https://biz.chosun.com/arc/outboundfeeds/rss/category/stock/?outputType=xml": "조선비즈",
-    "https://rss.mt.co.kr/mt_news.xml": "머니투데이", "https://www.asiae.co.kr/rss/stock.htm": "아시아경제",
-    "https://www.newsis.com/RSS/economy.xml": "뉴시스", "https://rss.etnews.com/Section901.xml": "전자신문",
-    "https://rss.donga.com/economy.xml": "동아일보",
-}  # fmt: skip
+# 언론사 RSS — 2026-10-10 약관을 읽어 보니 9곳 모두 공개 서비스에 쓸 권리가 확인되지 않았다(연합·동아·아시아경제는 「개인·비상업만」,
+# 매경·머니투데이·한경은 인용·자동 수집·AI 활용을 허락 사항으로, 조선비즈·뉴시스·전자신문은 RSS 조건 없음). 허락을 받은 곳만 여기에 (docs/data-rights.md §5.2)
+PRESS_FEEDS: dict[str, str] = {}
 NEWSROOMS = ROOT / "hanjang" / "newsrooms.txt"  # 종목코드 → 회사 뉴스룸 RSS (손으로 갱신 · 없는 회사는 언론 피드만)
 
 

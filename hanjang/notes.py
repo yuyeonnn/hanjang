@@ -62,6 +62,7 @@ TITLE_PLAIN = (
     (r"인수합병완료", "다른 회사를 사들이거나 합치는 일을 마쳤어요"),
     (r"실적발표\(8-K", "지난 분기 실적을 발표했어요"),
     (r"판매·?인도대수알림", "지난 분기에 판 물량(인도 대수)을 먼저 알렸어요 — 이익 숫자는 실적 발표 때 나와요"),
+    (r"예비실적알림", "지난 분기 실적을 확정 전에 어림값으로 먼저 알렸어요 — 확정 숫자는 실적 발표 때 나와요"),
     (r"큰계약체결", "회사에 중요한 계약을 맺었어요"),
     (r"큰계약해지", "회사에 중요한 계약이 끝났어요"),
     (r"큰빚\(차입", "돈을 크게 빌리거나 채권을 냈어요"),
@@ -520,7 +521,7 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None, 
             pv = f["slots"]["전년백원당"]
             was = f"1년 전엔 {pv[1:]}씩 잃음" if pv.startswith("-") else f"1년 전엔 {pv} 남김"
             f["text"] += (f" · {unit} 팔 때마다 본업에서 {f['slots']['손해']}씩 잃음({was})" if "손해" in f["slots"]
-                          else f" · {unit} 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})")
+                          else f" · {unit} 팔아 본업으로 {f['slots']['백원당']} 남김({was if pv.startswith('-') else '1년 전 ' + pv})")
     return out
 
 
@@ -806,10 +807,10 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
                 if bb and bb[0] and bb[0] >= eq * 0.1 and d > DEBT_BAD:  # 빚이 많아 보일 때만 이유를 붙인다(엔비디아 31% 에 붙으면 이상하다)
                     mid = mid | {"빚이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
             bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
-            out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
+            out.append({"id": "F3", "text": f"{yy.split('~')[-1]} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
                         + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
                         "tone": 0 if us else 1 if d < DEBT_GOOD else -1 if bad else 0,
-                        "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
+                        "slots": {"연도": yy.split("~")[-1], "비율": r, "빚": won(li), "자기돈": won(eq)}
                         | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})})  # fmt: skip
             if "빚이유" in mid:  # 「모든 문장에 원문 링크」 — 업종 설명은 사업보고서(F3)가 아니라 한장의 업종 풀이 글이 근거다
                 out.append({"id": "F17", "text": f"빚이 많은 까닭 — {mid['빚이유']}", "url": url if us else "/learn/sector-debt",

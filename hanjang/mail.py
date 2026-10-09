@@ -42,6 +42,12 @@ def send(to: str, subject: str, text: str, html: str = "") -> bool:
     return True
 
 
+def login_mail(link: str) -> tuple[str, str]:
+    return ("[한장] 로그인 링크예요",
+            f"아래 링크를 누르면 한장에 들어가요. 15분 동안만 쓸 수 있어요.\n\n{link}\n\n"
+            "직접 요청하지 않았다면 이 메일은 지우셔도 돼요.")  # fmt: skip
+
+
 # 화면과 같은 색 (docs/design.md 「Warm Editorial Finance」) — 메일 앱은 CSS 파일·클래스·웹 글꼴을 못 읽어
 # 인라인 스타일과 기기 기본 글꼴 하나로만 쓴다 (글꼴을 섞으면 앱마다 다르게 바뀌어 더 어수선해진다)
 INK, SUB, MUTE, LINE, BG, GREEN, MINT, PALE, RED = ("#1b1b1d", "#404945", "#717975", "#c0c8c4", "#f6f3f5",

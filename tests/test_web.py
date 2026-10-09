@@ -227,17 +227,24 @@ def test_redone_label():
     assert web.redone("2026-10-05", "2026-10-05T07:00:00") == "" and web.redone("2026-10-05", "now") == ""
 
 
-def test_login_needs_consent_then_goes_straight_in(capsys):
+def test_login_needs_consent_and_a_mailed_link(capsys):
     app, _ = _app()
     s, _, body = call(app, "/login", "POST", "email=a%40b.c")
-    assert "동의해야" in body  # 동의 없이는 안 된다
-    s, h, _ = call(app, "/login", "POST", "email=a%40b.c&agree=1")
-    assert s.startswith("303") and "s=" in h["Set-Cookie"] and "[메일" not in capsys.readouterr().err  # 처음 — 메일 없이 바로
-    assert "닉네임" in call(app, "/", cookie=h["Set-Cookie"].split(";")[0])[2]
+    assert "동의해야" in body and "[메일" not in capsys.readouterr().err  # 동의 없이는 메일을 보내지 않는다
+    s, h, body = call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    assert s.startswith("200") and "Set-Cookie" not in h and "[메일" in capsys.readouterr().err  # 처음 온 사람도 링크로만
     _login(app)  # 닉네임까지 만든 계정도
     s, h, _ = call(app, "/login", "POST", "email=me%40x.kr&agree=1")
-    assert s.startswith("303") and "[메일" not in capsys.readouterr().err  # 바로 내 종목으로
-    assert "내 종목" in call(app, "/", cookie=h["Set-Cookie"].split(";")[0])[2]
+    assert s.startswith("200") and "Set-Cookie" not in h and "[메일" in capsys.readouterr().err  # 이메일만 알아서는 못 들어간다
+    s, _, _ = call(app, "/login", "POST", "email=me%40x.kr&agree=1")  # 1분 안에 또
+    assert s.startswith("429") and "[메일" not in capsys.readouterr().err
+
+
+def test_login_help_page_is_public():
+    app, _ = _app()
+    assert 'href="/help/login"' in call(app, "/")[2]
+    s, _, body = call(app, "/help/login")
+    assert s.startswith("200") and "15분" in body and "비밀번호가 없어요" in body
 
 
 def test_public_pages_and_security_headers():
@@ -487,7 +494,7 @@ def test_invite_link_tags_trial_users_and_report_counts_weeks(capsys):
     app, con = _app()
     assert 'name="c" value="trial-1"' in call(app, "/?c=trial-1")[2]
     assert 'name="c"' not in call(app, "/?c=<x>")[2]  # 이상한 이름은 버린다
-    call(app, "/login", "POST", "email=a%40b.c&agree=1&c=trial-1")  # 처음 — 바로 시작하며 묶인다
+    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-1")  # 처음 — 링크로 들어오며 묶인다
     call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-2")  # 처음 묶음 그대로
     assert con.execute("select cohort from users where email = 'a@b.c'").fetchone() == ("trial-1",)
 
@@ -700,6 +707,20 @@ def test_follow_back_must_be_our_path():
     b = f"s={web.sign('2', SECRET)}"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/\\evil.example"), b)[1]["Location"] == "/u/1"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/f/1?tab=followers"), b)[1]["Location"] == "/f/1?tab=followers"
+
+
+def test_installable_app_pieces_are_public(monkeypatch):
+    app, _ = _app()
+    s, h, body = call(app, "/manifest.webmanifest")  # 로그인 없이
+    m = json.loads(body)
+    assert s.startswith("200") and m["display"] == "standalone" and {i["sizes"] for i in m["icons"]} >= {"192x192", "512x512"}
+    assert all(call_raw(app, i["src"])[0].startswith("200") for i in m["icons"])
+    assert "/offline" in call(app, "/sw.js")[2] and "연결이 끊겼어요" in call(app, "/offline")[2]
+    assert 'rel="manifest"' in call(app, "/")[2]
+    assert call(app, "/.well-known/assetlinks.json")[0].startswith("404")  # 지문을 넣기 전엔 닫혀 있다
+    monkeypatch.setattr(web, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
+    s, _, body = call(app, "/.well-known/assetlinks.json")
+    assert json.loads(body)[0]["target"] == {"namespace": "android_app", "package_name": "kr.hanjang.app", "sha256_cert_fingerprints": ["AA:BB"]}
 
 
 def test_learn_related_tips():

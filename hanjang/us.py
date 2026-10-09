@@ -30,6 +30,19 @@ FORMS = ("10-K", "10-Q", "8-K", "DEF 14A", "SC 13D", "SC 13D/A", "SC 13G", "SC 1
 DAYS = 400  # 공시 목록은 이만큼 (10-K 한 번은 들어오게) · Form 4 는 90일
 
 
+# 지주회사 개편 등으로 SEC 번호가 바뀐 회사 — 새 번호에 10-K 가 쌓일 때까지 옛 번호의 숫자를 함께 본다 (엑슨모빌 2026-07 ExxonMobil Holdings)
+PREDECESSOR = {"XOM": 34088}
+
+
+def merged_facts(new: dict, old: dict) -> dict:
+    """두 번호의 XBRL 숫자를 합친다 — 같은 기간은 series() 가 나중에 낸 보고서 값을 고른다."""
+    g = new.setdefault("facts", {}).setdefault("us-gaap", {})
+    for tag, v in old.get("facts", {}).get("us-gaap", {}).items():
+        for unit, rows in v.get("units", {}).items():
+            g.setdefault(tag, {}).setdefault("units", {}).setdefault(unit, []).extend(rows)
+    return new
+
+
 def universe() -> list[tuple[str, str]]:
     rows = (ln.split(maxsplit=1) for ln in UNIVERSE.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
     return [(t, n.strip()) for t, n in rows]
@@ -294,7 +307,7 @@ ITEMS = (
     ("2.06", "WRITE_DOWN", 3, -1, "큰 손상차손"),
     ("2.05", "WRITE_DOWN", 3, -1, "사업 정리 비용"),
     ("5.01", "HOLDER_CHANGE", 3, 0, "경영권 변동"),
-    ("3.02", "RIGHTS_ISSUE", 3, -1, "새 주식 발행"),
+    ("3.02", "RIGHTS_ISSUE", 2, -1, "새 주식 발행"),
     ("2.01", "MA", 2, 0, "인수·합병 완료"),
     ("2.02", "EARNINGS", 2, 0, "실적 발표"),
     ("1.01", "MAJOR_CONTRACT", 2, 0, "큰 계약 체결"),
@@ -324,8 +337,10 @@ def classify_8k(items: str, text: str = "") -> tuple[str, int, int, str]:
     its = set(items.split(","))
     for i, code, imp, dr, title in ITEMS:
         if i in its:
+            if i == "2.02" and re.search(r"preliminary", text[:3000], re.I) and re.search(r"(are|is) estimated|expects? to report", text, re.I):
+                return code, imp, dr, "예비 실적 알림 (8-K 2.02)"
             if i == "2.02" and DELIVERY.search(text) and (re.search(r"will be announced|when we announce", text, re.I)
-                                                          or not re.search(r"net income|earnings per share|operating income", text, re.I)):
+                                                          or not re.search(r"net (income|loss)|(earnings|profit|loss) per (diluted )?share|operating (income|loss|profit)", text, re.I)):
                 return code, imp, dr, "판매·인도 대수 알림 (8-K 2.02)"
             return code, imp, dr, f"{title} (8-K {i})"
     if SELLING.search(text):  # 새 주식을 시장에서 팔았다는 알림 — 매입 낱말이 함께 있어도 주식 수는 늘어난다
@@ -725,7 +740,7 @@ def check_release(j: dict, source: str, filed: date) -> dict:
 def read_release(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     """가장 최근 실적 발표(8-K 2.02, 판매 대수 알림 제외)의 분기 숫자 — 그 분기가 아직 우리 표에 없을 때만(10-Q 가 먼저 왔으면 읽지 않는다)."""
     row = con.execute("select f.accession, f.date, s.cik, s.fye from filings f join stocks s using(ticker) join disclosures d on d.rcept_no = f.accession"
-                      " where f.ticker = ? and f.form = '8-K' and f.items like '%2.02%' and d.title not like '판매%'"
+                      " where f.ticker = ? and f.form = '8-K' and f.items like '%2.02%' and d.title not like '판매%' and d.title not like '예비%'"
                       " order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
     if not row or con.execute("select 1 from skipped where accession = ?", ("rel:" + row[0],)).fetchone():
         return False
@@ -823,7 +838,7 @@ def save_8k(con: sqlite3.Connection, sec: "Edgar", ticker: str, cik: int, rows: 
             con.execute("insert or replace into events values (?, ?, 'EARNINGS', '실적 발표 (회사가 알린 날)', ?)", (ticker, d.isoformat(), r["accession"]))
         code, imp, dr, title = classify_8k(r["items"], text)
         # read_model 「8-K」 = 번호로 이미 분류함 — 국내 공시 AI 분류(read_disclosures)가 덮어쓰지 않게
-        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at, risk_tags) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?, 'v2')",
+        con.execute("insert or replace into disclosures (rcept_no, ticker, date, title, code, importance, direction, read_model, read_at, risk_tags) values (?, ?, ?, ?, ?, ?, ?, '8-K', ?, 'v3')",
                     (r["accession"], ticker, r["date"], title, code, imp, dr, datetime.now().isoformat()))  # fmt: skip
         n += 1
     return n
@@ -868,6 +883,7 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
     con, sec = con or db.connect(), sec or Edgar()
     con.execute("update insiders set kind = '임원' where kind = '임원·주요주주'")  # 10/9 첫 받기의 이름표 — 노트는 「임원」을 읽는다
     con.execute("delete from disclosures where read_model = '8-K' and code = 'BUYBACK' and risk_tags is null")  # 10/10 앞의 판 — 「주식 판매」를 매입으로 읽었을 수 있다, 다시 읽는다
+    con.execute("delete from disclosures where read_model = '8-K' and (title like '판매·인도%' or title like '새 주식 발행%' or (title like '실적 발표%' and date >= '2026-07-01')) and coalesce(risk_tags, '') != 'v3'")  # 10/10 분류 고침(실적·예비 실적·3.02 무게) — 다시 읽는다
     con.execute("update disclosures set read_model = '8-K', read_at = coalesce(read_at, ?) where rcept_no like '%-%-%' and read_model is null",
                 (datetime.now().isoformat(),))  # 10/9 앞서 넣은 8-K 도 「읽음」 — AI 분류가 덮지 않게
     tk = sec.tickers()
@@ -883,7 +899,10 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
                 print(f"  {ticker} {name}: 10-K 를 내지 않는 회사(20-F) — 뺀다", file=sys.stderr)
                 continue
             save_company(con, ticker, name, cik, sub)
-            f, q, fl = save_facts(con, ticker, sec.facts(cik), sub.get("fiscalYearEnd") or "1231", notes.us_finance(sub.get("sic")))
+            facts = sec.facts(cik)
+            if ticker in PREDECESSOR:
+                facts = merged_facts(facts, sec.facts(PREDECESSOR[ticker]))
+            f, q, fl = save_facts(con, ticker, facts, sub.get("fiscalYearEnd") or "1231", notes.us_finance(sub.get("sic")))
             rows = filing_rows(sub, today - timedelta(days=DAYS))
             con.executemany("insert or replace into filings values (?, ?, ?, ?, ?, ?, ?, ?)",
                             [(r["accession"], ticker, r["form"], r["date"], r["at"], r["items"], r["doc"], r["filed_us"]) for r in rows])  # fmt: skip
