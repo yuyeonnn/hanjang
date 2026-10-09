@@ -595,6 +595,9 @@ window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(funct
 addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
+TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게(사용자 10/10)
+
+
 def issuer_name(issuer: str, ours: str | None) -> str:
     """13F 회사 이름 — 우리 종목이면 한글 이름, 아니면 대문자 줄임말을 보기 좋게(「MAGNA INTL INC」→「Magna Intl Inc」)."""
     if not ours and gurus.sector("", issuer) == "ETF(지수 펀드)":  # 「INVESCO EXCH TRADED FD TR II …」 → 「Invesco ETF」
@@ -2412,8 +2415,8 @@ class App:
 
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">주식 포트폴리오 · 한국+미국</h2>'
                 + pie([(label(r), r[3]) for r in rows]) + after_pie
-                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:20], 1)) + "</div>"
-                + f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - 20:,}종목</p>'
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:TOP_LIST], 1)) + "</div>"
+                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - TOP_LIST:,}종목</p>' if len(rows) > TOP_LIST else "")
                 + '<p class="mt-2 text-[11px] text-outline leading-relaxed">한국 주식은 국민연금이 공개한 종목별 평가액(공공데이터포털 「국민연금공단_국내주식 투자정보」), '
                 + f'미국 주식은 같은 날 미국 증권거래위원회(SEC)에 낸 보유 신고(13F)예요. 달러는 그날 한국은행 환율(1달러 {meta[1]:,.1f}원)로 바꿨어요. '
                 + f'한국 {n_kr:,}종목 · 미국 {len(rows) - n_kr:,}종목. 1년에 한 번 나오는 공시라 지금과 다를 수 있어요.</p></section>')  # fmt: skip
@@ -2438,7 +2441,8 @@ class App:
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">미국 주식 포트폴리오</h2>'
                 f'<p class="mt-1 text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(rows[0][4])} 기준</p>'
                 + pie([(issuer_name(r[0], r[5]), r[2]) for r in rows]) + after_pie
-                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:10], 1)) + "</div>"
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:TOP_LIST], 1)) + "</div>"
+                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - TOP_LIST:,}종목</p>' if len(rows) > TOP_LIST else "")
                 + '<p class="mt-2 text-[11px] text-outline leading-relaxed">미국은 큰 투자자가 분기마다 미국 주식 보유 전체를 미국 증권거래위원회(SEC)에 신고해요(13F). '
                 "분기가 끝나고 45일 안에 나와서 지금과 다를 수 있어요. 미국 밖 주식은 들어 있지 않아요.</p></section>")  # fmt: skip
 
@@ -2497,7 +2501,7 @@ class App:
                 return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
             return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
-        top = rows[:30]
+        top = rows[:TOP_LIST]
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
                 f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'

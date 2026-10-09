@@ -106,3 +106,13 @@ def test_spread_out_portfolio_is_still_a_pie_without_other():
     many = [(f"종목{i}", 3) for i in range(30)]  # 넓게 나눈 곳도 파이 — 기타 없이 상위 5, 뺐다는 말은 눈에 띄게
     h = web.pie(many)
     assert "data-pie" in h and h.count("<path") == 5 and "기타는 빼고 상위 5종목만 그렸어요 (전체의 17%)" in h and ">기타<" not in h
+
+def test_every_holdings_list_shows_twenty():
+    from hanjang import web
+
+    con = db.connect(":memory:")
+    rows = [(k, f"{i:09d}", f"CO {i}", None, 1e9 - i, 1, 1.0, "a", "2026-06-30", "2026-08-14", "") for k in ("buffett", "nps") for i in range(25)]
+    con.executemany("insert into guru_holdings values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    app = web.App(con, "s" * 32)
+    for h in (app.guru(1, "buffett", "", "")[2], app.us_portfolio("nps")):  # 유명 투자자 · 기관 — 같은 20종목
+        assert h.count("text-[12px] text-outline tabular-nums") == 20 and "외 5종목" in h
