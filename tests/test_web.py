@@ -572,3 +572,18 @@ def test_returns_watch_and_cite_tone():
     assert "매출 1,000원 (2025년 · 전년보다 +0.0%)" in h and "「살펴볼 숫자」는" in h
     assert "「살펴볼 숫자」는" not in web.risk_block({"risks": ["환율 위험"]}, fins)
     assert "text-outline/70" in web.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in web.sentence({"text": "재무", "refs": ["F1"]})
+
+
+def test_rates_article_measures_from_bank_of_korea_series():
+    from hanjang import learn, sources
+    app, con = _app()
+    ck = _login(app)
+    assert "자료를 아직 받지 않았어요" in call(app, "/learn/rates", cookie=ck)[2]  # 자료가 없으면 고정 글
+    base = {"기준금리": 3.0, "국고채 3년": 4.0, "국고채 10년": 4.5, "회사채 AA-": 4.7, "회사채 BBB-": 10.5}
+    for sid, n in sources.RATES.items():
+        con.executemany("insert into macro values (?, ?, ?)", [(sid, f"{2001 + i // 12}-{i % 12 + 1:02d}-01", base[n] + (3 if n == "회사채 BBB-" and i == 5 else 0))
+                                                              for i in range(150)])
+    a = learn.rates(con)
+    assert a["month"] == "2013-06-01" and "가장 크게 벌어졌던 때는 2001년 6월로 **9.5%p**" in a["body"][1] and "**0달**" in a["body"][2]
+    html_ = call(app, "/learn/rates", cookie=ck)[2]
+    assert "금리 흐름" in html_ and "자료: 한국은행 ECOS" in html_ and html_.count("<polyline") == 5

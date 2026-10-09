@@ -59,6 +59,12 @@ ARTICLES = [
      ],
      "points": ["하루 기준으로 반대·몇 배", "오래 들고 있으면 지수와 결과가 달라질 수 있어요", "손실도 몇 배가 될 수 있어요"],
      "more": FINE},
+    {"slug": "rates", "cat": "상품 이해", "title": "신용이 낮을수록 이자를 더 줄까요?",
+     "lead": "같은 3년을 빌려도 **누가 빌리느냐**에 따라 이자가 달라요. 한국은행이 모은 금리로 재 봤어요.",
+     "body": ["(자료를 아직 받지 않았어요 — `python -m hanjang.collect` 뒤에 숫자가 채워져요.)"],
+     "points": ["나라 < 신용 좋은 회사 < 신용 낮은 회사 순으로 이자가 높았어요", "오래 빌릴수록 이자가 높은 편 — 늘 그렇진 않았어요",
+                "금리가 오르면 이미 나온 채권의 값은 내려가요"],
+     "more": ("한국은행 경제통계시스템 ECOS", "https://ecos.bok.or.kr")},
     {"slug": "dividend", "cat": "회사 읽기", "title": "배당은 어떻게 받아요?",
      "lead": "회사가 번 돈의 일부를 주주에게 나눠 주는 게 배당이에요. 「기준일」이 중요해요.",
      "body": [
@@ -194,6 +200,43 @@ def long_short(con) -> dict | None:
     body.append("다만 이건 **시장 전체(지수)** 이야기예요. 한 회사 주식은 회사가 어려워지면 오래 기다려도 회복하지 못할 수 있어요. "
                 "그리고 **과거에 그랬다는 측정일 뿐, 앞으로도 같다는 보장은 없어요.**")  # fmt: skip
     return BY_SLUG["long-short"] | {"body": body, "charts": got}
+
+
+# --- 「금리」 글 — 한국은행 월평균 금리로 코드가 잰다. 앞으로의 금리는 말하지 않는다 (불변식 1·5) ---
+
+
+def rates(con) -> dict | None:
+    """DB 의 금리로 글을 채운다. 다섯 가지가 10년치 넘게 있어야 쓴다 — 아니면 None (고정 글)."""
+    from hanjang.sources import RATES
+
+    got = {n: con.execute("select date, value from macro where series_id = ? and date >= '2001-01-01' order by date", (sid,)).fetchall()
+           for sid, n in RATES.items()}  # fmt: skip
+    if any(len(v) < 120 for v in got.values()):
+        return None
+    month = min(v[-1][0] for v in got.values())  # 다섯 가지가 모두 나온 마지막 달
+    got = {n: [(d, x) for d, x in v if d <= month] for n, v in got.items()}
+    now = {n: v[-1][1] for n, v in got.items()}
+    g3, g10, bbb = (dict(got[k]) for k in ("국고채 3년", "국고채 10년", "회사채 BBB-"))
+    gaps = [(d, bbb[d] - g3[d]) for d in sorted(g3) if d in bbb]
+    wide = max(gaps, key=lambda x: x[1])
+    flip = sum(g10[d] < g3[d] for d in g3 if d in g10)
+    body = [
+        f"{ym(month)} 평균으로, 나라가 3년 동안 돈을 빌릴 때 내는 이자(국고채 3년)는 연 **{now['국고채 3년']:.2f}%**, "
+        f"신용등급이 AA-인 회사는 **{now['회사채 AA-']:.2f}%**, BBB-인 회사는 **{now['회사채 BBB-']:.2f}%**였어요. "
+        "같은 3년인데도 **빌리는 곳의 신용이 낮을수록 이자를 더 줘요** — 돈을 못 돌려받을 위험을 더 크게 보기 때문이에요.",
+        f"신용이 낮은 회사가 나라보다 더 주는 이자(BBB- 회사채 − 국고채 3년)는 {ym(gaps[0][0])}부터 평균 **{sum(x for _, x in gaps) / len(gaps):.1f}%p**였어요. "
+        f"가장 크게 벌어졌던 때는 {ym(wide[0])}로 **{wide[1]:.1f}%p**였어요. {ym(month)}엔 {now['회사채 BBB-'] - now['국고채 3년']:.1f}%p예요.",
+        f"빌리는 기간도 이자를 바꿔요. 국고채 10년은 {now['국고채 10년']:.2f}%로 3년({now['국고채 3년']:.2f}%)보다 "
+        f"{'높았어요' if now['국고채 10년'] > now['국고채 3년'] else '낮았어요'}. 보통 오래 빌려줄수록 이자를 더 받지만 늘 그렇지는 않았어요 — "
+        f"{ym(got['국고채 3년'][0][0])}부터 {len(g3)}달 가운데 **{flip}달**은 10년이 3년보다 낮았어요.",
+        f"같은 달 기준금리(한국은행이 정하는 금리)는 {now['기준금리']:.2f}%였어요. 시장 금리는 기준금리를 따라 움직이는 편이지만, 날마다 사고파는 채권 값에 따라 달라져요.",
+        "**금리가 오르면 이미 나온 채권의 값은 내려가요.** 더 높은 이자를 주는 새 채권이 나오니 옛 채권은 싸게 팔아야 하거든요. "
+        "채권 ETF 를 가지고 있다면 그 값은 이 그림의 금리와 반대 방향으로 움직이는 편이에요.",
+        "모두 **과거에 그랬다는 측정**이에요. 앞으로 금리가 어떻게 될지를 말하는 글이 아니에요.",
+    ]
+    return BY_SLUG["rates"] | {"body": body, "rates": got, "now": now, "month": month}
+
+
 CATS = list(dict.fromkeys(a["cat"] for a in ARTICLES))
 # 캘린더의 「주주를 위한 읽기 팁」에서 이어 줄 글 — 공시 종류별
 FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "statements",

@@ -162,6 +162,11 @@ def main(today: date) -> None:
         con.executemany("insert or replace into macro values (?, ?, ?)", [(sid, d.isoformat(), v) for d, v in pts])
         print(f"{name} 주가지수 {len(pts)}달 (OECD)")
 
+    for sid in sources.RATES:
+        pts = sources.ecos(sid, date(2000, 1, 1), today, "M")
+        con.executemany("insert or replace into macro values (?, ?, ?)", [(sid, d.isoformat(), v) for d, v in pts])
+    print(f"금리 {len(sources.RATES)}가지 (월평균 · 한국은행)")
+
     if sources.price_dev():  # ⚠️ 개발 중 개인용만 — 서버에선 꺼짐 (data-rights §4)
         n = 0
         for t in tickers:

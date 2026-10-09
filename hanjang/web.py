@@ -617,6 +617,46 @@ def index_chart(got: dict) -> str:
             f'<div class="flex gap-3 font-label-micro text-label-micro text-on-surface-variant">{legend}</div></figure>')  # fmt: skip
 
 
+RATE_LOOK = {"기준금리": ("text-outline", "4 3"), "국고채 3년": ("text-primary", ""), "국고채 10년": ("text-primary", "2 2"),
+             "회사채 AA-": ("text-secondary", ""), "회사채 BBB-": ("text-tertiary", "")}  # fmt: skip
+RATE_BAR = {"text-outline": "bg-outline", "text-primary": "bg-primary", "text-secondary": "bg-secondary", "text-tertiary": "bg-tertiary"}
+
+
+def rate_ladder(now: dict, month: str) -> str:
+    """그달 금리 사다리 — 낮은 것부터 막대. 신용·기간에 따라 이자가 어떻게 달라지는지 한눈에."""
+    top = max(now.values())
+    rows = "".join(f'<div class="flex items-center gap-2 py-1"><span class="w-20 font-label-regular text-label-regular text-on-surface">{e(n)}</span>'
+                   f'<div class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><div class="{RATE_BAR[RATE_LOOK[n][0]]} h-full rounded-full" style="width:{v / top * 100:.0f}%"></div></div>'
+                   f'<span class="w-12 text-right font-label-regular text-label-regular text-on-surface font-semibold">{v:.2f}%</span></div>'
+                   for n, v in sorted(now.items(), key=lambda x: x[1]))  # fmt: skip
+    return (f'<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">{int(month[:4])}년 {int(month[5:7])}월 금리 (연, 월평균)</figcaption>'
+            f'{rows}<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
+
+
+def rate_chart(got: dict) -> str:
+    """금리 다섯 가지의 흐름 — 세로는 % 그대로, 달마다."""
+    ds = sorted({d for pts in got.values() for d, _ in pts})
+    hi = max(v for pts in got.values() for _, v in pts)
+    W, H, P = 340, 190, 24
+    pos = {d: i for i, d in enumerate(ds)}
+
+    def xy(d, v):
+        return f"{P + pos[d] / (len(ds) - 1) * (W - P - 4):.1f},{H - 18 - v / hi * (H - 30):.1f}"
+
+    polys = "".join(f'<polyline class="{RATE_LOOK[n][0]}" fill="none" stroke="currentColor" stroke-width="1.4"'
+                    + (f' stroke-dasharray="{RATE_LOOK[n][1]}"' if RATE_LOOK[n][1] else "") + f' points="{" ".join(xy(d, v) for d, v in pts)}"/>'
+                    for n, pts in got.items())  # fmt: skip
+    grid = "".join(f'<text x="2" y="{H - 18 - y / hi * (H - 30) + 3:.1f}" font-size="9" fill="currentColor" class="text-outline">{y}%</text>'
+                   for y in range(0, int(hi) + 1, 5))  # fmt: skip
+    ticks = "".join(f'<text x="{xy(d, 0).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{d[:4]}</text>'
+                    for d in ds if d[5:7] == "01" and int(d[:4]) % 5 == 0)  # fmt: skip
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {RATE_LOOK[n][0]} border-t-2 {"border-dashed" if RATE_LOOK[n][1] else ""} border-current"></span>{e(n)}</span>' for n in got)
+    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">금리 흐름 (연 %, 월평균)</figcaption>'
+            f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="기준금리·국고채·회사채 금리 흐름">{grid}{polys}{ticks}</svg>'
+            f'<div class="flex flex-wrap gap-x-3 gap-y-1 font-label-micro text-label-micro text-on-surface-variant">{legend}</div>'
+            '<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
+
+
 def loss_bars(got: dict) -> str:
     """보유 기간별 「손해였던 비율」 막대 — 한국·미국 나란히."""
     labels = [r["label"] for r in got["한국"]["rows"]]
@@ -1779,6 +1819,8 @@ class App:
         a = learn.BY_SLUG.get(slug)
         if slug == "long-short":  # 숫자를 DB 의 지수로 채운 글
             a = learn.long_short(self.con) or a
+        if slug == "rates":  # 숫자를 DB 의 금리로 채운 글
+            a = learn.rates(self.con) or a
         if slug and not a:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
@@ -1789,6 +1831,7 @@ class App:
                      f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">{self.marked(a["lead"])}</p></aside>'
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
+                     + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][1:])
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
