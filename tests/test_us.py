@@ -133,7 +133,7 @@ def test_us_facts_use_dollars_with_won_in_brackets_and_company_months(monkeypatc
     assert fs["F3"]["tone"] == 0 and "빚이유" not in fs["F3"]["slots"]  # 미국 부채비율은 판단하지 않는다 · 낮으면 이유도 없다
     assert notes.mend("중간값은 26달러이라서 높아요. 배당 10억 달러이에요.") == "중간값은 26달러라서 높아요. 배당 10억 달러예요."
     a = {f["id"]: f for f in notes.facts(con, "AAPL", date(2026, 10, 9))}
-    assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F3"]["slots"]["빚이유"]
+    assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F3"]["slots"]["자사주이유"] and "빚이유" not in a["F3"]["slots"]
     assert notes.won(123_456_789_000) == "1,235억원" and notes._MARKET["per"] == "원"  # 끝나면 국내로 되돌아간다
 
 
@@ -144,7 +144,7 @@ def test_8k_items_map_to_our_kinds_without_ai():
     assert us.needs_text("2.02,7.01,9.01") and not us.needs_text("1.01,2.03") and us.needs_text("7.01,8.01,9.01") and us.needs_text("5.02")
     assert us.classify_8k("2.02,9.01", "announced vehicle production and deliveries for the third quarter")[3] == "판매·인도 대수 알림 (8-K 2.02)"  # 테슬라
     assert us.member_name("nvda:ProfessionalVisualizationMember") == "전문가용 그래픽" and us.member_name("x:CloudPlatformSegmentMember") == "Cloud Platform"
-    assert us.member_name("jpm:AssetandWealthManagementMember") == "Asset & Wealth Management" and us.member_name("x:AllOtherGeographiesMemberMember") == "All Other Geographies"
+    assert us.member_name("jpm:AssetandWealthManagementMember") == "자산·자산관리" and us.member_name("x:AllOtherGeographiesMemberMember") == "All Other Geographies"
     assert us.classify_8k("8.01,9.01", "declared a quarterly dividend of $0.26 per share")[:2] == ("DIVIDEND", 2)
     assert us.classify_8k("7.01", "new share repurchase program")[:3] == ("BUYBACK", 3, 1)
     assert us.classify_8k("5.02", "appointed Chief Financial Officer")[0] == "EXEC" and us.classify_8k("5.02", "director resigned")[1] == 1
@@ -266,3 +266,17 @@ def test_release_numbers_are_checked_against_the_text():
     with pytest.raises(ValueError):
         us.check_release(ok | {"period_end": "2025-09-03"}, src, date(2026, 9, 30))  # 1년 전 분기
     assert us.check_release(ok | {"unit": "million", "operating_income": "(1,234)"}, src, date(2026, 9, 30))["operating_income"] == -1234e6
+
+
+def test_review_fixes_names_and_joins():
+    from hanjang import notes
+    assert us.member_name("jpm:CommercialAndInvestmentBankMember") == "기업·투자은행" and us.member_name("srt:NorthAmericaMember") == "북미"
+    assert us.member_name("mu:DRAMProductsMember") == "D램" and us.member_name("x:SomethingNewMember") == "Something New"
+    assert notes.mend("회사는 10월 1일에 실적을 발표했어요고, 매출이 늘었어요.") == "회사는 10월 1일에 실적을 발표했고, 매출이 늘었어요."
+
+
+def test_overlapping_regions_are_not_shown_as_shares():
+    rows = [{"member": "meta:USCanadaMember", "revenue": 39}, {"member": "country:US", "revenue": 37}, {"member": "srt:EuropeMember", "revenue": 23},
+            {"member": "srt:AsiaPacificMember", "revenue": 27}, {"member": "meta:RestOfWorldMember", "revenue": 11}]
+    assert [r["member"] for r in us.no_overlap(rows, 100)] == ["meta:USCanadaMember", "srt:EuropeMember", "srt:AsiaPacificMember", "meta:RestOfWorldMember"]
+    assert us.no_overlap([{"member": "a", "revenue": 80}, {"member": "b", "revenue": 50}], 100) == []

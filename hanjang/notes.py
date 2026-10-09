@@ -779,14 +779,15 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
             if us:  # 미국 회사는 자사주 매입으로 자기 돈이 작게 잡히는 일이 흔하다 — 비율로 좋다·나쁘다를 가르지 않는다
                 bb = con.execute("select buyback from flows where ticker = ? and months = 12 order by period_end desc limit 1", (ticker,)).fetchone()
                 if bb and bb[0] and bb[0] >= eq * 0.1 and d > DEBT_BAD:  # 빚이 많아 보일 때만 이유를 붙인다(엔비디아 31% 에 붙으면 이상하다)
-                    mid = mid | {"빚이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
-            bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
+                    mid = mid | {"자사주이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
+            bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid and "자사주이유" not in mid
             out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
                         + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
                         "tone": 0 if us else 1 if d < DEBT_GOOD else -1 if bad else 0,
                         "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
                         | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})
-                        | ({"빚이유": mid["빚이유"]} if "빚이유" in mid else {})})  # fmt: skip
+                        | ({"빚이유": mid["빚이유"]} if "빚이유" in mid else {})
+                        | ({"자사주이유": mid["자사주이유"]} if "자사주이유" in mid else {})})  # fmt: skip
         if ni is not None and eq and eq > 0:
             r = f"{ni / eq * 100:.1f}%"
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
@@ -975,7 +976,8 @@ def mend(text: str) -> str:
     text = re.sub(r"(았|었)(?:으로|로)(?=[,\s])", r"\1고", text)
     text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
     text = re.sub(r"(\d년)년", r"\1", text)
-    text = re.sub(r"(\d주)이에요", lambda m: m[1] + "예요", text)  # 「433만 2,118주이에요」
+    text = re.sub(r"(\d주)이에요", lambda m: m[1] + "예요", text)
+    text = re.sub(r"([았었였했])어요고(?=[,\s])", lambda m: m[1] + "고", text)  # 「발표했어요고,」 — 끝맺은 말 뒤에 「고」를 또 붙였다  # 「433만 2,118주이에요」
     text = re.sub(r"달러이(에요|라서|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)

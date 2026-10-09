@@ -374,6 +374,7 @@ def parse_13dg(xml: str) -> dict | None:
 
 # --- 10-K 인라인 XBRL — 사업부·제품·지역 숫자 (AI 없이) ---
 
+PARTS_V = 3  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
 AXES = {"segment": "StatementBusinessSegmentsAxis", "product": "ProductOrServiceAxis", "geo": "StatementGeographicalAxis"}
 MEMBER_KO = {
     "US": "미국", "CN": "중국", "TW": "대만", "JP": "일본", "KR": "한국", "DE": "독일", "GB": "영국", "IE": "아일랜드", "SG": "싱가포르", "CA": "캐나다",
@@ -400,7 +401,26 @@ def member_name(m: str) -> str:
     if local in MEMBER_KO:
         return MEMBER_KO[local]
     local = re.sub(r"(?<=[a-z])(and|including|excluding|of)(?=[A-Z])", lambda m: " " + m[1] + " ", local)  # 「AssetandWealth」「Chinaincluding」
-    return re.sub(r"\s+", " ", re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", local).replace(" And ", " & ").replace(" and ", " & ")).strip()
+    en = re.sub(r"\s+", " ", re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", local).replace(" And ", " & ").replace(" and ", " & ")).strip()
+    return EN_KO.get(en, en)
+
+
+# 띄어 쓴 영어 이름 → 한국어 (자주 담는 회사의 사업부·지역). 모르는 건 영어 그대로 — 지어내지 않는다
+EN_KO = {
+    "North America": "북미", "Latin America": "중남미", "US Canada": "미국·캐나다", "US & Canada": "미국·캐나다", "United States & Canada": "미국·캐나다",
+    "Americas Excluding United States": "그 밖 아메리카", "Americas Excluding U.S.": "그 밖 아메리카", "Asia Pacific": "아시아·태평양", "Other Asia Pacific": "그 밖 아시아·태평양",
+    "Europe Middle East & Africa": "유럽·중동·아프리카", "Rest Of World": "그 밖 나라", "All Other Countries": "그 밖 나라",
+    "Commercial & Investment Bank": "기업·투자은행", "Consumer Community Banking": "개인·지역 은행", "Consumer & Community Banking": "개인·지역 은행",
+    "Asset & Wealth Management": "자산·자산관리", "Corporate": "본사·기타", "Government": "정부", "Commercial": "기업",
+    "DRAM Products": "D램", "NAND Products": "낸드", "CMBU": "클라우드 메모리 사업부", "CDBU": "핵심 데이터센터 사업부",
+    "MCBU": "모바일·클라이언트 사업부", "AEBU": "자동차·임베디드 사업부", "Cloud": "클라우드", "Advertising": "광고",
+    "Google Services": "구글 서비스", "Google Cloud": "구글 클라우드", "Other Bets": "그 밖 신사업", "Family Of Apps": "앱(페이스북·인스타그램 등)",
+    "Reality Labs": "리얼리티 랩스(VR·AR)", "Amazon Web Services": "아마존 웹 서비스(AWS)", "Online Stores": "온라인 판매", "Physical Stores": "오프라인 매장",
+    "Third Party Seller Services": "입점 판매자 서비스", "Subscription Services": "구독 서비스", "Intelligent Cloud": "인텔리전트 클라우드",
+    "Productivity & Business Processes": "업무용 소프트웨어", "More Personal Computing": "개인용 컴퓨팅", "Server Products & Cloud Services": "서버·클라우드",
+    "Datacenter": "데이터센터", "Data Center": "데이터센터", "Client": "PC(클라이언트)", "Embedded": "임베디드", "Gaming": "게임",
+    "Semiconductor Solutions": "반도체", "Infrastructure Software": "인프라 소프트웨어", "Streaming": "스트리밍",
+}  # fmt: skip
 
 
 def ixbrl_parts(html: str, start: str, end: str) -> dict[str, list[dict]]:
@@ -449,6 +469,14 @@ def covering(total: float, *groups: list[dict]) -> list[dict]:
     return next((g for g in groups if g and sum(r.get("revenue") or 0 for r in g) >= total * 0.6), [])
 
 
+def no_overlap(rows: list[dict], total: float) -> list[dict]:
+    """지역 줄의 합이 매출을 넘으면 겹친 것이다(메타 「미국·캐나다」와 「미국」) — 나라 줄을 빼고, 그래도 넘으면 싣지 않는다."""
+    over = lambda rs: sum(r.get("revenue") or 0 for r in rs) > total * 1.02  # noqa: E731
+    if over(rows):
+        rows = [r for r in rows if not r["member"].startswith("country:")]
+    return [] if over(rows) else rows
+
+
 def shares(rows: list[dict], total: float) -> list[dict]:
     """매출 비중 — 코드가 나눈다. 큰 것부터 다섯, 1% 밑은 뺀다."""
     out = [{"name": r["name"], "share": f"{r['revenue'] / total * 100:.1f}%"} for r in sorted(rows, key=lambda r: -(r.get("revenue") or 0))
@@ -478,8 +506,10 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     what·risks = AI(숫자 없이) · segments(제품 비중)·seg(사업부 영업이익)·geo(지역 비중) = 코드."""
     row = con.execute("select f.accession, f.doc, s.cik from filings f join stocks s using(ticker) where f.ticker = ? and f.form = '10-K'"
                       " order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
-    have = con.execute("select rcept_no from business where ticker = ?", (ticker,)).fetchone()
-    if not row or (have and have[0] == row[0]):
+    have = con.execute("select rcept_no, body from business where ticker = ?", (ticker,)).fetchone()
+    # 같은 10-K 는 다시 읽지 않는다 — 단 코드로 만드는 칸(이름·비중)의 판(v)이 바뀌면 그 칸만 다시(AI 는 안 부른다)
+    redo = have and row and have[0] == row[0] and json.loads(have[1]).get("v") != PARTS_V
+    if not row or (have and have[0] == row[0] and not redo):
         return False
     accn, doc, cik = row
     fin = con.execute("select fiscal_year, period_start, period_end, revenue from financials where ticker = ? and rcept_no = ?"
@@ -491,17 +521,20 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     parts = ixbrl_parts(html, start, end)
     prev = con.execute("select period_start, period_end from financials where ticker = ? and fiscal_year = ?", (ticker, fy - 1)).fetchone()
     before = ixbrl_parts(html, *prev) if prev else {k: [] for k in AXES}
-    src = item_text(html)
-    got = llm.ask("reader", "business_us", {"원문": src}, lambda j: notes.check_business(j, src), notes.BUSINESS_SCHEMA, prompt_file="business_us")
+    if redo:
+        got = {k: v for k, v in json.loads(have[1]).items() if k in ("what", "risks")}
+    else:
+        src = item_text(html)
+        got = llm.ask("reader", "business_us", {"원문": src}, lambda j: notes.check_business(j, src), notes.BUSINESS_SCHEMA, prompt_file="business_us")
     if not got:
         return False
     old = {r["member"]: r for r in before["segment"]}
     seg_rows = [{"name": r["name"], "revenue": r.get("revenue"), "op": r.get("op"), "op_prev": old.get(r["member"], {}).get("op"),
                  "revenue_prev": old.get(r["member"], {}).get("revenue")} for r in parts["segment"]]  # fmt: skip
     body = got | {"segments": shares(covering(total, finest(parts["product"]), parts["segment"]), total) if total else [],  # 매출이 아직 없는 회사(오클로)는 비중 없이
-                  "geo": shares(covering(total, finest(parts["geo"])), total) if total else [],
+                  "geo": shares(covering(total, no_overlap(finest(parts["geo"]), total)), total) if total else [],
                   "seg": {"year": notes.span_label(start, end), "rows": seg_rows} if sum(r["op"] is not None for r in seg_rows) >= 2 else None,
-                  "year": fy, "market": "US"}  # fmt: skip
+                  "year": fy, "market": "US", "v": PARTS_V}  # fmt: skip
     con.execute("insert or replace into business values (?, ?, ?, ?, ?)",
                 (ticker, accn, json.dumps(body, ensure_ascii=False), llm.MODELS["reader"], datetime.now().isoformat()))  # fmt: skip
     return True
