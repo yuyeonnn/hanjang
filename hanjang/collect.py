@@ -17,7 +17,7 @@ def save_universe(con: sqlite3.Connection, picked: list[tuple[str, str]], corps:
     listed = 상장 회사 전체 — 검색·담기용으로 active=0 으로 넣어 둔다. 누가 담으면 다음 받기부터 active."""
     con.executemany("insert into stocks (ticker, name, corp_code, active) values (?, ?, ?, 0) on conflict(ticker) do update set"
                     " name = excluded.name, corp_code = excluded.corp_code", [(t, n, corps.get(t)) for t, n in listed])  # fmt: skip
-    con.execute("update stocks set active = 0")
+    con.execute("update stocks set active = 0 where market = 'KR'")  # 미국 종목은 us.py 가 정한다
     con.executemany(
         "insert into stocks (ticker, name, corp_code, active) values (?, ?, ?, 1) on conflict(ticker) do update set"
         " name = excluded.name, corp_code = excluded.corp_code, active = 1",
@@ -110,7 +110,7 @@ def per_stock(con: sqlite3.Connection, dart: "sources.Dart", tickers: list[str],
                        f" and ticker in ({','.join('?' * len(tickers))})", (lo.isoformat(), today.isoformat(), *tickers)).rowcount  # fmt: skip
     print(f"  정정되어 옛 판이 된 공시 {gone}건 정리")
 
-    for (t,) in con.execute("select ticker from stocks where active = 1 and (induty_code is null or homepage is null)").fetchall():
+    for (t,) in con.execute("select ticker from stocks where active = 1 and market = 'KR' and (induty_code is null or homepage is null)").fetchall():
         con.execute("update stocks set induty_code = ?, homepage = ? where ticker = ?", (*dart.company(t), t))
     # 자기주식 취득 결정은 금액을 전용 API 로 받는다 (제목만으로는 규모를 모른다)
     want = con.execute("select distinct ticker from disclosures where amount is null and date >= ?"
