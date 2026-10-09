@@ -363,7 +363,7 @@ def test_unit_after_slot_is_not_doubled():
 def test_story_facts_say_where_this_year_stands():
     fin = [(2025, 300, 30, 0, 0, 0, "r", "CFS"), (2024, 250, 10, 0, 0, 0, "r", "CFS"), (2023, 200, -5, 0, 0, 0, "r", "CFS")]
     f5, f6 = notes.story_facts(fin, "u", "2025년")
-    assert f5["slots"] == {"연도": "2025년", "비율": "10.0%", "백원당": "10원", "전년비율": "4.0%", "전년연도": "2024년"}
+    assert f5["slots"] == {"연도": "2025년", "비율": "10.0%", "백원당": "10원", "전년비율": "4.0%", "전년연도": "2024년", "힘": "더 세졌"}
     assert f6["slots"]["매출자리"] == "가장 많았" and f6["slots"]["이익바닥해"] == "2023년" and f6["slots"]["기간"] == "2023~2025년"
 
 
@@ -453,7 +453,7 @@ def test_tidy_broken_joins():
 
 def test_relation_says_what_numbers_mean():
     r = notes.relation(130, 100, 123, 100)
-    assert r == {"백원당": "95원", "전년백원당": "100원", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
+    assert r == {"백원당": "95원", "전년백원당": "100원", "힘": "약해졌", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
     assert notes.relation(110, 100, 150, 100)["관계"] == "판 돈보다 남긴 돈이 더 빨리 늘었"
     assert notes.relation(90, 100, 80, 100)["관계"] == "판 돈도 남긴 돈도 줄었"
     assert "관계" not in notes.relation(100, None, 10, None)
@@ -549,3 +549,13 @@ def test_industry_uses_median_and_skips_ratios_beyond_100pct():
     assert "4곳 가운데" in f["text"] and "중간값 10.5%" in f["text"] and "SQ" not in f["text"] and f["slots"]["중간값"] == "10.5%"
     assert notes.industry_fact(con, "SQ") == []  # 같은 잣대가 아닌 회사는 견주지 않는다
     assert "2번째로 높았" in notes.industry_fact(con, "A3")[0]["text"] and "가장 낮았" in f["text"]
+
+
+def test_margin_power_is_decided_by_code():
+    assert notes.relation(100, 100, 44, 47)["힘"] == "약해졌" and notes.power(13.1, 10.9) == "더 세졌" and notes.power(9.0, 9.2) == "비슷했"
+    by = {"F8": {"id": "F8", "text": "100원당 44원 · 47원", "tone": 0, "slots": {"백원당": "44원", "전년백원당": "47원", "힘": "약해졌"}}}
+    with pytest.raises(ValueError):
+        notes.fill({"text": "본업으로 {F8.백원당}을 남겼어요(1년 전엔 {F8.전년백원당}). 남기는 힘이 더 세졌어요.", "refs": ["F8"]}, by)
+    assert notes.fill({"text": "남기는 힘이 {F8.힘}어요.", "refs": ["F8"]}, by)["text"] == "남기는 힘이 약해졌어요."
+    with pytest.raises(ValueError):
+        notes.check_sentence({"text": "더 빨리 증가).", "refs": ["F8"]}, [by["F8"]])
