@@ -52,6 +52,7 @@ create table if not exists holidays (date text primary key, name text not null);
 create table if not exists filings (
   accession text primary key, ticker text not null references stocks, form text not null, date text not null, at text,
   items text, doc text, filed_us text);
+create table if not exists outlooks (ticker text primary key references stocks, accession text not null, date text not null, body text not null);
 create table if not exists skipped (accession text primary key, ticker text not null);
 create table if not exists flows (
   ticker text not null references stocks, period_start text not null, period_end text not null, months integer,
