@@ -91,14 +91,15 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "미국 주식 포트폴리오" in app.us_portfolio("nps") and app.us_portfolio("blackrock") == ""
     big = app.big(1, "nps", "", "")[2]  # 기관 페이지 — 미국 주식은 국내 목록 위에, 머리에 종목 수
     assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("지분이 큰 순서")
-    assert web.pie([("가", 50), ("나", 30), ("다", 20)], n=2).count("<path") == 3 and ">기타</span>" in web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)
+    two = web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)  # 기타는 그리지 않는다 — 상위 2종목만, 글자는 전체 중 비중
+    assert two.count("<path") == 2 and ">기타<" not in two and ">50.0%</span>" in two and "상위 2종목만 그렸어요 · 전체의 80%" in two
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
 
 
-def test_spread_out_portfolio_gets_a_bar_not_a_pie():
+def test_spread_out_portfolio_gets_a_treemap_not_a_pie():
     from hanjang import web
 
     many = [(f"종목{i}", 3) for i in range(30)]  # 큰 다섯이 17% — 파이면 「기타」 덩어리뿐
     h = web.pie(many)
-    assert "data-pie" not in h and "상위 10종목이 전체의 <b class=\"text-on-surface\">33%</b>" in h and ">나머지 20종목</span>" in h
+    assert "data-pie" not in h and "상위 10종목만 그렸어요 · 전체의 33%" in h and h.count("title=") == 10 and "나머지" not in h  # 트리맵, 기타 없이
     assert "data-pie" in web.pie([("가", 50), ("나", 30), ("다", 20)])  # 몰려 있으면 그대로 파이
