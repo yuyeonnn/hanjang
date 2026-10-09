@@ -158,7 +158,7 @@ def test_fallback_headline_is_the_companys_biggest_issue():
     con = _con()
     collect.save_disclosures(con, [sources.Disclosure("20261001000001", "005930", date(2026, 10, 1), "유상증자결정")])
     con.execute("update disclosures set code='RIGHTS_ISSUE', importance=3, direction=-1 where rcept_no='20261001000001'")
-    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "새 주식을 찍어 팔아 돈을 모으기로 했어요(10월 1일)."  # 어려운 말 대신 무슨 일인지
+    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) .startswith("새 주식을 찍어 팔아 돈을 모으기로 했어요(10월 1일). ")  # 어려운 말 대신 무슨 일인지 · 줄표 없이
 
 
 def test_year_may_be_written_but_nothing_else():
@@ -593,3 +593,9 @@ def test_this_week_only_for_this_weeks_events_and_short_second_date():
          "sections": [{"title": "최근 소식", "sentences": [{"text": "이번 주에는 실적을 먼저 알렸어요.", "refs": ["D1"]}]}]}
     assert notes.fill_note(j, fs)["sections"][0]["sentences"][0]["text"] == "최근 실적을 먼저 알렸어요."
     assert notes.mend("10월 8일과 7일에 돈을 모으기로 했어요.") == "돈을 모으기로 했어요(10월 8일과 7일)."
+
+
+def test_no_dashes_in_sentences():
+    assert notes.mend("결산 실적 발표 날짜를 미리 알렸어요 — 아직 숫자는 없어요.") == "결산 실적 발표 날짜를 미리 알렸어요. 아직 숫자는 없어요."
+    assert notes.mend("보도가 있었어요 — 적자 전환이 불가피하다는 전망이에요.") == "보도가 있었어요. 적자 전환이 불가피하다는 전망이에요."
+    assert "—" not in notes.plain("결산실적공시예고") and "—" not in notes.plain("유상증자결정")
