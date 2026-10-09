@@ -89,5 +89,7 @@ def test_guru_page_and_note_owners_link_each_other():
     con.execute("insert into guru_holdings values ('nps', '037833100', 'APPLE INC', 'AAPL', 9e9, 1, 5.9, 'x', '2026-06-30', '2026-08-13', '')")
     assert [r[0] for r in app.owners("AAPL")[2]] == ["워런 버핏 · 버크셔 해서웨이", "국민연금"] and "미국 주식의 5.9%" in app.owners("AAPL")[2][1][3]
     assert "미국 주식 포트폴리오" in app.us_portfolio("nps") and app.us_portfolio("blackrock") == ""
+    big = app.big(1, "nps", "", "")[2]  # 기관 페이지 — 미국 주식은 국내 목록 위에, 머리에 종목 수
+    assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("지분이 큰 순서")
     assert web.pie([("가", 50), ("나", 30), ("다", 20)], n=2).count("<path") == 3 and ">기타</span>" in web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
