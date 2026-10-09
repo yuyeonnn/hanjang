@@ -1020,6 +1020,17 @@ def people_credits() -> dict[str, tuple[str, str, str]]:
 
 
 PEOPLE = people_credits()  # 키 → (찍은 사람, 이용 허락, 원본 주소)
+BOOK_FACE = {"book-graham": "graham", "book-buffett": "buffett", "book-bogle": "bogle", "book-marks": "marks"}  # 책 글 → 지은이 사진 (자유 이용 사진이 없는 린치·말킬·피셔·하우절은 없음)
+
+
+def book_face(slug: str) -> tuple[str, str]:
+    """책에서 배우기 — (글 첫머리에 띄워 글이 옆으로 흐르는 지은이 얼굴, 맨 밑 출처 한 줄) (사용자 10/10). 사진이 없으면 둘 다 빈 글."""
+    key = BOOK_FACE.get(slug)
+    if key not in PEOPLE:
+        return "", ""
+    who, lic, url = PEOPLE[key]
+    return (f'<img alt="" class="float-left w-20 h-20 lg:w-24 lg:h-24 mr-4 mb-2 mt-1 rounded-full object-cover object-[50%_20%] bg-surface-container" src="/static/people/{key}.jpg">',
+            f'<a class="block mt-space-md text-[12px] text-outline hover:underline" href="{e(url)}" target="_blank" rel="noopener">사진: {e(who)} · {e(lic)} · 위키미디어 공용</a>')  # fmt: skip
 
 
 def kdate(iso: str) -> str:
@@ -1226,7 +1237,7 @@ class App:
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
         if path == "/stocks.js":  # 검색 자동완성 — 상장사 이름·코드는 공개 정보라 로그인 없이
             return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "public, max-age=86400")], self.stocks_js()
-        if path.startswith("/static/people/") and path[15:-4] in gurus.GURUS and path.endswith(".jpg") and (STATIC / "people" / path[15:]).exists():
+        if path.startswith("/static/people/") and path[15:-4] in PEOPLE and path.endswith(".jpg") and (STATIC / "people" / path[15:]).exists():
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "people" / path[15:]).read_bytes()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
@@ -2558,11 +2569,12 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
             more_label, more_url = a["more"]
+            face, credit = book_face(slug)
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
-                     + self.flow(a["body"][:1])
+                     + f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
+                     + '<div class="block">' + face + self.flow(a["body"][:1]) + '<div class="clear-both"></div></div>'
                      + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
@@ -2570,7 +2582,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
-                     + self.related(slug)
+                     + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
         groups = "".join(

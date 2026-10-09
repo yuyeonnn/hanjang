@@ -7,3 +7,6 @@ ackman|Senate Democrats|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Valean
 dalio|Web Summit|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Web_Summit_2018_-_Forum_-_Day_2,_November_7_HM1_7481_(44858045925).jpg
 tepper|Appaloosa Management|CC BY-SA 3.0|https://commons.wikimedia.org/wiki/File:David_Tepper_01.jpg
 soros|Aris Oikonomou / European Commission|CC BY 4.0|https://commons.wikimedia.org/wiki/File:George_Soros,_Founder_and_Chairman_of_the_Open_Society_Foundations,_visits_the_EC_(3x4_cropped).jpg
+graham|Unknown author|Public domain|https://commons.wikimedia.org/wiki/File:Benjamin_Graham_(1894-1976)_portrait_on_23_March_1950.jpg
+bogle|Bill Cramer|CC BY-SA 4.0|https://commons.wikimedia.org/wiki/File:Photo_of_a_John_C._Bogle_By_Bill_Cramer.jpg
+marks|kellywritershouse|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Howard_Marks_2.17.12_(cropped).jpg

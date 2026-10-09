@@ -775,3 +775,14 @@ def test_learn_figures():
     assert len({f["type"] for f in learn.FIGURE.values()}) >= 8  # 여러 모양 (사용자 10/10: 다 똑같다)
     for f in learn.FIGURE.values():
         assert web.figure(f).startswith("<figure"), f["type"]
+
+
+def test_book_author_photo(tmp_path):
+    from hanjang import web
+    face, credit = web.book_face("book-graham")
+    assert "/static/people/graham.jpg" in face and "Public domain" in credit
+    assert web.book_face("book-lynch") == ("", "")  # 자유 이용 사진이 없으면 그림 없이
+    for key in web.BOOK_FACE.values():
+        assert (web.STATIC / "people" / f"{key}.jpg").exists() and key in web.PEOPLE
+    app, _ = _app()
+    assert call_raw(app, "/static/people/graham.jpg")[1]["Content-Type"] == "image/jpeg"  # 투자자 목록에 없는 지은이도 열린다
