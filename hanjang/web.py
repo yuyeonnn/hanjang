@@ -804,6 +804,44 @@ def metrics(fins: list[tuple]) -> str:
             f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">{"".join(cells)}</div></div>')  # fmt: skip
 
 
+FILLED = "font-variation-settings:'FILL' 1,'wght' 600"  # 꽉 찬 검은 그림 — 톱니바퀴 같은 인포그래픽 모양
+
+
+def figure(f: dict | None) -> str:
+    """읽기 팁 인포그래픽 — 상자·흰 바탕 없이 큰 검은 그림과 글. flow 는 휴대폰에서 세로·넓은 화면에서 가로로 (사용자 10/10)."""
+    if not f:
+        return ""
+    head = (f'<figure class="my-space-xl"><figcaption class="mb-5 text-[13px] font-semibold tracking-wide text-outline">{e(f["title"])}</figcaption>')
+    icon = lambda name, size: f'<span class="material-symbols-outlined {size} text-on-surface leading-none" style="{FILLED}" aria-hidden="true">{e(name)}</span>'
+    if f["type"] == "flow":
+        n = len(f["steps"])
+        parts = []
+        for k, (ic, t, d) in enumerate(f["steps"]):
+            parts.append(f'<li class="flex items-start gap-4 lg:flex-1 lg:flex-col lg:items-center lg:text-center lg:gap-3">{icon(ic, "text-[44px] lg:text-[56px]")}'
+                         f'<span class="flex flex-col pt-1 lg:pt-0"><b class="text-[15px] leading-[22px] text-on-surface"><span class="text-primary mr-1">{k + 1}</span>{e(t)}</b>'
+                         + (f'<span class="text-[13px] leading-[19px] text-on-surface-variant mt-0.5">{e(d)}</span>' if d else "") + "</span></li>")
+            if k < n - 1:
+                parts.append('<li aria-hidden="true" class="pl-3 lg:pl-0 lg:pt-4 text-outline-variant"><span class="material-symbols-outlined text-[22px] lg:hidden">arrow_downward</span>'
+                             '<span class="material-symbols-outlined text-[26px] hidden lg:inline">arrow_forward</span></li>')
+        return head + f'<ol class="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3">{"".join(parts)}</ol></figure>'
+    if f["type"] == "compare":
+        (i1, c1), (i2, c2) = f["cols"]
+        top = ('<div class="grid grid-cols-[28%_1fr_1fr] lg:grid-cols-[22%_1fr_1fr] gap-3 items-end pb-3"><span></span>'
+               + "".join(f'<span class="flex flex-col items-start gap-1.5">{icon(ic, "text-[40px] lg:text-[52px]")}<b class="text-[15px] text-on-surface">{e(c)}</b></span>'
+                         for ic, c in ((i1, c1), (i2, c2))) + "</div>")  # fmt: skip
+        rows = "".join(f'<div class="grid grid-cols-[28%_1fr_1fr] lg:grid-cols-[22%_1fr_1fr] gap-3 py-2.5 text-[14px] leading-[21px]">'
+                       f'<span class="text-on-surface-variant">{e(k)}</span><span class="text-on-surface">{e(x)}</span><span class="text-on-surface">{e(y)}</span></div>'
+                       for k, x, y in f["rows"])  # fmt: skip
+        return head + top + f'<div class="divide-y divide-surface-container-high">{rows}</div></figure>'
+    if f["type"] == "equation":
+        rows = "".join(f'<div class="flex items-baseline flex-wrap gap-x-2 gap-y-1 py-1"><span class="text-[15px] text-on-surface">{e(x)}</span><span class="text-[18px] text-outline">{e(op)}</span>'
+                       f'<span class="text-[15px] text-on-surface">{e(y)}</span><span class="text-[18px] text-outline">=</span><b class="text-[20px] text-primary">{e(z)}</b></div>'
+                       for x, op, y, z in f["rows"])  # fmt: skip
+        return (head + f'<div class="flex items-center gap-5">{icon("calculate", "text-[56px] lg:text-[72px]")}'
+                f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-1 flex-1">{rows}</div></div></figure>')
+    return ""
+
+
 def chapter(title: str, body: str, extra: str = "") -> str:
     return ('<article class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
@@ -2474,6 +2512,7 @@ class App:
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
                      f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
                      + self.flow(a["body"][:1])
+                     + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
                      + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])

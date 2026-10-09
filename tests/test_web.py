@@ -743,3 +743,17 @@ def test_learn_story_box():
     ck = _login(app)
     body = call(app, "/learn/stock-bond", cookie=ck)[2]
     assert "이야기로 보면" not in body and "실리콘밸리은행" in body  # 소제목 없이 본문으로 이어진다
+
+
+def test_learn_figures():
+    from hanjang import learn
+
+    for slug, f in learn.FIGURE.items():  # 그림도 있는 글에만 · 권유·예측 말 없이
+        assert slug in learn.BY_SLUG and f["type"] in ("flow", "compare", "equation"), slug
+        words = " ".join(str(x) for x in [f["title"], *(f.get("steps") or []), *(f.get("rows") or []), *(f.get("cols") or [])])
+        assert not notes.FORBIDDEN.search(words), slug
+    app, con = _app()
+    ck = _login(app)
+    body = call(app, "/learn/start", cookie=ck)[2]
+    assert "주식을 처음 사기까지" in body and "이틀 뒤 내 것으로 확정" in body
+    assert "PER" in web.figure(learn.FIGURE["ratios"]) and "−4%" in web.figure(learn.FIGURE["inverse-leverage"])
