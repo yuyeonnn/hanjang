@@ -98,6 +98,7 @@ class Period:
     val: float
     accn: str
     filed: str
+    form: str = "10-K"
 
 
 def series(facts: dict, tags: tuple[str, ...], unit_prefix: str = "USD") -> dict[tuple, Period]:
@@ -112,18 +113,20 @@ def series(facts: dict, tags: tuple[str, ...], unit_prefix: str = "USD") -> dict
                 if r.get("form", "").split("/")[0] not in ("10-K", "10-Q") or r.get("val") is None:
                     continue
                 key = (r.get("start"), r["end"])
-                p = Period(date.fromisoformat(r["start"]) if r.get("start") else None, date.fromisoformat(r["end"]), r["val"], r["accn"], r["filed"])
+                p = Period(date.fromisoformat(r["start"]) if r.get("start") else None, date.fromisoformat(r["end"]), r["val"], r["accn"], r["filed"], r["form"])
                 if key not in out or p.filed > out[key].filed:
                     out[key] = p
     return out
 
 
 def months(p: Period) -> int | None:
-    """기간 길이 — 3·6·9·12 (분기·반기·9개월·연간). 잔액은 None."""
+    """기간 길이 — 3·6·9·12 (분기·반기·9개월·연간). 잔액은 None.
+    12개월은 10-K 에 실린 것만 — 분기보고서의 「최근 12개월」(아마존 7월~6월)은 회계연도가 아니다 (10/10)."""
     if not p.start:
         return None
     d = (p.end - p.start).days
-    return next((m for m, (lo, hi) in ((3, (75, 100)), (6, (165, 195)), (9, (255, 285)), (12, (350, 380))) if lo <= d <= hi), None)
+    m = next((m for m, (lo, hi) in ((3, (75, 100)), (6, (165, 195)), (9, (255, 285)), (12, (350, 380))) if lo <= d <= hi), None)
+    return None if m == 12 and not p.form.startswith("10-K") else m
 
 
 def fye_month(fye: str) -> int:
@@ -374,7 +377,7 @@ def parse_13dg(xml: str) -> dict | None:
 
 # --- 10-K 인라인 XBRL — 사업부·제품·지역 숫자 (AI 없이) ---
 
-PARTS_V = 3  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
+PARTS_V = 7  # 코드로 만드는 사업부·지역 칸의 판 — 이름표(EN_KO)를 고치면 올린다 (10/10: 영어로 남던 이름)
 AXES = {"segment": "StatementBusinessSegmentsAxis", "product": "ProductOrServiceAxis", "geo": "StatementGeographicalAxis"}
 MEMBER_KO = {
     "US": "미국", "CN": "중국", "TW": "대만", "JP": "일본", "KR": "한국", "DE": "독일", "GB": "영국", "IE": "아일랜드", "SG": "싱가포르", "CA": "캐나다",
@@ -386,7 +389,8 @@ MEMBER_KO = {
     "Service": "서비스", "Services": "서비스", "Product": "제품", "Products": "제품", "Subscription": "구독", "Advertising": "광고",
     "AutomotiveSales": "자동차 판매", "AutomotiveRegulatoryCredits": "탄소 배출권", "AutomotiveLeasing": "자동차 리스", "EnergyGenerationAndStorage": "에너지 저장",
     "EnergyGenerationAndStorageSegment": "에너지 저장", "AutomotiveSegment": "자동차", "ServicesAndOther": "서비스·기타",
-    "ComputeAndNetworking": "연산·네트워킹", "Graphics": "그래픽", "HK": "홍콩", "OtherAsiaPacific": "그 밖 아시아·태평양", "OtherAmericas": "그 밖 아메리카",
+    "ComputeAndNetworking": "연산·네트워킹", "Graphics": "그래픽", "MX": "멕시코", "CH": "스위스", "FR": "프랑스", "IN": "인도", "NL": "네덜란드",
+    "BR": "브라질", "AU": "호주", "IT": "이탈리아", "ES": "스페인", "IL": "이스라엘", "MY": "말레이시아", "TH": "태국", "VN": "베트남", "PH": "필리핀", "HK": "홍콩", "OtherAsiaPacific": "그 밖 아시아·태평양", "OtherAmericas": "그 밖 아메리카",
     "EuropeMiddleEastAndAfrica": "유럽·중동·아프리카", "Foreign": "해외", "NonUS": "미국 밖", "UnitedStates": "미국", "RestOfWorld": "그 밖 나라",
 }  # fmt: skip
 
@@ -420,6 +424,34 @@ EN_KO = {
     "Productivity & Business Processes": "업무용 소프트웨어", "More Personal Computing": "개인용 컴퓨팅", "Server Products & Cloud Services": "서버·클라우드",
     "Datacenter": "데이터센터", "Data Center": "데이터센터", "Client": "PC(클라이언트)", "Embedded": "임베디드", "Gaming": "게임",
     "Semiconductor Solutions": "반도체", "Infrastructure Software": "인프라 소프트웨어", "Streaming": "스트리밍",
+    "Concentrate Operations": "원액 판매", "Finished Product Operations": "완제품 판매", "Insurance & Other": "보험·기타",
+    "Railroad Utilities & Energy": "철도·전력·에너지", "Company Operated Stores": "직영 매장", "Licensed Stores": "라이선스 매장",
+    "Corporate & Other": "본사·기타", "Other": "기타", "Beverage": "음료", "Food": "음식", "Pharmaceutical": "의약품",
+    "Transaction": "거래 수수료", "Subscription & Services": "구독·서비스", "Footwear": "신발", "Apparel": "의류", "Equipment": "용품",
+    "Client & Gaming": "PC·게임", "Subscriptions & Services": "구독·서비스", "Asia": "아시아", "Insurance Corporate & Other": "보험(본사·기타)",
+    "Berkshire Hathaway Insurance Group": "버크셔 보험 그룹", "Manufacturing Businesses": "제조업", "Mc Lane Company": "맥레인(유통)",
+    "Machinery Power Energy": "기계·동력·에너지", "Financial Products": "금융 상품", "Constellation Mid Atlantic": "중부 대서양 지역",
+    "Constellation Midwest": "중서부 지역", "Constellation Other Regions": "그 밖 지역", "Constellation New York": "뉴욕 지역", "Constellation ERCOT": "텍사스(ERCOT)",
+    "Food & Sundries": "식품·생활용품", "Non Foods": "비식품", "Fresh Food": "신선식품", "Subscription & Circulation": "구독", "Professional Services": "전문 서비스",
+    "Entertainment": "엔터테인먼트", "Experiences": "테마파크·체험", "Sports": "스포츠", "Intel Foundry": "인텔 파운드리", "Client Computing Group": "PC(클라이언트)",
+    "Datacenter & AI": "데이터센터·AI", "Quantum Hardware": "양자 하드웨어", "Platform Consulting & Support Services": "플랫폼·컨설팅",
+    "Innovative Medicine": "의약품", "Med Tech": "의료기기", "Asia Pacific Africa": "아시아·태평양·아프리카", "Vehicle Sales From E Vs": "전기차 판매",
+    "Regulatory Credits": "탄소 배출권", "Sale & Leaseback Transactions": "판매 후 재임대", "International Operated Markets": "해외 직영 시장",
+    "US Market": "미국 시장", "International Developmental Licensed Markets & Corporate": "해외 라이선스 시장·본사", "Product Support": "제품 지원",
+    "Service Other": "그 밖 서비스", "License": "라이선스", "Other Regions": "그 밖 지역", "Sporting Equipment": "운동 용품",
+    "Software Support": "소프트웨어 유지보수", "Cloud Infrastructure": "클라우드 인프라", "Cloud Applications": "클라우드 앱", "Software License": "소프트웨어 라이선스",
+    "Pepsi Co Beverages North America": "북미 음료", "Pepsi Co Foods North America": "북미 식품", "Europe Middle East Africa": "유럽·중동·아프리카",
+    "Latin America Foods": "중남미 식품", "Fabric Home Care": "세제·생활용품", "Baby Feminine Family Care": "기저귀·위생·가정용품", "Beauty": "뷰티",
+    "Health Care": "헬스케어", "Grooming": "면도·그루밍", "Transaction Revenue": "결제 수수료", "Revenues From Other Value Added Services": "부가 서비스",
+    "Qct": "반도체(QCT)", "Qtl": "특허 사용료(QTL)", "Software & Services": "소프트웨어·서비스", "Space Systems": "우주 시스템", "Launch Services": "발사 서비스",
+    "Channel Development": "유통 채널", "Edge": "엣지(PC·모바일)", "Consumer": "소비자용", "Rest Of Asia": "그 밖 아시아", "Mobility": "차량 호출",
+    "Delivery": "배달", "Freight": "화물", "Data Processing Revenues": "결제 처리", "International Transaction Revenues": "해외 결제",
+    "Value Added Services": "부가 서비스", "Product Excluding Spares": "제품", "Services & Spares": "서비스·부품", "Client Devices": "PC·기기",
+    "Walmart US": "월마트 미국", "Walmart International": "월마트 해외", "Sams Club US": "샘스클럽 미국", "Lending": "대출",
+    "Financial Services": "금융 서비스", "Technology Platform": "기술 플랫폼", "Unitedhealthcare": "유나이티드헬스케어(보험)", "Total Optum": "옵텀",
+    "Optumrx": "옵텀 Rx(약국)", "Optumhealth": "옵텀 헬스(의료)", "Middle East": "중동", "Africa": "아프리카", "Membership": "회원비",
+    "Western Hemisphere Excluding US": "미국 밖 서반구", "International Beverage Franchise": "해외 음료 프랜차이즈", "RU": "러시아",
+    "Latin America & Canada": "중남미·캐나다", "Middle East & Africa": "중동·아프리카",
 }  # fmt: skip
 
 
@@ -451,15 +483,31 @@ def ixbrl_parts(html: str, start: str, end: str) -> dict[str, list[dict]]:
     return {k: [r for r in v.values() if r.get("revenue") is not None or r.get("op") is not None] for k, v in out.items()}
 
 
-def finest(rows: list[dict]) -> list[dict]:
-    """겹치는 줄을 뺀다 — 「데이터센터 = 연산 + 네트워킹」「제품 = 아이폰+맥+아이패드+…」처럼 다른 줄들의 합인 줄(위 단계)은 버린다."""
-    vals = [(r, r.get("revenue") or 0) for r in rows]
+GENERIC = {"us-gaap:ProductMember", "us-gaap:ServiceMember", "srt:ProductMember", "srt:ServiceMember", "us-gaap:ProductAndServiceOtherMember"}
+
+
+def finest(rows: list[dict], total: float) -> list[dict]:
+    """겹치는 줄을 뺀다 — **줄들의 합이 매출을 넘을 때만**(겹치지 않으면 그대로).
+    ① 「제품」「서비스」 같은 큰 묶음 줄을 빼 보고(애플 「제품 = 아이폰+맥+…」, 아마존은 둘 다) ② 그래도 겹치면 다른 줄 둘·셋의 합인 줄(엔비디아 「데이터센터 = 연산+네트워킹」).
+    아무 줄들의 합으로 맞추면 우연히 맞는 일이 있다(아마존 「온라인 판매」를 잘못 뺐다, 10/10) — 둘·셋까지만."""
+    def rev(rs):
+        return sum(r.get("revenue") or 0 for r in rs)
+
+    if rev(rows) <= total * 1.02:
+        return rows
+    gens = [r for r in rows if r["member"] in GENERIC]
+    for k in (1, 2):
+        for c in itertools.combinations(gens, k):
+            rest = [r for r in rows if r not in c]
+            if rev(rest) <= total * 1.02:
+                return rest
     drop = set()
-    for r, v in vals:
-        others = [x for x, xv in vals if x is not r and xv and xv < v]
-        for k in range(2, min(6, len(others)) + 1):
-            if any(abs(sum(x.get("revenue") or 0 for x in c) - v) <= v * 0.005 for c in itertools.combinations(others, k)):
-                drop.add(r["member"])
+    vals = [(r, r.get("revenue") or 0) for r in rows]
+    for r, v in sorted(vals, key=lambda x: -x[1]):
+        others = [x for x, xv in vals if x is not r and xv and xv < v and x["member"] not in drop]
+        if any(abs(rev(c) - v) <= v * 0.005 for k in (2, 3) for c in itertools.combinations(others, k)):
+            drop.add(r["member"])
+            if rev([x for x in rows if x["member"] not in drop]) <= total * 1.02:
                 break
     return [r for r in rows if r["member"] not in drop]
 
@@ -481,7 +529,10 @@ def shares(rows: list[dict], total: float) -> list[dict]:
     """매출 비중 — 코드가 나눈다. 큰 것부터 다섯, 1% 밑은 뺀다."""
     out = [{"name": r["name"], "share": f"{r['revenue'] / total * 100:.1f}%"} for r in sorted(rows, key=lambda r: -(r.get("revenue") or 0))
            if r.get("revenue") and r["revenue"] / total >= 0.01]  # fmt: skip
-    return out[:5]
+    plus = sum(r["revenue"] for r in rows if (r.get("revenue") or 0) > 0)  # 마이너스 줄(비자 「고객 인센티브」)이 겹침을 가리지 않게 양수만
+    if plus > total * 1.025:  # 합이 매출을 넘으면 겹친 표다(인텔·유나이티드헬스·비자 123%, 소파이 298%) — 싣지 않는다
+        return []
+    return out[:5] if len(out) >= 2 else []  # 한 줄뿐이면(일라이릴리 「Reportable 100%」) 비중이 뜻이 없다
 
 
 def item_text(html: str) -> str:
@@ -531,8 +582,8 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     old = {r["member"]: r for r in before["segment"]}
     seg_rows = [{"name": r["name"], "revenue": r.get("revenue"), "op": r.get("op"), "op_prev": old.get(r["member"], {}).get("op"),
                  "revenue_prev": old.get(r["member"], {}).get("revenue")} for r in parts["segment"]]  # fmt: skip
-    body = got | {"segments": shares(covering(total, finest(parts["product"]), parts["segment"]), total) if total else [],  # 매출이 아직 없는 회사(오클로)는 비중 없이
-                  "geo": shares(covering(total, no_overlap(finest(parts["geo"]), total)), total) if total else [],
+    body = got | {"segments": shares(covering(total, no_overlap(finest(parts["product"], total or 0), total), parts["segment"]), total) if total else [],  # 매출이 아직 없는 회사(오클로)는 비중 없이
+                  "geo": shares(covering(total, no_overlap(finest(parts["geo"], total or 0), total)), total) if total else [],
                   "seg": {"year": notes.span_label(start, end), "rows": seg_rows} if sum(r["op"] is not None for r in seg_rows) >= 2 else None,
                   "year": fy, "market": "US", "v": PARTS_V}  # fmt: skip
     con.execute("insert or replace into business values (?, ?, ?, ?, ?)",
@@ -712,6 +763,9 @@ def save_company(con: sqlite3.Connection, ticker: str, name: str, cik: int, sub:
 
 def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> tuple[int, int, int]:
     fin = financial_rows(facts, fye)
+    # 미국 연간·흐름은 받을 때마다 새로 — 앞서 잘못 잡힌 줄(아마존 「최근 12개월」)이 남지 않게. 분기는 보도자료 줄을 지키려고 두고 덮어쓴다
+    con.execute("delete from financials where ticker = ?", (ticker,))
+    con.execute("delete from flows where ticker = ?", (ticker,))
     con.executemany("insert or replace into financials (ticker, fiscal_year, revenue, operating_income, net_income, equity, liabilities, rcept_no, basis,"
                     " period_start, period_end, currency, eps) values (?, ?, ?, ?, ?, ?, ?, ?, 'US-GAAP', ?, ?, ?, ?)",
                     [(ticker, r["fiscal_year"], r["revenue"], r["operating_income"], r["net_income"], r["equity"], r["liabilities"], r["accn"],

@@ -280,3 +280,36 @@ def test_overlapping_regions_are_not_shown_as_shares():
             {"member": "srt:AsiaPacificMember", "revenue": 27}, {"member": "meta:RestOfWorldMember", "revenue": 11}]
     assert [r["member"] for r in us.no_overlap(rows, 100)] == ["meta:USCanadaMember", "srt:EuropeMember", "srt:AsiaPacificMember", "meta:RestOfWorldMember"]
     assert us.no_overlap([{"member": "a", "revenue": 80}, {"member": "b", "revenue": 50}], 100) == []
+
+
+def test_second_review_fixes():
+    from hanjang import notes
+    # 분기보고서 속 「최근 12개월」은 연간이 아니다(아마존)
+    p10q = us.Period(date(2025, 7, 1), date(2026, 6, 30), 1, "a", "2026-07-31", "10-Q")
+    p10k = us.Period(date(2025, 1, 1), date(2025, 12, 31), 1, "a", "2026-02-06", "10-K")
+    assert us.months(p10q) is None and us.months(p10k) == 12
+    assert notes._change("매출", 1_210_000, 0, "1년 전 같은 분기") == "매출 1,210,000원(1년 전엔 매출 없음)"  # 매출에 「흑자 전환」은 없다
+    f = {"id": "F1", "slots": {"연도": "2025년", "값": "372억 달러", "폭": "2.8%", "방향": "늘었"}}
+    assert notes.say(f) == "2025년 매출은 372억 달러로, 전년보다 2.8% 늘었어요."
+    assert notes.say({"id": "F5", "slots": {"백원당": "8달러", "비율": "7.9%"}}) == "100달러어치 팔면 본업으로 8달러를 남긴 셈이에요(영업이익률 7.9%)."
+    assert us.member_name("sbux:CompanyOperatedStoresMember") == "직영 매장" and us.member_name("ko:ConcentrateOperationsMember") == "원액 판매"
+
+
+def test_finest_only_drops_when_rows_overlap():
+    amzn = [{"member": m, "revenue": v} for m, v in (("us-gaap:ProductMember", 296.3), ("us-gaap:ServiceMember", 420.7), ("amzn:OnlineStoresMember", 269.3),
+            ("amzn:PhysicalStoresMember", 22.6), ("amzn:ThirdPartySellerServicesMember", 172.2), ("us-gaap:AdvertisingMember", 68.6),
+            ("amzn:SubscriptionServicesMember", 49.6), ("amzn:AmazonWebServicesMember", 128.7), ("amzn:OtherServicesMember", 5.9))]
+    got = [r["member"] for r in us.finest(amzn, 716.9)]
+    assert "amzn:OnlineStoresMember" in got and "us-gaap:ProductMember" not in got and "us-gaap:ServiceMember" not in got  # 우연히 맞는 합으로 빼지 않는다
+    aapl = [{"member": m, "revenue": v} for m, v in (("us-gaap:ProductMember", 307), ("us-gaap:ServiceMember", 109), ("aapl:IPhoneMember", 209.6),
+            ("aapl:MacMember", 33.7), ("aapl:IPadMember", 28), ("aapl:WearablesMember", 35.7))]
+    assert [r["member"] for r in us.finest(aapl, 416)] == ["us-gaap:ServiceMember", "aapl:IPhoneMember", "aapl:MacMember", "aapl:IPadMember", "aapl:WearablesMember"]
+    nvda = [{"member": m, "revenue": v} for m, v in (("nvda:DataCenterMember", 193.7), ("nvda:ComputeMember", 162.4), ("nvda:NetworkingMember", 31.4),
+            ("nvda:GamingMember", 16.0), ("nvda:AutomotiveMember", 2.3))]
+    assert "nvda:DataCenterMember" not in [r["member"] for r in us.finest(nvda, 215.9)]
+    assert us.shares([{"name": "Reportable", "revenue": 65}], 65) == []  # 한 줄뿐이면 싣지 않는다
+
+
+def test_shares_that_add_past_revenue_are_not_shown():
+    assert us.shares([{"name": "a", "revenue": 300}, {"name": "b", "revenue": 250}], 100) == []  # 소파이 298%
+    assert us.member_name("uber:MobilityMember") == "차량 호출" and us.member_name("country:MX") == "멕시코"

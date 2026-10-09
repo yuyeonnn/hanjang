@@ -72,10 +72,12 @@ def test_tone_is_decided_by_code_and_enforced():
     fs = {f["id"]: f for f in notes.facts(con, "005930", date(2026, 10, 7))}
     assert (fs["F1"]["tone"], fs["F2"]["tone"], fs["F3"]["tone"], fs["D1"]["tone"]) == (1, -1, -1, 1)
     note = _note("매출이 늘었어요.")
-    with pytest.raises(ValueError, match="concern"):  # 걱정 사실이 있는데 비워 두면 탈락
-        notes.check_note(note, list(fs.values()))
-    with pytest.raises(ValueError, match="concern 비었음"):  # 좋은 사실만 걱정 칸에 — 그 문장을 빼면 비어서 탈락
-        notes.check_note({**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}]}, list(fs.values()))
+    empty = {**note, "concern": []}
+    notes.check_note(empty, list(fs.values()))  # 걱정 사실이 있는데 비워 두면 — 노트를 버리지 않고 그 사실을 코드 문장으로 채운다
+    assert empty["concern"][0]["refs"][0] in ("F2", "F3") and empty["concern"][0]["text"]
+    wrong = {**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}]}  # 좋은 사실만 걱정 칸에 — 빼면 비니 코드 문장으로
+    notes.check_note(wrong, list(fs.values()))
+    assert all(r != "F1" for x in wrong["concern"] for r in x["refs"])
     mixed = {**note, "concern": [{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "영업 적자예요.", "refs": ["F2"]}]}
     notes.check_note(mixed, list(fs.values()))
     assert [x["refs"] for x in mixed["concern"]] == [["F2"]]  # 섞인 문장만 빠지고 노트는 산다

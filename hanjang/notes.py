@@ -432,6 +432,8 @@ UNITS = {"원": 1, "천원": 1_000, "백만원": 1_000_000, "억원": 100_000_00
 def _change(what: str, cur: int | None, prev: int | None, than: str) -> str | None:
     if cur is None:
         return None
+    if what == "매출" and prev is not None and prev <= 0:  # 「매출 흑자 전환」은 말이 안 된다
+        return f"{what} {won(cur)}(1년 전엔 매출 없음)"
     _, _, chg = trend(cur, prev)
     return f"{what} {won(cur)}" + (f"({than}보다 {chg})" if chg.startswith(("+", "-")) else f"({chg})" if chg else "")
 
@@ -440,6 +442,8 @@ def _slots(key: str, cur: int | None, prev: int | None) -> dict:
     """「{F8.매출}」「{F8.매출폭}」「{F8.매출방향}어요」 — 노트의 F1·F2 와 같은 빈칸 모양."""
     if cur is None:
         return {}
+    if key == "매출" and prev is not None and prev <= 0:
+        return {key: won(cur)}
     _, way, chg = trend(cur, prev)
     return ({key: won(cur)} | ({f"{key}방향": way} if way else {})
             | ({f"{key}폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
@@ -528,15 +532,19 @@ def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
             {"폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {})
         out.append({"id": "F13", "text": f"{qname} 주당순이익(EPS) {slots['값']}" + (f"(1년 전 {slots['전년값']})" if prev is not None else ""),
                     "url": link(rno), "tone": 0, "slots": slots})  # fmt: skip
-    row = con.execute("select period_start, period_end, buyback, dividends, sbc, accn from flows where ticker = ? and months = 12"
-                      " order by period_end desc limit 1", (ticker,)).fetchone()  # fmt: skip
-    if row and any(v for v in row[2:5]):
+    last = con.execute("select period_end from financials where ticker = ? order by fiscal_year desc limit 1", (ticker,)).fetchone()
+    row = last and con.execute("select period_start, period_end, buyback, dividends, sbc, accn from flows where ticker = ? and months = 12 and period_end = ?",
+                               (ticker, last[0])).fetchone()  # 가장 최근 1년만 — 그해에 없었으면 앞선 해 것을 끌어오지 않는다(버크셔 2024년 자사주)  # fmt: skip
+    if row:
         ps, pe, bb, dv, sbc, accn = row
         span = span_label(ps, pe)
-        parts = [(k, usd(v)) for k, v in (("자사주 매입", bb), ("배당", dv), ("주식 보상", sbc)) if v]
-        slots = {"기간": span} | {k.replace(" ", ""): v for k, v in parts}
-        out.append({"id": "F14", "text": f"{span} 주주에게 돌려준 돈 — " + " · ".join(f"{k} {v}" for k, v in parts if k != "주식 보상")
-                    + (f" · 임직원에게 주식으로 준 보상 {slots['주식보상']}" if "주식보상" in slots else ""), "url": link(accn), "tone": 0, "slots": slots})  # fmt: skip
+        given = [(k, usd(v)) for k, v in (("자사주 매입", bb), ("배당", dv)) if v]
+        if given:
+            out.append({"id": "F14", "text": f"{span} 주주에게 돌려준 돈 — " + " · ".join(f"{k} {v}" for k, v in given), "url": link(accn), "tone": 0,
+                        "slots": {"기간": span} | {k.replace(" ", ""): v for k, v in given}})  # fmt: skip
+        if sbc:  # 주식 보상은 주주에게 돌려준 돈이 아니다 — 따로 (사실이 한 줄이면 AI 가 섞어 쓴다, 알파벳·코인베이스 10/10)
+            out.append({"id": "F18", "text": f"{span} 임직원에게 주식으로 준 보상 {usd(sbc)} — 주주에게 돌려준 돈이 아니라 월급처럼 준 것이라 주식 수가 늘어나는 쪽",
+                        "url": link(accn), "tone": 0, "slots": {"기간": span, "주식보상": usd(sbc)}})  # fmt: skip
     biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
     geo = biz and json.loads(biz[0]).get("geo")
     if geo and len(geo) >= 2:  # 어디서 파나 — 코드가 나눈 비중
@@ -547,8 +555,10 @@ def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     if items:  # 회사가 실적 발표에서 밝힌 다음 기간 전망 — 회사의 말 그대로, 숫자는 원문 대조를 통과한 것만 (사용자 10/9: 싣는다)
         from hanjang.us import METRIC_KO, say_outlook
         d = date.fromisoformat(ol[1])
-        slots = {"날짜": f"{d.month}월 {d.day}일"} | {METRIC_KO[x["metric"]]: say_outlook(x) for x in items}
-        out.append({"id": "F16", "text": f"{d.month}월 {d.day}일 실적 발표에서 회사가 밝힌 다음 분기 전망 — "
+        period = json.loads(ol[2]).get("period", "")
+        span = "다음 분기" if re.search(r"quarter|\bQ[1-4]\b", period, re.I) else "올해 1년(회계연도 전체)" if re.search(r"year|annual|full", period, re.I) else "다음 기간"
+        slots = {"날짜": f"{d.month}월 {d.day}일", "기간": span} | {METRIC_KO[x["metric"]]: say_outlook(x) for x in items}
+        out.append({"id": "F16", "text": f"{d.month}월 {d.day}일 실적 발표에서 회사가 밝힌 {span} 전망 — "
                     + " · ".join(f"{METRIC_KO[x['metric']]} {say_outlook(x)}" for x in items), "url": link(ol[0]), "tone": 0, "slots": slots})  # fmt: skip
     for f in out:
         f["slots"] = {k: v for k, v in f["slots"].items() if v}
@@ -1074,8 +1084,9 @@ def check_note(note: dict, fs: list[dict]) -> dict:
         want = {f["id"] for f in fs if f["tone"] == sign}
         # 다른 쪽(중립 등) 사실을 끌어온 문장만 뺀다 — 한 문장 때문에 노트 전체를 버리지 않게 (SK 10/9: 세 번 다 떨어져 코드 글)
         got = note[key] = [s for s in note.get(key) or [] if set(s["refs"]) <= want]
-        if want and not got:
-            raise ValueError(f"{key} 비었음 — 해당 사실 {sorted(want)}")
+        if want and not got:  # AI 가 이 칸을 비우거나 다른 쪽 사실과 섞어 다 빠졌으면 — 노트를 버리지 않고 그 사실을 코드 문장 하나로 (스타벅스 10/10)
+            f = next(f for f in fs if f["id"] in want)
+            got = note[key] = [{"text": say(f), "refs": [f["id"]]}]
     sents = (note["summary"] + [s for sec in note["sections"] for s in sec["sentences"]]
              + (note.get("good") or []) + (note.get("concern") or []))  # fmt: skip
     if not isinstance(note["headline"], str) or not sents:
@@ -1232,14 +1243,15 @@ def say(f: dict) -> str:
     if i in ("F1", "F2") and "값" in s:
         what = "매출" if i == "F1" else "영업이익"
         if "방향" in s and "폭" in s:
-            return f"{s['연도']} {what}은 {s['값']}으로, 전년보다 {s['폭']} {s['방향']}어요."
-        return f"{s['연도']} {what}은 {s['값']}이었어요."
+            return f"{s['연도']} {what}은 {s['값']}{josa(s['값'], '으로')}, 전년보다 {s['폭']} {s['방향']}어요."
+        return f"{s['연도']} {what}은 {s['값']}{'였' if not josa(s['값'], '이') == '이' else '이었'}어요."
     if i == "F3" and "비율" in s:
         return f"{s['연도']} 말 빚은 {s['빚']}, 자기 돈은 {s['자기돈']}이에요(부채비율 {s['비율']})."
     if i == "F4" and "비율" in s:
         return f"자기 돈으로 얼마나 벌었는지 보는 ROE는 {s['비율']}였어요({s['연도']} 순이익 {s['순이익']})."
     if i == "F5":
-        return f"100원어치 팔면 본업으로 {s['백원당']}을 남긴 셈이에요(영업이익률 {s['비율']})."
+        unit = "달러" if s["백원당"].endswith("달러") else "원"
+        return f"100{unit}어치 팔면 본업으로 {s['백원당']}{josa(s['백원당'], '을')} 남긴 셈이에요(영업이익률 {s['비율']})."
     if i == "F7" and "첫부문" in s:
         return f"돈은 주로 {s['첫부문']}에서 벌어요(매출의 {s['첫비중']})."
     if i[0] == "D" and "날짜" in s:
@@ -1258,7 +1270,7 @@ def code_note(fs: list[dict]) -> dict:
         t = say(f)
         return not (t in seen or seen.add(t))
 
-    groups = zip(TITLES, (("F1", "F2", "F3", "F17", "F4", "F5", "F7", "F10", "F12", "F14", "F15"), ("F8", "F9", "F11", "F13", "F16"), ("D", "N"), "I"))
+    groups = zip(TITLES, (("F1", "F2", "F3", "F17", "F4", "F5", "F7", "F10", "F12", "F14", "F18", "F15"), ("F8", "F9", "F11", "F13", "F16"), ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]
