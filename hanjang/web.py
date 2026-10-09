@@ -743,7 +743,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         if sec["title"].startswith("회사 사정"):
             extra = metrics(report.get("fins") or []) + money_blocks(report.get("fin"), report.get("mid"))
         elif sec["title"].startswith(NEWS_TITLES):  # 「이번 주 소식」(공시+소식) · 옛 노트의 「요즘 무슨 일이 있었나요?」
-            right = (f"반가운 쪽 {good_d}" + (f" · 걸리는 쪽 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
+            right = (f"좋게 볼 점 {good_d}" + (f" · 주의해서 볼 점 {bad_d}" if bad_d else "")) if good_d or bad_d else "분류 완료"
             extra = ('<div class="py-space-sm flex items-center justify-between border-t border-outline-variant/30 mt-space-xs"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-secondary text-[18px]">assignment_turned_in</span><div class="flex items-center gap-2">'
                      f'<span class="font-label-regular text-label-regular text-on-surface font-medium">최근 주요 공시 {nd}건 집계</span><span class="font-label-micro text-label-micro text-on-surface-variant">· DART 기준 자동 분류</span></div></div>'
                      f'<span class="font-label-micro text-label-micro text-secondary font-semibold">{e(right)}</span></div>'
