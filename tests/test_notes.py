@@ -580,11 +580,12 @@ def test_sector_context_finance_and_industry_median():
 
 def test_debt_reason_is_added_when_ai_skips_it():
     fs = [{"id": "F3", "text": "2025년 말 부채비율 446.4% (빚 1조원 · 자기 돈 1조원)", "tone": 0, "url": "u",
-           "slots": {"연도": "2025년", "비율": "446.4%", "빚이유": "수주 대금을 미리 받아 빚으로 잡혀요"}}]
+           "slots": {"연도": "2025년", "비율": "446.4%"}},
+          {"id": "F17", "text": "빚이 많은 까닭", "tone": 0, "url": "/learn/sector-debt", "slots": {"빚이유": "수주 대금을 미리 받아 빚으로 잡혀요"}}]
     j = {"headline": "", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
          "sections": [{"title": "회사 사정은 어떤가요?", "sentences": [{"text": "빚이 자기 돈보다 많아요(부채비율 {F3.비율}).", "refs": ["F3"]}]}]}
     note = notes.fill_note(j, fs)
-    assert note["sections"][0]["sentences"][1]["text"] == "이 업종은 수주 대금을 미리 받아 빚으로 잡혀요."
+    assert note["sections"][0]["sentences"][1] == {"text": "이 업종은 수주 대금을 미리 받아 빚으로 잡혀요.", "refs": ["F17"]}
 
 
 def test_this_week_only_for_this_weeks_events_and_short_second_date():
@@ -612,3 +613,8 @@ def test_reword_with_date_in_between():
 
 def test_reword_other_shapes():
     assert notes.mend("또 실적을 발표할 날짜를 미리 알렸다고도 했어요. 아직 숫자는 없어요.") == "또 실적을 발표할 날짜를 미리 알렸다고도 했어요."
+
+
+def test_date_move_keeps_decimal_numbers():
+    assert notes.mend("10월 1일에는 매출 1.3조원을 기록했어요.") == "매출 1.3조원을 기록했어요(10월 1일)."
+    assert notes.mend("10월 2일 국민연금이 9.34%로 늘렸어요. 다음 문장.") == "국민연금이 9.34%로 늘렸어요(10월 2일). 다음 문장."

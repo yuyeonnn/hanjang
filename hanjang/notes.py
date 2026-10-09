@@ -477,7 +477,7 @@ RELATIONS = ("판 돈보다 남긴 돈이 더 빨리 늘었", "판 돈이 늘어
 REL_WORDS = re.compile(r"판 돈보다 남긴 돈이 더|늘어난 만큼은? 남긴 돈|팔았지만 남긴 돈|판 돈도 남긴 돈도")
 
 
-def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None) -> list[dict]:
+def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None, mid: dict | None = None) -> list[dict]:
     """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가.
     미국은 4분기도 있고(연간−9개월) 분기 이름은 회사 회계연도라 실제 달로 부른다 — 「2026년 5~7월(회사 기준 2분기)」."""
     row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
@@ -503,7 +503,7 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None) 
         out.append({"id": "F9", "text": f"{ytd} 누적 " + " · ".join(parts), "url": url, "tone": 0,
                     "slots": {"기간": ytd} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
     unit = "100달러어치" if us else "100원어치"
-    if industry_mid(con, ticker).get("금융"):  # 금융회사는 「100원당」이 다른 업종과 같은 잣대가 아니다
+    if (mid if mid is not None else industry_mid(con, ticker)).get("금융"):  # 금융회사는 「100원당」이 다른 업종과 같은 잣대가 아니다
         for f in out:
             for k in ("백원당", "전년백원당", "힘"):
                 f["slots"].pop(k, None)
@@ -779,15 +779,16 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
             if us:  # 미국 회사는 자사주 매입으로 자기 돈이 작게 잡히는 일이 흔하다 — 비율로 좋다·나쁘다를 가르지 않는다
                 bb = con.execute("select buyback from flows where ticker = ? and months = 12 order by period_end desc limit 1", (ticker,)).fetchone()
                 if bb and bb[0] and bb[0] >= eq * 0.1 and d > DEBT_BAD:  # 빚이 많아 보일 때만 이유를 붙인다(엔비디아 31% 에 붙으면 이상하다)
-                    mid = mid | {"자사주이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
-            bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid and "자사주이유" not in mid
+                    mid = mid | {"빚이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
+            bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
             out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
                         + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
                         "tone": 0 if us else 1 if d < DEBT_GOOD else -1 if bad else 0,
                         "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
-                        | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})
-                        | ({"빚이유": mid["빚이유"]} if "빚이유" in mid else {})
-                        | ({"자사주이유": mid["자사주이유"]} if "자사주이유" in mid else {})})  # fmt: skip
+                        | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})})  # fmt: skip
+            if "빚이유" in mid:  # 「모든 문장에 원문 링크」 — 업종 설명은 사업보고서(F3)가 아니라 한장의 업종 풀이 글이 근거다
+                out.append({"id": "F17", "text": f"빚이 많은 까닭 — {mid['빚이유']}", "url": url if us else "/learn/sector-debt",
+                            "tone": 0, "slots": {"빚이유": mid["빚이유"]}})  # fmt: skip
         if ni is not None and eq and eq > 0:
             r = f"{ni / eq * 100:.1f}%"
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
@@ -805,7 +806,7 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
         slots = {f"{o}부문": x["name"].split(" · ")[-1] for o, x in zip(("첫", "둘째"), top)} | {f"{o}비중": x["share"] for o, x in zip(("첫", "둘째"), top)}
         out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": link(biz[1]),
                     "tone": 0, "slots": slots})  # fmt: skip
-    out += quarter_facts(con, ticker, us) + industry_fact(con, ticker) + segment_fact(con, ticker) + bond_fact(con, ticker, today)
+    out += quarter_facts(con, ticker, us, locals().get("mid")) + industry_fact(con, ticker) + segment_fact(con, ticker) + bond_fact(con, ticker, today)
     if us:
         out += us_facts(con, ticker)
     evs = con.execute("select rcept_no, date, title, code, direction from disclosures"
@@ -983,7 +984,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
     text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
     # 날짜로 시작하는 문장 — 날짜는 문장 끝 괄호로 (사용자 10/9: 날짜가 앞에서 오가면 요점이 안 보인다)
-    text = re.sub(r"(?:^|(?<=[.!?] ))(\d+월 \d+일(?:(?:과|와|,| ·) (?:\d+월 )?\d+일)*)(?:에는|에도|에|엔|,)?\s+([^.!?]+?)([.!?])",
+    text = re.sub(r"(?:^|(?<=[.!?] ))(\d+월 \d+일(?:(?:과|와|,| ·) (?:\d+월 )?\d+일)*)(?:에는|에도|에|엔|,)?\s+(.+?)([.!?])(?=\s|$)",
                   lambda m: f"{m[2][:1].upper()}{m[2][1:]}({m[1]}){m[3]}", text)
     text = re.sub(r"(았|었)에(?=\s)", r"\1던 해에", text)  # 「4번째로 많았에 머물렀어요」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
@@ -1175,12 +1176,12 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     note["sections"] = [sec for sec in note["sections"] if sec["sentences"]]
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
-    why = by.get("F3", {}).get("slots", {}).get("빚이유")
-    if why and not any(why in x["text"] for sec in note["sections"] for x in sec["sentences"]):
+    why = by.get("F17", {}).get("slots", {}).get("빚이유")
+    if why and not any("F17" in x["refs"] for sec in note["sections"] for x in sec["sentences"]):
         for sec in note["sections"]:
             at = next((i for i, x in enumerate(sec["sentences"]) if "F3" in x["refs"]), None)
             if at is not None:
-                sec["sentences"].insert(at + 1, {"text": f"이 업종은 {why}.", "refs": ["F3"]})
+                sec["sentences"].insert(at + 1, {"text": undash(f"이 업종은 {why}."), "refs": ["F17"]})
                 break
     for key, sign in (("good", 1), ("concern", -1)):
         if not note[key]:
@@ -1257,7 +1258,7 @@ def code_note(fs: list[dict]) -> dict:
         t = say(f)
         return not (t in seen or seen.add(t))
 
-    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10", "F12", "F14", "F15"), ("F8", "F9", "F11", "F13", "F16"), ("D", "N"), "I"))
+    groups = zip(TITLES, (("F1", "F2", "F3", "F17", "F4", "F5", "F7", "F10", "F12", "F14", "F15"), ("F8", "F9", "F11", "F13", "F16"), ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]
