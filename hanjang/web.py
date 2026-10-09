@@ -841,6 +841,56 @@ def figure(f: dict | None) -> str:
                        for x, op, y, z in f["rows"])  # fmt: skip
         return (head + f'<div class="flex items-center gap-5">{icon("calculate", "text-[56px] lg:text-[72px]")}'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-1 flex-1">{rows}</div></div></figure>')
+    note = f'<p class="mt-3 text-[13px] leading-[19px] text-on-surface-variant">{e(f["note"])}</p>' if f.get("note") else ""
+    if f["type"] == "cards":  # 그림 카드 — 휴대폰 두 칸, 넓은 화면 네 칸
+        items = "".join(f'<div class="flex flex-col gap-2">{icon(ic, "text-[40px] lg:text-[48px]")}<b class="text-[15px] leading-[21px] text-on-surface">{e(t)}</b>'
+                        f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(d)}</span></div>' for ic, t, d in f["items"])  # fmt: skip
+        return head + f'<div class="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-7">{items}</div>{note}</figure>'
+    if f["type"] == "ladder":  # 먼저 받는 차례 — 왼쪽 맞춤 + 아래 화살표, 번호·배경·들여쓰기 없이 (사용자 10/10)
+        arrow = '<span class="material-symbols-outlined text-[22px] text-outline-variant pl-2" aria-hidden="true">arrow_downward</span>'
+        rows = arrow.join(f'<div class="flex items-center gap-3">{icon(ic, "text-[36px] lg:text-[44px]")}'
+                          f'<span class="flex flex-col min-w-0"><b class="text-[15px] leading-[22px] text-on-surface">{e(t)}</b>'
+                          f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(d)}</span></span></div>'
+                          for ic, t, d in f["steps"])  # fmt: skip
+        return head + f'<div class="flex flex-col gap-1">{rows}</div>{note}</figure>'
+    if f["type"] == "timeline":  # 때 — 휴대폰 세로 줄, 넓은 화면 가로 줄
+        pts = "".join(f'<li class="relative flex gap-4 pb-6 last:pb-0 lg:flex-1 lg:flex-col lg:items-center lg:text-center lg:pb-0 lg:gap-2">'
+                      f'<span class="w-14 shrink-0 pt-1 text-[13px] font-bold text-primary lg:w-auto lg:pt-0">{e(w)}</span>'
+                      f'<span class="relative z-10 w-3.5 h-3.5 mt-1.5 shrink-0 rounded-full bg-primary ring-4 ring-surface lg:mt-0"></span>'
+                      f'<span class="flex flex-col items-start lg:items-center gap-1">{icon(ic, "text-[34px] lg:text-[44px]")}<b class="text-[14px] text-on-surface">{e(t)}</b>'
+                      f'<span class="text-[12px] leading-[17px] text-on-surface-variant">{e(d)}</span></span></li>' for w, ic, t, d in f["points"])  # fmt: skip
+        line = '<span aria-hidden="true" class="absolute left-[78px] top-2 bottom-2 w-px bg-primary/30 lg:left-0 lg:right-0 lg:top-[38px] lg:bottom-auto lg:w-auto lg:h-px"></span>'
+        return head + f'<ol class="relative flex flex-col lg:flex-row lg:gap-4">{line}{pts}</ol>{note}</figure>'
+    if f["type"] == "bars":  # 막대 — 가장 큰 값을 꽉 찬 길이로
+        top = max(v for _, _, v in f["items"]) or 1
+        rows = "".join(f'<div class="flex items-center gap-3 py-1.5">{icon(ic, "text-[30px]")}<span class="w-20 shrink-0 text-[14px] text-on-surface">{e(t)}</span>'
+                       f'<span class="flex-1 h-3 rounded-full bg-surface-container overflow-hidden"><span class="block h-full rounded-full bg-primary" style="width:{max(v / top * 100, 3):.0f}%"></span></span>'
+                       f'<b class="w-12 text-right text-[14px] tabular-nums text-on-surface">{v}{e(f.get("unit", ""))}</b></div>' for ic, t, v in f["items"])  # fmt: skip
+        return head + rows + note + "</figure>"
+    if f["type"] == "lines":  # 꺾은선 — 같은 출발점에서 갈라지는 모양
+        xs, series = f["x"], f["series"]
+        vals = [v for _, ys in series for v in ys]
+        lo, hi = min(vals) - 5, max(vals) + 5
+        w, h, pad = 320, 150, 28
+        px = lambda k: pad + k * (w - 2 * pad) / (len(xs) - 1)
+        py = lambda v: 12 + (hi - v) / (hi - lo) * (h - 36)
+        cols = ("#154539", "#F4806A")
+        top = [max(ys[k] for _, ys in series) for k in range(len(xs))]  # 높은 쪽 숫자는 위, 낮은 쪽은 아래 — 겹치지 않게
+        first = [next(ys for _, ys in series if ys[k] == top[k]) for k in range(len(xs))]  # 같은 값은 한 번만
+        lines = "".join(f'<polyline fill="none" stroke="{c}" stroke-width="3" stroke-linejoin="round" points="{" ".join(f"{px(k):.1f},{py(v):.1f}" for k, v in enumerate(ys))}"/>'
+                        + "".join(f'<circle cx="{px(k):.1f}" cy="{py(v):.1f}" r="4" fill="{c}"/><text x="{px(k):.1f}" y="{py(v) + (18 if v < top[k] else -9):.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="{c}">{v}</text>'
+                                  for k, v in enumerate(ys) if v != top[k] or ys is first[k]) for (_, ys), c in zip(series, cols))  # fmt: skip
+        ticks = "".join(f'<text x="{px(k):.1f}" y="{h - 4}" text-anchor="middle" font-size="11" fill="#717975">{e(x)}</text>' for k, x in enumerate(xs))
+        legend = "".join(f'<span class="flex items-center gap-1.5"><span class="w-4 h-1 rounded-full" style="background:{c}"></span>{e(n)}</span>' for (n, _), c in zip(series, cols))
+        return (head + f'<div class="flex gap-4 mb-2 text-[13px] text-on-surface">{legend}</div>'
+                f'<svg viewBox="0 0 {w} {h}" class="w-full max-w-[520px]" role="img" aria-label="{e(f["title"])}">{lines}{ticks}</svg>{note}</figure>')
+    if f["type"] == "stack":  # 나눠 쌓은 막대 — 전체 하나를 몫으로 나눈다
+        total = sum(v for _, v, _ in f["parts"]) or 1
+        bar = "".join(f'<span class="h-full flex items-center justify-center text-[13px] font-bold text-on-primary" style="width:{v / total * 100:.0f}%;background:{c}">{v}</span>' for _, v, c in f["parts"])
+        keys = "".join(f'<span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm" style="background:{c}"></span>{e(t)}</span>' for t, _, c in f["parts"])
+        return (head + f'<div class="flex items-center gap-4">{icon("account_balance", "text-[44px] lg:text-[56px]")}<div class="flex-1 flex flex-col gap-2">'
+                f'<b class="text-[14px] text-on-surface">{e(f["total"])}</b><div class="h-9 w-full rounded-lg overflow-hidden flex">{bar}</div>'
+                f'<div class="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-on-surface-variant">{keys}</div></div></div>{note}</figure>')
     return ""
 
 

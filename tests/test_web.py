@@ -764,11 +764,14 @@ def test_learn_figures():
     from hanjang import learn
 
     for slug, f in learn.FIGURE.items():  # 그림도 있는 글에만 · 권유·예측 말 없이
-        assert slug in learn.BY_SLUG and f["type"] in ("flow", "compare", "equation"), slug
-        words = " ".join(str(x) for x in [f["title"], *(f.get("steps") or []), *(f.get("rows") or []), *(f.get("cols") or [])])
+        assert slug in learn.BY_SLUG and f["type"] in ("flow", "compare", "equation", "cards", "ladder", "timeline", "bars", "lines", "stack"), slug
+        words = " ".join(str(x) for x in [f["title"], f.get("note", ""), *(f.get(k) or [] for k in ("steps", "rows", "cols", "items", "points", "parts"))])
         assert not notes.FORBIDDEN.search(words), slug
     app, con = _app()
     ck = _login(app)
     body = call(app, "/learn/start", cookie=ck)[2]
     assert "주식을 처음 사기까지" in body and "이틀 뒤 내 것으로 확정" in body
-    assert "PER" in web.figure(learn.FIGURE["ratios"]) and "−4%" in web.figure(learn.FIGURE["inverse-leverage"])
+    assert "PER" in web.figure(learn.FIGURE["ratios"]) and "<polyline" in web.figure(learn.FIGURE["inverse-leverage"])
+    assert len({f["type"] for f in learn.FIGURE.values()}) >= 8  # 여러 모양 (사용자 10/10: 다 똑같다)
+    for f in learn.FIGURE.values():
+        assert web.figure(f).startswith("<figure"), f["type"]
