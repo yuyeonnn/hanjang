@@ -81,6 +81,12 @@ class FakeSec:
     def facts(self, cik):
         return load("facts_NVDA.json") if cik == 1045810 else load("facts_AAPL.json")
 
+    def doc(self, cik, accn, doc):
+        if "13G" in doc or "13D" in doc:  # 하나는 엔비디아가 대상, 하나는 남의 회사가 대상
+            issuer = cik if accn.endswith("1") else 999
+            return f"<issuerCik>{issuer:010d}</issuerCik><reportingPersonName>Vanguard Group Inc</reportingPersonName><classPercent>8.9</classPercent><eventDateRequiresFilingThisStatement>09/30/2026</eventDateRequiresFilingThisStatement><typeOfReportingPerson>IA</typeOfReportingPerson>"
+        return "<p>Item 8.01 Other Events. The Board approved a new $50 billion share repurchase program.</p>"
+
     def form4(self, cik, accn, doc):
         return "<ownershipDocument><officerTitle>CEO</officerTitle><nonDerivativeTransaction><transactionCode>P</transactionCode><transactionShares><value>10</value></transactionShares></nonDerivativeTransaction></ownershipDocument>"
 
@@ -117,3 +123,39 @@ def test_us_facts_use_dollars_with_won_in_brackets_and_company_months(monkeypatc
     a = {f["id"]: f for f in notes.facts(con, "AAPL", date(2026, 10, 9))}
     assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F3"]["slots"]["빚이유"]
     assert notes.won(123_456_789_000) == "1,235억원" and notes._MARKET["per"] == "원"  # 끝나면 국내로 되돌아간다
+
+
+def test_8k_items_map_to_our_kinds_without_ai():
+    assert us.classify_8k("2.02,9.01") == ("EARNINGS", 2, 0, "실적 발표 (8-K 2.02)")
+    assert us.classify_8k("4.02,2.02") [0:3] == ("RESTATEMENT", 3, -1)  # 무거운 번호가 이긴다
+    assert us.classify_8k("1.01,2.03,9.01")[0] == "MAJOR_CONTRACT" and us.classify_8k("3.01")[2] == -1
+    assert not us.needs_text("2.02,7.01,9.01") and us.needs_text("7.01,8.01,9.01") and us.needs_text("5.02")
+    assert us.classify_8k("8.01,9.01", "declared a quarterly dividend of $0.26 per share")[:2] == ("DIVIDEND", 2)
+    assert us.classify_8k("7.01", "new share repurchase program")[:3] == ("BUYBACK", 3, 1)
+    assert us.classify_8k("5.02", "appointed Chief Financial Officer")[0] == "EXEC" and us.classify_8k("5.02", "director resigned")[1] == 1
+    x = us.parse_13dg("<issuerCik>0001045810</issuerCik><reportingPersonName>JPMORGAN CHASE &amp; CO.</reportingPersonName><classPercent>11.0</classPercent>"
+                      "<eventDateRequiresFilingThisStatement>09/30/2026</eventDateRequiresFilingThisStatement><typeOfReportingPerson>HC</typeOfReportingPerson>")
+    assert x == {"issuer": 1045810, "who": "JPMORGAN CHASE & CO.", "rate": 11.0, "day": "2026-09-30", "person": "HC"}
+
+
+def test_us_disclosures_and_insiders_become_note_facts(monkeypatch):
+    from hanjang import notes
+    monkeypatch.setattr(us, "universe", lambda: [("NVDA", "엔비디아")])
+    con = db.connect(":memory:")
+    s = load("sub_NVDA.json")
+    r = s["filings"]["recent"]
+    # 13G 두 장을 끼워 넣는다 — 끝자리 1 은 엔비디아가 대상, 2 는 남의 회사
+    for accn in ("0000000000-26-000001", "0000000000-26-000002"):
+        r["accessionNumber"].insert(0, accn); r["filingDate"].insert(0, "2026-10-01"); r["acceptanceDateTime"].insert(0, "2026-10-01T20:00:00.000Z")
+        r["form"].insert(0, "SCHEDULE 13G/A"); r["items"].insert(0, ""); r["primaryDocument"].insert(0, "xslSCHEDULE_13G_X02/primary_doc.xml")
+    fake = FakeSec()
+    monkeypatch.setattr(fake, "submissions", lambda cik: s)
+    us.main(date(2026, 10, 9), con, fake)
+    kinds = dict(con.execute("select title, code from disclosures where ticker = 'NVDA' and importance >= 2"))
+    assert kinds.get("실적 발표 (8-K 2.02)") == "EARNINGS" and any(c == "BUYBACK" for c in kinds.values())
+    assert con.execute("select who, rate from insiders where kind = '5%'").fetchall() == [("Vanguard Group Inc", 8.9)]  # 남의 회사 보고는 뺐다
+    assert ("0000000000-26-000002",) in con.execute("select accession from skipped").fetchall()  # 다시 열지 않게 적어 둔다
+    fs = {f["id"]: f for f in notes.facts(con, "NVDA", date(2026, 10, 9))}
+    d = next(f for f in fs.values() if f["id"].startswith("D") and f["slots"]["종류"] == "실적")
+    assert "지난 분기 실적을 발표했어요" in d["slots"]["무슨일"] and "sec.gov" in d["url"]
+    assert "시장에서 산 보고" in fs["I1"]["text"] and "Vanguard" in fs["I2"]["text"]
