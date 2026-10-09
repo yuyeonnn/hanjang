@@ -1369,7 +1369,8 @@ class App:
                     chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></a>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
-                cells.append(f'<div class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else ""}">{cell}</div>')
+                pick = f' data-day="{iso}" onclick="if(!event.target.closest(&quot;a&quot;))pickDay(this.dataset.day)"' if d.month == m else ""  # 칩(원문 링크) 말고 칸을 누르면 그 날 일정
+                cells.append(f'<div{pick} class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 rounded-lg flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else "cursor-pointer hover:bg-surface-container-low"}">{cell}</div>')
         items = []
         for rs in mine:
             d, name, code, title, rno, dr, t, _ = rs[0]
@@ -1420,7 +1421,7 @@ class App:
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 공모주 청약</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          '<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</span></article></a>'))  # fmt: skip
+                          '<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</span></article></a>', {x for x in (a, listed) if x}))  # fmt: skip
         for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
             if d[:7] != f"{y}-{m:02d}":
                 continue
@@ -1431,7 +1432,21 @@ class App:
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(what)}</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(sources.MACRO_EXPLAIN[(kind, nat)])}</p>'
                           f'<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</span></article></a>'))  # fmt: skip
-        items = [html_ for _, _, html_ in sorted(items, key=lambda x: (x[0], x[1]))]  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
+        items.sort(key=lambda x: (x[0], x[1]))  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
+        days: dict[str, list] = {}  # 달력에서 고른 날의 일정 — 같은 순서로, 공모주는 청약 첫날·상장일 둘 다
+        for x in items:
+            for dd_ in x[3] if len(x) > 3 else {x[1]}:
+                days.setdefault(dd_, []).append(x[2])
+        items = [x[2] for x in items]
+        pick = today.isoformat() if (today.year, today.month) == (y, m) else f"{y}-{m:02d}-01"  # 처음엔 오늘, 다른 달이면 1일
+        day_lists = "".join(f'<div data-list="{d}"{"" if d == pick else " hidden"}>{"".join(h)}</div>' for d, h in days.items() if d[:7] == f"{y}-{m:02d}")
+        day_none = f'<p data-list="none" class="py-3.5 font-body-compact text-body-compact text-on-surface-variant"{" hidden" if pick in days else ""}>이 날은 일정이 없어요.</p>'
+        pick_js = ("<script>function pickDay(d){var t=new Date(d+'T00:00');"
+                   f"document.getElementById('day-title').textContent=d=='{today.isoformat()}'?'오늘 일정':(t.getMonth()+1)+'월 '+t.getDate()+'일 ('+'일월화수목금토'[t.getDay()]+') 일정';"
+                   "var hit=false;document.querySelectorAll('[data-list]').forEach(function(x){var on=x.dataset.list==d;x.hidden=!on;hit=hit||on});"
+                   "document.querySelector('[data-list=none]').hidden=hit;"
+                   "document.querySelectorAll('[data-day]').forEach(function(c){c.classList.toggle('bg-primary-fixed',c.dataset.day==d)})}"
+                   f"pickDay('{pick}')</script>")  # fmt: skip
         if not items:
             items.append('<p class="py-3.5 font-body-compact text-body-compact text-on-surface-variant">이 달엔 내 종목의 큰 공시가 없어요.</p>')
         # 이 달 일정에 나온 공시 종류마다 그에 맞는 읽기 팁 글 — 많이 나온 종류부터, 같은 글은 한 번, 최대 3편
@@ -1467,13 +1482,14 @@ class App:
                  '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
-                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
+                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="pb-2 border-b border-surface-container-highest"><h2 id="day-title" class="font-headline-md text-headline-md text-on-surface">오늘 일정</h2></div>'
+                 f'{day_lists}{day_none}</section><section class="flex flex-col"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
                  f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
                  f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'
                  '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당), 점선 칩은 금리·물가·고용·선거 같은 시장 일정이에요. 공휴일: 한국천문연구원.</p></footer>'
-                 "</div></main>" + bottom_nav("calendar"))  # fmt: skip
+                 "</div></main>" + bottom_nav("calendar") + pick_js)  # fmt: skip
         return page("캘린더", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
