@@ -920,7 +920,7 @@ def test_morning_card_on_home(monkeypatch):
     assert morning.prepare(con, today) == 1 and len(asked) == 1  # 코드 풀이가 있는 유상증자는 AI 를 부르지 않는다
     assert morning.prepare(con, today) == 0 and len(asked) == 1  # 공시마다 한 번
     body = call(app, "/", cookie=f"s={web.sign('1', SECRET)}")[2]
-    assert "아침 한 장" in body and "한화오션</a>은 새 주식을 찍어 팔아" in body and "품목허가를 받았다고 알렸어요" in body
+    assert "아침 한 장" in body and ">한화오션</span>" in body and "새 주식을 찍어 팔아" in body and "공시 원문 보기" in body and "품목허가를 받았다고 알렸어요" in body
     assert "실적 발표" in body and "유상증자 공시는 이렇게 읽어요" in body
     try:
         morning.check({"sentence": "매출이 30% 늘 거예요."}, "단일판매공급계약")
