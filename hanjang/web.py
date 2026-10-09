@@ -609,7 +609,7 @@ def metrics(fins: list[tuple]) -> str:
 
 
 def chapter(title: str, body: str, extra: str = "") -> str:
-    return ('<article class="mb-space-xl flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+    return ('<article class="mb-16 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
             f'<div class="font-body-reading text-body-reading text-on-surface leading-loose">{body}</div>{extra}</article>')  # fmt: skip
 
@@ -737,7 +737,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     ]  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
-        parts.append('<section class="mb-space-xl pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
+        parts.append('<section class="mb-16 pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
                      f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s, seen) for s in body["summary"])}</p></section>')  # fmt: skip
     parts.append(business_block(report.get("biz"), report.get("rno")))
     nd = sum(f["id"][0] == "D" for f in facts)
@@ -777,7 +777,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                     f'<span class="px-2 py-0.5 rounded text-label-micro font-label-micro font-semibold {chip}">{label}</span>'
                     f'<span class="font-label-regular text-label-regular {ink} font-semibold">{e(title)}</span></div>'
                     f'<p class="font-body-reading text-body-reading text-on-surface leading-relaxed">{" ".join(sentence(s, seen) for s in items)}</p></div>')  # fmt: skip
-        parts.append('<section class="mb-space-xl flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">좋게 볼 점과 주의해서 볼 점</h3></div>'
+        parts.append('<section class="mb-16 flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">좋게 볼 점과 주의해서 볼 점</h3></div>'
                      + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
                      + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
