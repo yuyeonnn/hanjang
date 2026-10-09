@@ -1459,6 +1459,8 @@ class App:
         for (d, _, _), rs in grouped.items():
             by.setdefault(d, []).append(rs)
         macro = sources.macro_events(lo, hi)
+        has_us = self.con.execute("select 1 from holdings h join stocks s using(ticker) where h.user_id = ? and s.market = 'US'", (uid,)).fetchone()
+        macro = [x for x in macro if x[1] != "휴장" or has_us]  # 미국 휴장일은 미국 종목을 담은 사람에게만
         macro_by: dict[str, list] = {}
         for x in macro:
             macro_by.setdefault(x[0], []).append(x)

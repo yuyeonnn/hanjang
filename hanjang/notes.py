@@ -481,10 +481,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None) 
     """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가.
     미국은 4분기도 있고(연간−9개월) 분기 이름은 회사 회계연도라 실제 달로 부른다 — 「2026년 5~7월(회사 기준 2분기)」."""
     row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
-                      " rcept_no, period_start, period_end from quarters where ticker = ? order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
+                      " rcept_no, period_start, period_end, basis from quarters where ticker = ? order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
     if not row:
         return []
-    y, q, rev, op, rp, opp, ry, oy, ryp, oyp, rno, ps, pe = row
+    y, q, rev, op, rp, opp, ry, oy, ryp, oyp, rno, ps, pe, basis = row
     if us and ps:
         qname, months = span_label(ps, pe), f"회사 기준 {q}분기"
         ytd = span_label(con.execute("select min(period_start) from quarters where ticker = ? and year = ?", (ticker, y)).fetchone()[0], pe)
@@ -495,7 +495,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None) 
         slots = {"분기": qname, "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)
         if us and us.get("rate") and rev:
             slots["매출원화"] = f"약 {krw(rev * us['rate'])}"
-        out.append({"id": "F8", "text": f"{qname}({months}) " + " · ".join(parts), "url": url, "tone": 0, "slots": slots})
+        if basis == "보도자료":  # 미국 — 분기보고서 전, 실적 발표 보도자료 숫자 (10-Q 가 오면 그 숫자로 바뀐다)
+            slots["기준"] = "실적 발표 보도자료 기준"
+        out.append({"id": "F8", "text": f"{qname}({months}) " + " · ".join(parts) + (" · 실적 발표 보도자료 기준(분기보고서 전)" if basis == "보도자료" else ""),
+                    "url": url, "tone": 0, "slots": slots})  # fmt: skip
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
         out.append({"id": "F9", "text": f"{ytd} 누적 " + " · ".join(parts), "url": url, "tone": 0,
                     "slots": {"기간": ytd} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip

@@ -206,7 +206,8 @@ def quarter_rows(facts: dict, fye: str) -> list[dict]:
             a, b = grab(k, key), grab(k, k9)
             return round(a - b, 2) if a is not None and b is not None else None
         rows[(fy, 4)] = {"fiscal_year": fy, "q": 4, "start": (nine.end + timedelta(days=1)).isoformat(), "end": p.end.isoformat(),
-                         "revenue": diff("revenue"), "operating_income": diff("operating_income"), "net_income": diff("net_income"), "eps": diff("eps"),
+                         "revenue": diff("revenue"), "operating_income": diff("operating_income"), "net_income": diff("net_income"),
+                         "eps": None,  # 주당순이익은 빼기로 못 구한다(분기마다 주식 수가 다르다 — 마이크론 32.93 vs 실제 32.87, 10/10). 보도자료 값이 있으면 지킨다
                          "revenue_ytd": grab("revenue", key), "op_ytd": grab("operating_income", key), "accn": p.accn, "currency": "USD", "basis": "연간−9개월"}  # fmt: skip
     return sorted(rows.values(), key=lambda r: (r["fiscal_year"], r["q"]))
 
@@ -584,6 +585,68 @@ def read_outlook(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     return True
 
 
+# --- 실적 보도자료의 분기 숫자 — 분기보고서(10-Q)보다 2~3주 빠르다. 10-Q 가 오면 XBRL 숫자가 덮어쓴다 ---
+
+RELEASE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["period_end", "unit", "revenue", "operating_income", "net_income", "eps"],
+                  "properties": {"period_end": {"type": "string"}, "unit": {"type": "string", "enum": ["billion", "million", "thousand", "one"]},
+                                 **{k: {"type": "string"} for k in ("revenue", "operating_income", "net_income", "eps")}}}  # fmt: skip
+UNIT = {"billion": 1e9, "million": 1e6, "thousand": 1e3, "one": 1}
+
+
+def check_release(j: dict, source: str, filed: date) -> dict:
+    """옮긴 숫자 검사 — 원문에 글자 그대로 있어야 하고(부호·괄호 빼고), 분기 끝 날이 공시 전 120일 안. 어기면 ValueError(다시 묻는다)."""
+    try:
+        end = date.fromisoformat(j["period_end"])
+    except ValueError:
+        raise ValueError(f"날짜 {j['period_end']!r}") from None
+    if not filed - timedelta(days=120) <= end < filed:
+        raise ValueError(f"분기 끝 날 {end} 이 공시({filed})와 멀다")
+    out = {"period_end": end.isoformat()}
+    for k in ("revenue", "operating_income", "net_income", "eps"):
+        raw = j[k].strip().replace("$", "")
+        if not raw:
+            out[k] = None
+            continue
+        neg = raw.startswith(("-", "(")) or raw.endswith(")")
+        digits = raw.strip("-()")
+        if not re.fullmatch(r"[\d,]+(\.\d+)?", digits) or not re.search(rf"(?<![\d.,]){re.escape(digits)}(?![\d])", source):
+            raise ValueError(f"원문에 없는 {k} {raw!r}")
+        v = float(digits.replace(",", "")) * (1 if k == "eps" else UNIT[j["unit"]])
+        out[k] = -v if neg else v
+    if out["revenue"] is None:
+        raise ValueError("매출 없음")
+    return out
+
+
+def read_release(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
+    """가장 최근 실적 발표(8-K 2.02, 판매 대수 알림 제외)의 분기 숫자 — 그 분기가 아직 우리 표에 없을 때만(10-Q 가 먼저 왔으면 읽지 않는다)."""
+    row = con.execute("select f.accession, f.date, s.cik, s.fye from filings f join stocks s using(ticker) join disclosures d on d.rcept_no = f.accession"
+                      " where f.ticker = ? and f.form = '8-K' and f.items like '%2.02%' and d.title not like '판매%'"
+                      " order by f.date desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    if not row or con.execute("select 1 from skipped where accession = ?", ("rel:" + row[0],)).fetchone():
+        return False
+    accn, day, cik, fye = row
+    last = con.execute("select max(period_end) from quarters where ticker = ? and basis != '보도자료'", (ticker,)).fetchone()[0]
+    if last and last >= (date.fromisoformat(day) - timedelta(days=60)).isoformat():  # 이 발표의 분기를 10-Q·10-K 가 이미 채웠다
+        return False
+    text = exhibit(sec, cik, accn)[:9000]
+    got = llm.ask("reader", "release_us", {"원문": text}, lambda j: check_release(j, text, date.fromisoformat(day)), RELEASE_SCHEMA, prompt_file="release_us") if text else None
+    con.execute("insert or ignore into skipped values (?, ?)", ("rel:" + accn, ticker))  # 한 번만 읽는다
+    if not got:
+        return False
+    end = date.fromisoformat(got["period_end"])
+    fy, q = fiscal_year(end, fye or "1231"), quarter_no(end, fye or "1231")
+    if con.execute("select 1 from quarters where ticker = ? and year = ? and q = ? and basis != '보도자료'", (ticker, fy, q)).fetchone():
+        return False
+    p = con.execute("select revenue, operating_income from quarters where ticker = ? and year = ? and q = ?", (ticker, fy - 1, q)).fetchone() or (None, None)
+    before = con.execute("select max(period_end) from quarters where ticker = ? and period_end < ?", (ticker, end.isoformat())).fetchone()[0]
+    start = (date.fromisoformat(before) + timedelta(days=1)).isoformat() if before else (end - timedelta(days=90)).isoformat()
+    con.execute("insert or replace into quarters (ticker, year, q, revenue, operating_income, revenue_prev, op_prev, rcept_no, basis, period_start, period_end, currency, eps)"
+                " values (?, ?, ?, ?, ?, ?, ?, ?, '보도자료', ?, ?, 'USD', ?)",
+                (ticker, fy, q, got["revenue"], got["operating_income"], p[0], p[1], accn, start, end.isoformat(), got["eps"]))  # fmt: skip
+    return True
+
+
 def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None" = None, only: list[str] | None = None) -> None:
     """AI 읽기 — 새 10-K 와 새 실적 발표만. 매일 실행에서 받기 다음에."""
     con, sec = con or db.connect(), sec or Edgar()
@@ -594,6 +657,9 @@ def read(today: date, con: sqlite3.Connection | None = None, sec: "Edgar | None"
         try:  # 한 회사가 실패해도 나머지는 읽는다 — 내일 다시
             n10 += read_10k(con, sec, ticker)
             nout += read_outlook(con, sec, ticker)
+            nrel = read_release(con, sec, ticker)
+            if nrel:
+                print(f"  {ticker} 실적 보도자료 분기 숫자 — 10-Q 전까지", file=sys.stderr)
         except (httpx.HTTPError, ValueError, KeyError) as err:
             print(f"  {ticker} 읽기 실패 {type(err).__name__} — 내일 다시", file=sys.stderr)
         con.commit()
@@ -618,6 +684,10 @@ def save_facts(con: sqlite3.Connection, ticker: str, facts: dict, fye: str) -> t
                     [(ticker, r["fiscal_year"], r["revenue"], r["operating_income"], r["net_income"], r["equity"], r["liabilities"], r["accn"],
                       r["start"], r["end"], r["currency"], r["eps"]) for r in fin])  # fmt: skip
     qs = quarter_rows(facts, fye)
+    kept = {(y, q): e for y, q, e in con.execute("select year, q, eps from quarters where ticker = ? and eps is not null", (ticker,))}
+    for r in qs:  # 4분기 EPS 처럼 XBRL 에 없는 값은 앞서 보도자료에서 읽은 것을 지킨다
+        if r["eps"] is None:
+            r["eps"] = kept.get((r["fiscal_year"], r["q"]))
     by = {(r["fiscal_year"], r["q"]): r for r in qs}
     con.executemany("insert or replace into quarters (ticker, year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev, rcept_no, basis, period_start, period_end, currency, eps) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(ticker, r["fiscal_year"], r["q"], r["revenue"], r["operating_income"],

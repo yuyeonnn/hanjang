@@ -32,7 +32,7 @@ def test_nvidia_quarters_add_up_to_the_year_and_fy_label_is_ignored():
     assert (q2["start"], q2["end"], q2["revenue"], q2["operating_income"], q2["revenue_ytd"], q2["eps"]) == (
         "2026-04-27", "2026-07-26", 96_221_000_000, 63_734_000_000, 177_837_000_000, 2.46)
     q4 = qs[(2026, 4)]
-    assert q4["basis"] == "연간−9개월" and q4["end"] == "2026-01-25" and q4["revenue_ytd"] == 215_938_000_000
+    assert q4["basis"] == "연간−9개월" and q4["end"] == "2026-01-25" and q4["revenue_ytd"] == 215_938_000_000 and q4["eps"] is None  # EPS 는 빼기로 안 된다
     assert sum(qs[(2026, q)]["revenue"] for q in (1, 2, 3, 4)) == fin[2026]["revenue"]  # 4분기 = 연간 − 9개월
     assert sum(qs[(2026, q)]["operating_income"] for q in (1, 2, 3, 4)) == fin[2026]["operating_income"]
 
@@ -238,3 +238,31 @@ def test_dates_the_company_announced_are_read_and_past_dates_skipped():
     proxy = ("NOTICE OF 2027 ANNUAL MEETING OF STOCKHOLDERS The 2027 Annual Meeting of Stockholders of NVIDIA Corporation will be held "
              "virtually on Wednesday, June 23, 2027 at 9:00 a.m. Pacific Time.")
     assert us.future_day(us.AGM_DAY, proxy, date(2027, 5, 1), 120) == date(2027, 6, 23)
+
+
+def test_us_market_holidays_only_for_people_with_us_stocks():
+    from hanjang import sources, web
+    hol = [x for x in sources.macro_events("2026-11-01", "2026-11-30") if x[1] == "휴장"]
+    assert hol == [("2026-11-26", "휴장", "US", "미국 증시 휴장 (추수감사절)")]
+    con = db.connect(":memory:")
+    con.execute("insert into stocks (ticker, name, market) values ('NVDA', '엔비디아', 'US')")
+    con.execute("insert into users (id, email, created_at) values (1, 'a@x.kr', 'now')")
+    app = web.App(con, "s")
+    assert "추수감사절" not in app.calendar(1, "2026-11", today=date(2026, 11, 1))
+    con.execute("insert into holdings values (1, 'NVDA', 'now')")
+    assert "추수감사절" in app.calendar(1, "2026-11", today=date(2026, 11, 1))
+
+
+def test_release_numbers_are_checked_against_the_text():
+    src = ("MICRON REPORTS RECORD FISCAL FOURTH-QUARTER RESULTS ... results for its fourth quarter and full year of fiscal 2026, which ended September 3, 2026. "
+           "Revenue of $54.23 billion versus $41.46 billion for the prior quarter. GAAP net income of $37.70 billion, or $32.87 per diluted share. "
+           "Operating income (loss) (1,234)")
+    ok = {"period_end": "2026-09-03", "unit": "billion", "revenue": "54.23", "operating_income": "", "net_income": "37.70", "eps": "32.87"}
+    got = us.check_release(ok, src, date(2026, 9, 30))
+    assert (got["revenue"], got["net_income"], got["eps"], got["operating_income"]) == (54.23e9, 37.70e9, 32.87, None)
+    import pytest
+    with pytest.raises(ValueError):
+        us.check_release(ok | {"revenue": "55.00"}, src, date(2026, 9, 30))  # 원문에 없는 숫자
+    with pytest.raises(ValueError):
+        us.check_release(ok | {"period_end": "2025-09-03"}, src, date(2026, 9, 30))  # 1년 전 분기
+    assert us.check_release(ok | {"unit": "million", "operating_income": "(1,234)"}, src, date(2026, 9, 30))["operating_income"] == -1234e6
