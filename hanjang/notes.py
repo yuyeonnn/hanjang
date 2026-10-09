@@ -622,7 +622,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
                         "tone": 1 if ni / eq * 100 >= ROE_GOOD else -1 if ni < 0 else 0,
                         "slots": {"연도": yy, "비율": r, "순이익": won(ni), "자기돈": won(eq)}})  # fmt: skip
-        story = story_facts(fin, url, yy)
+        story = [f for f in story_facts(fin, url, yy) if not (f["id"] == "F5" and mid.get("금융"))]
         for f in story:  # 100원당 남긴 돈 — 같은 업종 중간값도 (유통·상사·정유는 원래 몇 원, 소프트웨어는 수십 원)
             if f["id"] == "F5" and mid.get("백원당") is not None:
                 f["slots"] |= {"업종보통": f"{mid['백원당']:.0f}원", "업종": mid["업종"]}
@@ -952,6 +952,13 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     note["sections"] = [sec for sec in note["sections"] if sec["sentences"]]
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
+    why = by.get("F3", {}).get("slots", {}).get("빚이유")
+    if why and not any(why in x["text"] for sec in note["sections"] for x in sec["sentences"]):
+        for sec in note["sections"]:
+            at = next((i for i, x in enumerate(sec["sentences"]) if "F3" in x["refs"]), None)
+            if at is not None:
+                sec["sentences"].insert(at + 1, {"text": f"이 업종은 {why}.", "refs": ["F3"]})
+                break
     for key, sign in (("good", 1), ("concern", -1)):
         if not note[key]:
             note[key] = [{"text": mend(say(f)), "refs": [f["id"]]} for f in fs if f["tone"] == sign][:3]
