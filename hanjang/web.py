@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, policy, sources
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -1475,6 +1475,11 @@ class App:
                  "target": {"namespace": "android_app", "package_name": pkg, "sha256_cert_fingerprints": [x.strip() for x in sha.split(",")]}}]
         return "200 OK", [("Content-Type", "application/json")], json.dumps(body)
 
+    def hidden(self, uid: int, other: int) -> bool:
+        """예시 사람(personas.py)은 둘러보기 계정만 본다 — 실제 사용자에겐 없는 사람."""
+        row = self.con.execute("select email from users where id = ?", (other,)).fetchone()
+        return bool(row and row[0].endswith(personas.DOMAIN)) and not self.is_demo(uid)
+
     def is_demo(self, uid: int) -> bool:
         row = self.con.execute("select email from users where id = ?", (uid,)).fetchone()
         return bool(row and row[0] == DEMO_EMAIL)
@@ -2139,7 +2144,7 @@ class App:
     def follow_page(self, uid: int, who: int, tab: str):
         """인스타그램처럼 — 위에 「팔로워 N명 | 팔로잉 N명」 탭, 아래에 사람 목록과 팔로우 단추 (사용자 10/10)."""
         row = self.con.execute("select nickname from users where id = ?", (who,)).fetchone()
-        if not row:
+        if not row or self.hidden(uid, who):
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요.")
         tab = tab if tab in ("followers", "following") else "followers"
         if not self.can_see(uid, who):
@@ -2356,8 +2361,8 @@ class App:
     def people(self, uid: int, q: str) -> str:
         if not q:
             return ""
-        rows = self.con.execute("select id, nickname, bio, photo_at from users where nickname is not null and id != ? and nickname like ? limit 20",
-                                (uid, f"%{q}%")).fetchall()  # fmt: skip
+        rows = self.con.execute("select id, nickname, bio, photo_at from users where nickname is not null and id != ? and nickname like ?"
+                                + ("" if self.is_demo(uid) else f" and id not in {personas.IDS}") + " limit 20", (uid, f"%{q}%")).fetchall()  # fmt: skip
         items = "".join(f'<a href="/u/{i}" class="py-space-sm flex items-center gap-space-sm">{self.face(n, photo=photo_url(i, p))}<span class="flex flex-col min-w-0">'
                         f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(n)}</span>'
                         f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(b or "")}</span></span></a>' for i, n, b, p in rows)  # fmt: skip
@@ -2419,11 +2424,11 @@ class App:
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(b["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
-    def popular(self, photos: "Photos") -> str:
+    def popular(self, photos: "Photos", demo: bool = False) -> str:
         """팔로우한 사람의 리그램이 없을 때 — 이번 주 노트를 많이 읽힌 순서로."""
         rows = self.con.execute(
             "select s.ticker, s.name, n.body, s.induty_code, n.made_at,"
-            " (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week) c"
+            " (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week" + ("" if demo else f" and v.user_id not in {personas.IDS}") + ") c"
             " from notes n join stocks s using(ticker) where n.week = (select max(week) from notes) order by c desc, s.name limit 20").fetchall()  # fmt: skip
         cards = "".join(story(f"/n/{t}", photos.pick(None, ind, name), notes.mend(json.loads(b)["headline"]), gist(json.loads(b)), name, made[:10].replace("-", "."))
                         for t, name, b, ind, made, c in rows)  # fmt: skip
@@ -2440,7 +2445,8 @@ class App:
             " (select count(*) from regrams r where r.user_id = u.id and r.at >= ?) rg,"
             " (select count(*) from likes l where l.user_id = u.id and l.at >= ?) lk,"
             " (select count(*) from follows f where f.followee_id = u.id and f.ok = 1) fer"
-            " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)",
+            " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)"
+            + ("" if self.is_demo(uid) else f" and u.id not in {personas.IDS}"),
             (since, since, uid, uid)).fetchall()  # fmt: skip
         rows = sorted(rows, key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
         if not rows:
@@ -2457,19 +2463,20 @@ class App:
                 f'<div class="mt-space-sm -mx-margin px-margin flex gap-4 overflow-x-auto pb-2">{cards}</div></section>'
                 "<script>try{if(sessionStorage.getItem('hideSuggest'))document.getElementById('suggest').remove()}catch(e){}</script>")  # fmt: skip
 
-    def ranks(self, end: datetime) -> tuple[list, list]:
+    def ranks(self, end: datetime, demo: bool = False) -> tuple[list, list]:
         """end 앞 7일 동안 많이 담은 종목·많이 읽은 노트, 각 5개 [(ticker, name)]. 3명 이상일 때만 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
         a, b = (end - timedelta(days=7)).isoformat(), end.isoformat()
-        held = self.con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.added_at >= ? and h.added_at < ?"
-                                " group by s.ticker having count(*) >= 3 order by count(*) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
-        read = self.con.execute("select s.ticker, s.name from views v join stocks s using(ticker) where v.page = 'note' and v.at >= ? and v.at < ?"
-                                " group by s.ticker having count(distinct v.user_id) >= 3 order by count(distinct v.user_id) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
+        real = "" if demo else f" and user_id not in {personas.IDS}"  # 예시 사람은 둘러보기에서만 센다
+        held = self.con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.added_at >= ? and h.added_at < ?" + real
+                                + " group by s.ticker having count(*) >= 3 order by count(*) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
+        read = self.con.execute("select s.ticker, s.name from views v join stocks s using(ticker) where v.page = 'note' and v.at >= ? and v.at < ?" + real
+                                + " group by s.ticker having count(distinct v.user_id) >= 3 order by count(distinct v.user_id) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
         return held, read
 
-    def this_week(self) -> str:
+    def this_week(self, demo: bool = False) -> str:
         """이번 주 한장 — 몇 명인지는 적지 않고, 한 시간 전 순위와 견준 오르내림·NEW 만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다."""
         now = datetime.now().replace(minute=0, second=0, microsecond=0)
-        cur, prev = self.ranks(now), self.ranks(now - timedelta(hours=1))
+        cur, prev = self.ranks(now, demo), self.ranks(now - timedelta(hours=1), demo)
         up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
         down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'
         same = '<span class="text-outline-variant text-[12px]" aria-label="그대로">–</span>'
@@ -2496,7 +2503,7 @@ class App:
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos)) + self.suggest(uid)
+        body = self.this_week(self.is_demo(uid)) + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos, self.is_demo(uid))) + self.suggest(uid)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
@@ -2508,6 +2515,8 @@ class App:
     def user_page(self, uid: int, other: int):
         row = self.con.execute("select nickname, bio, photo_at from users where id = ? and nickname is not null", (other,)).fetchone()
         if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
+            return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
+        if self.hidden(uid, other):
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
         nick, bio, pat = row
         label, on = self.follow_state(uid, other)
