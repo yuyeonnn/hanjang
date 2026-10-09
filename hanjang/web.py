@@ -179,6 +179,28 @@ def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, 
             "</span></a></article>")  # fmt: skip
 
 
+def note_card(t: str, name: str, home: str | None, head: str, day: str, top: str = "") -> str:
+    """노트 리그램 — 내 종목 카드와 같은 모양: 로고 · 이름 · 종목 코드 · 날짜 / 한 줄 요약 / 「노트 읽기 →」 (사용자 10/9)."""
+    return (f'<article class="py-4 flex flex-col gap-2">{top}<div class="flex items-center gap-2">{logo(name, home, "w-7 h-7")}'
+            f'<a href="/n/{e(t)}"><h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h3></a>'
+            f'<span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e(t)}</span>'
+            f'<span class="font-label-micro text-label-micro text-outline-variant">{e(day)}</span></div>'
+            f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface tracking-tight">{e(head)}</p></a>'
+            f'<div class="flex justify-end"><a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기'
+            '<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
+
+
+def row(href: str, img: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
+    """피드 기사 리그램 — 뉴닉식 한 줄: 왼쪽 작은 사진 · 제목 · 두 줄 요약 · 출처와 날짜. 넓은 화면에서도 사진은 작게 (사용자 10/9)."""
+    return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-4 items-start group">'
+            f'<img alt="" loading="lazy" class="w-[36%] max-w-[180px] aspect-[4/3] object-cover rounded-xl shrink-0 bg-surface-container" src="{e(img)}">'
+            '<span class="min-w-0 flex flex-col gap-1 pt-0.5">'
+            f'<span class="text-[15px] leading-[22px] lg:text-[18px] lg:leading-[26px] font-semibold tracking-tight text-on-surface line-clamp-2 group-hover:underline">{e(title)}</span>'
+            f'<span class="text-[13px] leading-[19px] lg:text-[15px] lg:leading-[23px] text-on-surface-variant line-clamp-2">{e(excerpt)}</span>'
+            f'<span class="mt-0.5 text-[11px] leading-4 lg:text-[13px] text-outline"><b class="text-on-surface-variant font-medium">{e(source)}</b>  {e(day)}</span>'
+            "</span></a></article>")  # fmt: skip
+
+
 def mini(href: str, mark: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
     """리그램 카드 — 큰 사진 없이 내 종목 카드처럼: 로고(또는 아이콘) · 이름 · 한 줄 요약 · 두 줄 설명 (사용자 10/9: 사진이 너무 커요)."""
     return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex flex-col gap-1.5 group">'
@@ -1719,9 +1741,10 @@ class App:
 
     def regram(self, uid: int, form: dict):
         kind, ref, week = form.get("k", ""), form.get("r", ""), form.get("w", "")
-        back = f"/n/{quote(ref)}" if kind == "note" else f"/learn/{quote(ref)}"
+        back = {"note": f"/n/{quote(ref)}", "article": f"/a/{quote(ref)}"}.get(kind, f"/learn/{quote(ref)}")
         ok = (kind == "note" and self.con.execute("select 1 from notes where ticker = ? and week = ?", (ref, week)).fetchone()) or (
-            kind == "learn" and ref in learn.BY_SLUG and week == "")
+            kind == "learn" and ref in learn.BY_SLUG and week == "") or (
+            kind == "article" and ref.isdigit() and week == "" and self.con.execute("select 1 from articles where id = ?", (int(ref),)).fetchone())
         if not ok:
             return self.see("/feed")
         if form.get("undo"):
@@ -1742,23 +1765,31 @@ class App:
             + where + " order by r.at desc limit 50", args).fetchall()  # fmt: skip
         cards = []
         for who, nick, kind, ref, week, comment, at, pat in rows:
+            d = at[:10].replace("-", ".")
             if kind == "note":
                 hit = self.con.execute("select s.name, n.body, s.homepage from stocks s join notes n on n.ticker = s.ticker and n.week = ?"
                                        " where s.ticker = ?", (week, ref)).fetchone()  # fmt: skip
                 if not hit:
                     continue
-                b = json.loads(hit[1])
-                head, sub, href, src, mark = notes.mend(b["headline"]), notes.mend(gist(b)), f"/n/{ref}", hit[0], logo(hit[0], hit[2], "w-7 h-7")
+                card = lambda top, h=notes.mend(json.loads(hit[1])["headline"]), n=hit[0], home=hit[2], t=ref: note_card(t, n, home, h, d, top)
+            elif kind == "article":
+                hit = self.con.execute("select a.id, a.kind, a.body, a.date, s.name, s.induty_code from articles a join stocks s using(ticker) where a.id = ?",
+                                       (int(ref) if ref.isdigit() else -1,)).fetchone()  # fmt: skip
+                if not hit:
+                    continue
+                aid, k, body, adate, name, ind = hit
+                b = json.loads(body)
+                img = self.article_photo(aid, k, ind, name, photos)
+                card = lambda top, b=b, img=img, name=name, aid=aid, adate=adate: row(f"/a/{aid}", img, b["title"], b["paragraphs"][0]["text"], name, adate.replace("-", "."), top)
             else:
                 a = learn.BY_SLUG.get(ref)
                 if not a:
                     continue
-                head, sub, href, src = a["title"], a["lead"].replace("**", ""), f"/learn/{ref}", "읽기 팁"
                 mark = '<span class="w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center"><span class="material-symbols-outlined text-[16px]">menu_book</span></span>'
-            d = at[:10].replace("-", ".")
+                card = lambda top, a=a, ref=ref, mark=mark: mini(f"/learn/{ref}", mark, a["title"], a["lead"].replace("**", ""), "읽기 팁", d, top)
             top = "" if mine else (f'<a href="/u/{who}" class="flex items-center gap-2">{self.face(nick, "w-6 h-6", photo_url(who, pat))}'
                                    f'<span class="font-label-regular text-label-regular text-on-surface-variant"><b class="text-on-surface font-semibold">{e(nick)}</b>님이 리그램</span></a>')  # fmt: skip
-            cards.append(mini(href, mark, head, sub, src, d, top))
+            cards.append(card(top))
         if not cards:
             return ""
         body = "".join(cards)
@@ -1823,6 +1854,7 @@ class App:
                  f'<img alt="" class="mt-space-md w-full aspect-[16/10] object-cover rounded-xl" src="{e(img)}">'
                  '<p class="mt-1 text-right text-[11px] text-outline">주제 사진 · Unsplash</p>'
                  f'<article class="mt-space-md">{paras}</article>'
+                 + '<div class="mt-space-sm mb-space-sm flex justify-end">' + self.regram_form(uid, "article", str(aid), "") + "</div>"
                  f'<a class="mt-space-sm flex items-center justify-between rounded-xl border border-outline-variant/50 px-space-md py-3" href="/n/{e(t)}">'
                  f'<span class="flex items-center gap-2">{logo(name, self.con.execute("select homepage from stocks where ticker = ?", (t,)).fetchone()[0], "w-8 h-8")}'
                  f'<span class="text-[14px] font-semibold text-on-surface">{e(name)} 분석 보고서 보기</span></span><span class="material-symbols-outlined text-outline">chevron_right</span></a>'
