@@ -1033,13 +1033,13 @@ class App:
     def stocks_js(self) -> str:
         """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만)."""
         rows = [{"t": t, "n": n, "l": "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c in
-                self.con.execute("select ticker, name, induty_code from stocks order by active desc, name")]  # fmt: skip
+                self.con.execute("select ticker, name, induty_code from stocks where market = 'KR' order by active desc, name")]  # 미국은 5주차에  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
 
     def match(self, q: str) -> str | None:
         """이름·코드 → 종목 코드. 띄어쓰기·대소문자는 무시한다(「삼성 SDI」→ 삼성SDI)."""
         key = re.sub(r"\s+", "", q).upper()
-        row = self.con.execute("select ticker from stocks where ticker = ? or upper(replace(name, ' ', '')) = ? order by active desc",
+        row = self.con.execute("select ticker from stocks where market = 'KR' and (ticker = ? or upper(replace(name, ' ', '')) = ?) order by active desc",
                                (key, key)).fetchone()  # 상장사 전체 (코스닥 포함) — 노트가 없던 종목은 다음 아침에 생긴다  # fmt: skip
         return row[0] if row else None
 

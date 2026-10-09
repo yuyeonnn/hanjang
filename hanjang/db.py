@@ -49,6 +49,12 @@ create table if not exists big_holdings (
   inst text not null, stock_code text not null, corp_name text not null, corp_cls text, rate real not null,
   rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
+create table if not exists filings (
+  accession text primary key, ticker text not null references stocks, form text not null, date text not null, at text,
+  items text, doc text, filed_us text);
+create table if not exists flows (
+  ticker text not null references stocks, period_start text not null, period_end text not null, months integer,
+  buyback real, dividends real, sbc real, accn text, primary key (ticker, period_start, period_end));
 create table if not exists etfs (
   ticker text primary key references stocks, name text not null, rcept_no text not null, filed text not null,
   info text, read_rcept text);
@@ -101,7 +107,12 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
                             ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"),
-                            ("news", "summary", "text")):  # RSS 요약문 — 기사 본문이 아니다  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
+                            ("news", "summary", "text"),
+                            # 미국 주식 (docs/stage3-us.md 1주차) — 시장·SEC 번호·업종·회계연도 끝 · 기간·통화·주당순이익 · 임원 거래의 계획 표시·단가
+                            ("stocks", "market", "text not null default 'KR'"), ("stocks", "cik", "integer"), ("stocks", "sic", "text"), ("stocks", "fye", "text"),
+                            ("financials", "period_start", "text"), ("financials", "period_end", "text"), ("financials", "currency", "text"), ("financials", "eps", "real"),
+                            ("quarters", "period_start", "text"), ("quarters", "period_end", "text"), ("quarters", "currency", "text"), ("quarters", "eps", "real"),
+                            ("insiders", "planned", "integer"), ("insiders", "price", "real")):  # RSS 요약문 — 기사 본문이 아니다  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")
