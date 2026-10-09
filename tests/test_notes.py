@@ -559,3 +559,8 @@ def test_margin_power_is_decided_by_code():
     assert notes.fill({"text": "남기는 힘이 {F8.힘}어요.", "refs": ["F8"]}, by)["text"] == "남기는 힘이 약해졌어요."
     with pytest.raises(ValueError):
         notes.check_sentence({"text": "더 빨리 증가).", "refs": ["F8"]}, [by["F8"]])
+
+
+def test_per_100_won_shows_decimal_when_rounding_hides_the_change():
+    r = notes.relation(1000, 1000, 44, 36)
+    assert (r["백원당"], r["전년백원당"], r["힘"]) == ("4.4원", "3.6원", "더 세졌")
