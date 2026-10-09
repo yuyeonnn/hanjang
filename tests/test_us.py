@@ -103,6 +103,7 @@ def test_main_saves_us_rows_hidden_from_search(monkeypatch):
     us.main(date(2026, 10, 9), con, FakeSec())
     assert dict(con.execute("select ticker, market from stocks")) == {"NVDA": "US", "AAPL": "US"}
     assert con.execute("select active, cik, sic, fye from stocks where ticker = 'NVDA'").fetchone() == (0, 1045810, "3674", "0131")
+    assert con.execute("select homepage from stocks where ticker = 'AAPL'").fetchone()[0] in ("ticker/AAPL", "apple.com")  # 로고 — 웹사이트 없으면 티커로
     assert con.execute("select count(*) from financials where ticker = 'NVDA' and currency = 'USD'").fetchone()[0] >= 3
     (q,) = con.execute("select revenue_prev from quarters where ticker = 'NVDA' and year = 2027 and q = 2").fetchone()
     assert q == con.execute("select revenue from quarters where ticker = 'NVDA' and year = 2026 and q = 2").fetchone()[0]  # 1년 전 같은 분기
