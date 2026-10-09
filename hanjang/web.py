@@ -1475,12 +1475,6 @@ class App:
                  "target": {"namespace": "android_app", "package_name": pkg, "sha256_cert_fingerprints": [x.strip() for x in sha.split(",")]}}]
         return "200 OK", [("Content-Type", "application/json")], json.dumps(body)
 
-    def example(self, other: int) -> str:
-        """예시 사람(personas.py)이면 작은 「예시 계정」 표시 — 진짜 사람으로 오해하지 않게."""
-        row = self.con.execute("select email from users where id = ?", (other,)).fetchone()
-        return ('<span class="shrink-0 px-1.5 py-px rounded-md border border-outline-variant/70 text-[11px] text-outline">예시 계정</span>'
-                if row and row[0].endswith(personas.DOMAIN) else "")
-
     def is_demo(self, uid: int) -> bool:
         row = self.con.execute("select email from users where id = ?", (uid,)).fetchone()
         return bool(row and row[0] == DEMO_EMAIL)
@@ -2008,6 +2002,7 @@ class App:
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
+                 + self.suggest(uid)  # 추천 프로필은 내 프로필 맨 밑 (사용자 10/10)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2454,8 +2449,8 @@ class App:
 
         cards = "".join(
             f'<div class="shrink-0 w-[132px] flex flex-col items-center gap-1.5 text-center"><a href="/u/{i}" class="flex flex-col items-center gap-1.5 min-w-0 w-full">'
-            f'{self.face(n, "w-16 h-16", photo_url(i, p))}<b class="text-[14px] text-on-surface truncate w-full">{e(n)}</b>{self.example(i)}'
-            f'</a>{self.follow_button(uid, i, "/feed")}</div>'
+            f'{self.face(n, "w-16 h-16", photo_url(i, p))}<b class="text-[14px] text-on-surface truncate w-full">{e(n)}</b>'
+            f'</a>{self.follow_button(uid, i, "/me")}</div>'
             for i, n, p, rg, lk, fer in rows)  # fmt: skip
         return (f'<section id="suggest" class="mt-space-lg"><div class="flex items-center justify-between"><h2 class="font-headline-sm text-headline-sm text-on-surface">추천 프로필</h2>'
                 '<button type="button" aria-label="추천 프로필 닫기" class="p-1 text-outline hover:text-on-surface" onclick="try{sessionStorage.setItem(\'hideSuggest\',\'1\')}catch(e){}this.closest(\'section\').remove()">'
@@ -2473,9 +2468,10 @@ class App:
         return held, read
 
     def this_week(self) -> str:
-        """이번 주 한장 — 몇 명인지는 적지 않고, 한 시간 전 순위와 견준 오르내림·NEW 만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다."""
+        """이번 주 한장 — 몇 명인지는 적지 않고, 하루 전 순위와 견준 오르내림·NEW 만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다.
+        한 시간 전과 견주면 거의 늘 그대로(–)라 움직임이 안 보였다 (사용자 10/10)."""
         now = datetime.now().replace(minute=0, second=0, microsecond=0)
-        cur, prev = self.ranks(now), self.ranks(now - timedelta(hours=1))
+        cur, prev = self.ranks(now), self.ranks(now - timedelta(days=1))
         up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
         down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'
         same = '<span class="text-outline-variant text-[12px]" aria-label="그대로">–</span>'
@@ -2502,7 +2498,7 @@ class App:
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos)) + self.suggest(uid)
+        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
@@ -2525,7 +2521,7 @@ class App:
         see = self.can_see(uid, other)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
-                 f'<div class="flex items-center gap-2 min-w-0"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.example(other)}</div>{self.follow_line(other, see)}</div>'
+                 f'<div class="flex items-center gap-2 min-w-0"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1></div>{self.follow_line(other, see)}</div>'
                  f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
                  + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)

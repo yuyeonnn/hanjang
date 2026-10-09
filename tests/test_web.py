@@ -308,11 +308,12 @@ def test_follow_regram_feed_and_privacy():
     call(app, "/regram", "POST", "k=note&r=005930&w=2026-10-05", you)
     _, _, body = call(app, "/feed", cookie=me)
     assert "많이 읽은 노트" in body and "님이 리그램" not in body  # 팔로우 전 — 리그램은 안 보이고 조회수 순 노트
+    body = call(app, "/me", cookie=me)[2]
     assert "추천 프로필" in body and "반도체공부" in body and "리그램 1개" not in body  # 활발한 사람은 추천 프로필로, 이유 글은 없이 (사용자 10/10)
     call(app, "/follow", "POST", "u=2", me)
     _, _, body = call(app, "/feed", cookie=me)
     assert "반도체공부" in body and "삼성전자" in body and "you@b.c" not in body and "많이 읽은 노트" not in body
-    assert "추천 프로필" not in body  # 이미 팔로우한 사람은 추천하지 않는다
+    assert "추천 프로필" not in call(app, "/me", cookie=me)[2]  # 이미 팔로우한 사람은 추천하지 않는다
     _, _, body = call(app, "/u/2", cookie=me)
     assert "팔로워 <b class=\"text-on-surface\">1</b>" in body and "메모리 회사를 봐요" in body and ">팔로잉</button>" in body
     _, _, body = call(app, "/feed?q=" + quote("반도체"), cookie=me)
@@ -857,7 +858,7 @@ def test_notices_this_week():
     con.execute("insert into holdings values (3, '005930', ?)", (now,))
     week = app.this_week()
     assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
-    assert "NEW" in week and "시 업데이트" in week  # 한 시간 전엔 없던 종목
+    assert "NEW" in week and "시 업데이트" in week  # 하루 전엔 없던 종목
 
 
 def test_health_says_what_is_wrong(tmp_path, monkeypatch):
@@ -929,7 +930,7 @@ def test_morning_card_on_home(monkeypatch):
 
 
 def test_personas_seen_by_everyone_with_label():
-    """예시 사람들 — 모두에게 보이고(사용자 10/10) 「예시 계정」 표시가 붙는다. 다시 깔아도 겹치지 않고 실제 사용자를 먼저 팔로우하지 않는다."""
+    """예시 사람들 — 모두에게 보인다(사용자 10/10). 다시 깔아도 겹치지 않고 실제 사용자를 먼저 팔로우하지 않는다."""
     from hanjang import personas
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉')")
@@ -938,9 +939,9 @@ def test_personas_seen_by_everyone_with_label():
     demo = con.execute("select id from users where email = ?", (personas.DEMO_EMAIL,)).fetchone()[0]
     first = con.execute("select id from users where email = ?", ("chip" + personas.DOMAIN,)).fetchone()[0]
     me = f"s={web.sign('1', SECRET)}"
-    assert "삼성전자" in app.this_week() and "반도체일기" in app.suggest(1) and "예시 계정" in app.suggest(1)
+    assert "삼성전자" in app.this_week() and "반도체일기" in app.suggest(1)
     body = call(app, f"/u/{first}", cookie=me)[2]
-    assert "반도체일기" in body and "예시 계정" in body
+    assert "반도체일기" in body
     assert "반도체일기" in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
     assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
     assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
