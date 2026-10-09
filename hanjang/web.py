@@ -596,6 +596,8 @@ addEventListener('load',pieLines);addEventListener('resize',pieLines);document.f
 
 def issuer_name(issuer: str, ours: str | None) -> str:
     """13F 회사 이름 — 우리 종목이면 한글 이름, 아니면 대문자 줄임말을 보기 좋게(「MAGNA INTL INC」→「Magna Intl Inc」)."""
+    if not ours and gurus.sector("", issuer) == "ETF(지수 펀드)":  # 「INVESCO EXCH TRADED FD TR II …」 → 「Invesco ETF」
+        return issuer.split()[0].title() + " ETF"
     return ours or (issuer.title() if issuer.isupper() else issuer)
 
 
@@ -2239,6 +2241,40 @@ class App:
                 '<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">국민연금·운용사 같은 기관이 5% 넘게 가진 회사들이에요. 공시로 알려진 것만 보여요.</p>'
                 f'<div class="flex flex-col divide-y divide-surface-container-high/80">{items}</div></section>')  # fmt: skip
 
+    def nps_portfolio(self) -> str:
+        """국민연금 주식 — 한국(국민연금 연간 공시 평가액)과 미국(같은 날 13F, 한국은행 환율로 원화)을 금액 큰 순 하나로. 파이도 그 비중."""
+        rows = self.con.execute(
+            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker)"
+            " from nps_port p left join stocks s on s.ticker = p.ticker order by p.won desc").fetchall()  # fmt: skip
+        meta = self.con.execute("select asof, fx from nps_meta order by asof desc limit 1").fetchone()
+        if not rows or not meta:
+            return ""
+        total = sum(r[3] for r in rows)
+        n_kr = sum(r[0] == "KR" for r in rows)
+        won_kr = sum(r[3] for r in rows if r[0] == "KR")
+
+        def label(r):
+            mkt, name, _, _, kname, *_ = r
+            return name if mkt == "KR" else issuer_name(name, kname)
+
+        def line(i, r):
+            mkt, _, t, won, _, home, has_note = r
+            tag = ('<span class="ml-1.5 px-1.5 py-px rounded text-[10px] font-semibold align-middle '
+                   + ("bg-surface-container-high text-on-surface-variant\">한국" if mkt == "KR" else "bg-secondary-container text-on-secondary-container\">미국") + "</span>")
+            inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label(r), home, "w-9 h-9")}'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'<span class="text-[12px] text-on-surface-variant">비중 {won / total * 100:.1f}% · {e(sources.won_short(won))}</span></span>')  # fmt: skip
+            return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
+
+        return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">주식 포트폴리오 · 한국+미국</h2>'
+                f'<p class="mt-1 text-[12px] text-outline">{len(rows):,}종목 · {e(sources.won_short(total))} · {kdate(meta[0])} 기준 · 한국 {won_kr / total * 100:.0f}% · 미국 {100 - won_kr / total * 100:.0f}%</p>'
+                + pie([(label(r), r[3]) for r in rows])
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:20], 1)) + "</div>"
+                + f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - 20:,}종목</p>'
+                + '<p class="mt-2 text-[11px] text-outline leading-relaxed">한국 주식은 국민연금이 공개한 종목별 평가액(공공데이터포털 「국민연금공단_국내주식 투자정보」), '
+                + f'미국 주식은 같은 날 미국 증권거래위원회(SEC)에 낸 보유 신고(13F)예요. 달러는 그날 한국은행 환율(1달러 {meta[1]:,.1f}원)로 바꿨어요. '
+                + f'한국 {n_kr:,}종목 · 미국 {len(rows) - n_kr:,}종목. 1년에 한 번 나오는 공시라 지금과 다를 수 있어요.</p></section>')  # fmt: skip
+
     def us_portfolio(self, key: str) -> str:
         """기관의 미국 주식 — 13F 로 보유 전체가 공개된다(국내 5% 보고와 달리). 파이 + 큰 10종목."""
         rows = self.con.execute(
@@ -2338,7 +2374,8 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, _, intro = holders.BIG[key]
         (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
-        us_n = f" · 미국 주식 {n_us:,}종목" if n_us else ""
+        (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
+        us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
         rows = self.con.execute(
             "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
             " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
@@ -2361,7 +2398,7 @@ class App:
                 f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
                 f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
                 + bars([sector(x) for x in inds], [1] * len(inds), "곳", "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.")
-                + self.us_portfolio(key)  # 국내 목록(수백 곳) 위에 — 맨 아래에 두면 아무도 못 본다(사용자 10/10)
+                + (self.nps_portfolio() or self.us_portfolio(key) if key == "nps" else self.us_portfolio(key))  # 국내 목록(수백 곳) 위에 — 맨 아래에 두면 아무도 못 본다(사용자 10/10)
                 + (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 늘리고 줄인 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                    + "".join(row(i, r) for i, r in enumerate(recent, 1)) + "</div></section>" if recent else "")
                 + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">지분이 큰 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'

@@ -95,7 +95,7 @@ ABBR = {"FINL": "FINANCIAL", "AMER": "AMERICA", "WHSL": "WHOLESALE", "INTL": "IN
 
 def sector(sic: str | None, issuer: str = "") -> str | None:
     """SIC → 큰 업종. ETF(지수 펀드)는 이름으로 — 13F 에는 ETF 도 주식처럼 들어 있다."""
-    if re.search(r"\bETF\b|ISHARES|SPDR|INVESCO QQQ|VANGUARD .*(INDEX|ETF)|SELECT SECTOR", issuer.upper()):
+    if re.search(r"\bETF\b|ISHARES|SPDR|INVESCO QQQ|EXCH TRADED|TRADED FD|VANGUARD .*(INDEX|ETF)|SELECT SECTOR", issuer.upper()):
         return "ETF(지수 펀드)"
     d = int(sic) if sic and sic.isdigit() else None
     return next((name for (lo, hi), name in SIC_SECTOR if d is not None and lo <= d <= hi), None)
