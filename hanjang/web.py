@@ -272,7 +272,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
                        f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full" style="width:{b:.1f}%;background:#F4806A"></span></div>'
                        f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
                        f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. '
-                       + (f'같은 업종({e(mid["업종"])}) 보통(중간값)은 {mid["부채비율"]:,.0f}%예요.' if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
+                       + (f'같은 업종({e(mid["업종"])}) 보통(중간값)은 {mid["부채비율"]:,.0f}%예요. ' if mid.get("부채비율") is not None else "")
+                       + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}.' if mid.get("빚이유") else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
                        + '</p>')  # fmt: skip
     if not out:
         return ""

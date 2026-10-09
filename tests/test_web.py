@@ -629,3 +629,8 @@ def test_money_blocks_finance_and_industry_usual():
     assert "금융회사는 잣대가 달라요" in h and "부채비율 1" not in h and "ROE 37.0%" in h
     h = web.money_blocks((2025, 1000, 30, 20, 400, 600), {"백원당": 3.2, "부채비율": 180.0, "업종": "무역·도매", "곳수": 4})
     assert "보통(중간값): 영업이익 3원" in h and "원래 조금씩 남겨요" in h and "보통(중간값)은 180%" in h
+
+
+def test_high_debt_sector_shows_reason():
+    h = web.money_blocks((2025, 1000, 70, 50, 100, 446), {"업종": "방위산업", "곳수": 1, "빚이유": "수주 대금을 미리 받아요"})
+    assert "부채비율 446%" in h and "방위산업 업종은 수주 대금을 미리 받아요." in h
