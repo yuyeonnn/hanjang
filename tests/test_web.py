@@ -545,7 +545,7 @@ def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     ck = _login(app)
     call(app, "/add", "POST", "q=" + quote("에코프로 비엠"), ck)
     assert con.execute("select ticker from holdings order by ticker").fetchall()[-1] == ("247540",)
-    assert "내일 아침 7시에 첫 노트" in call(app, "/", cookie=ck)[2]
+    assert "첫 노트" in call(app, "/", cookie=ck)[2]  # 바로 받기가 끝났거나(실패) 만드는 중
     js = call(app, "/stocks.js")[2]
     assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]
 
@@ -605,3 +605,19 @@ def test_calendar_shows_my_companys_bond_on_pay_day():
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
     assert html_.count("삼성전자 회사채 1,500억원</span>") == 1  # 두 회차가 칩 하나로
     assert "회사가 채권을 팔아 1,500억원을 빌려요 — 2년·3년 뒤에 갚는 조건이에요. 빌린 돈은 회사 운영 1,000억원 · 빚 갚기 500억원에 쓴다고 적었어요." in html_
+
+
+def test_adding_a_stock_without_note_starts_first_note_now(monkeypatch):
+    import threading
+    app, con = _app()
+    con.execute("insert or ignore into stocks (ticker, name, active) values ('036620', '감성코퍼레이션', 0)")
+    con.commit()
+    started, gate = [], threading.Event()
+    monkeypatch.setattr(web, "FIRST", lambda t: (started.append(t), gate.wait(2)))
+    ck = _login(app)
+    call(app, "/add", "POST", "q=036620", ck)
+    assert started == ["036620"] and "036620" in app.making
+    assert "첫 노트를 만들고 있어요" in call(app, "/", cookie=ck)[2]
+    call(app, "/add", "POST", "q=036620", ck)  # 이미 만드는 중이면 한 번만
+    assert started == ["036620"]
+    gate.set()
