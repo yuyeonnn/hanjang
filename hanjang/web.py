@@ -712,6 +712,11 @@ def redone(week: str, made: str) -> str:
     return f" · {d.month}월 {d.day}일 고침" if d and d.isoformat() > week else ""
 
 
+# 노트 한 줄 요약 위아래 선 — 신문 괘선처럼 굵은 실선 + 점선, 주 색 초록 (사용자 10/9)
+RULE = '<div class="border-t-2 border-primary"></div><div class="mt-[3px] border-t-2 border-dotted border-primary"></div>'
+RULE_FLIP = '<div class="border-t-2 border-dotted border-primary"></div><div class="mt-[3px] border-t-2 border-primary"></div>'
+
+
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
                 industry: str | None = None, initial: str = "", survey: str = "", made: str = "", homepage: str | None = None,
                 stats: tuple[int, int, bool] = (0, 0, False), regram: str = "",
@@ -728,7 +733,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 text-[12px] text-outline">{e(" · ".join(x for x in (industry_label(industry), md(made), f"읽음 {stats[0]:,}") if x))}</p></header>',
         price_chart(prices) if prices else "",
-        f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p></aside>',
+        f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
