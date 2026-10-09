@@ -574,7 +574,34 @@ def test_returns_watch_and_cite_tone():
     assert "text-outline/70" in web.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in web.sentence({"text": "재무", "refs": ["F1"]})
 
 
+def test_rates_article_measures_from_bank_of_korea_series():
+    from hanjang import learn, sources
+    app, con = _app()
+    ck = _login(app)
+    assert "자료를 아직 받지 않았어요" in call(app, "/learn/rates", cookie=ck)[2]  # 자료가 없으면 고정 글
+    base = {"기준금리": 3.0, "국고채 3년": 4.0, "국고채 10년": 4.5, "회사채 AA-": 4.7, "회사채 BBB-": 10.5}
+    for sid, n in sources.RATES.items():
+        con.executemany("insert into macro values (?, ?, ?)", [(sid, f"{2001 + i // 12}-{i % 12 + 1:02d}-01", base[n] + (3 if n == "회사채 BBB-" and i == 5 else 0))
+                                                              for i in range(150)])
+    a = learn.rates(con)
+    assert a["month"] == "2013-06-01" and "가장 크게 벌어졌던 때는 2001년 6월로 **9.5%p**" in a["body"][1] and "**0달**" in a["body"][2]
+    html_ = call(app, "/learn/rates", cookie=ck)[2]
+    assert "금리 흐름" in html_ and "자료: 한국은행 ECOS" in html_ and html_.count("<polyline") == 5
+
 def test_metrics_compares_last_year_and_this_year():
     h = web.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
     assert "2024년 → 2025년" in h and "+56.8%" in h and h.count("bg-outline-variant") == 2 and h.count("bg-primary") == 2
     assert web.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다
+
+
+def test_calendar_shows_my_companys_bond_on_pay_day():
+    from datetime import date
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.executemany("insert into bonds values ('r1', ?, '005930', '2026-10-21', ?, ?, null, '신한투자증권', ?)",
+                    [("1", 50_000_000_000, "2028-10-20", '{"채무상환자금": 50000000000}'), ("2", 100_000_000_000, "2029-10-19", '{"운영자금": 100000000000}')])
+    (uid,) = con.execute("select id from users").fetchone()
+    html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
+    assert html_.count("삼성전자 회사채 1,500억원</span>") == 1  # 두 회차가 칩 하나로
+    assert "회사가 채권을 팔아 1,500억원을 빌려요 — 2년·3년 뒤에 갚는 조건이에요. 빌린 돈은 회사 운영 1,000억원 · 빚 갚기 500억원에 쓴다고 적었어요." in html_
