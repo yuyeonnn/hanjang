@@ -608,3 +608,7 @@ def test_earnings_date_notice_is_not_a_yearly_result():
 
 def test_reword_with_date_in_between():
     assert notes.mend("실적을 발표할 날짜를 미리 알렸어요(10월 7일). 아직 숫자는 없어요.") == "실적을 발표할 날짜를 미리 알렸어요(10월 7일)."
+
+
+def test_reword_other_shapes():
+    assert notes.mend("또 실적을 발표할 날짜를 미리 알렸다고도 했어요. 아직 숫자는 없어요.") == "또 실적을 발표할 날짜를 미리 알렸다고도 했어요."
