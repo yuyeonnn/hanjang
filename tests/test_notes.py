@@ -576,3 +576,12 @@ def test_sector_context_finance_and_industry_median():
     assert notes.when(date(2026, 10, 5), date(2026, 10, 9)) == "이번 주" and notes.when(date(2026, 7, 23), date(2026, 10, 9)) == "7월"
     with pytest.raises(ValueError):
         notes.check_sentence({"text": "주식을 없애기로 해 주주에게 반가운 쪽이에요.", "refs": ["D1"]}, list(fs.values()))
+
+
+def test_debt_reason_is_added_when_ai_skips_it():
+    fs = [{"id": "F3", "text": "2025년 말 부채비율 446.4% (빚 1조원 · 자기 돈 1조원)", "tone": 0, "url": "u",
+           "slots": {"연도": "2025년", "비율": "446.4%", "빚이유": "수주 대금을 미리 받아 빚으로 잡혀요"}}]
+    j = {"headline": "", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
+         "sections": [{"title": "회사 사정은 어떤가요?", "sentences": [{"text": "빚이 자기 돈보다 많아요(부채비율 {F3.비율}).", "refs": ["F3"]}]}]}
+    note = notes.fill_note(j, fs)
+    assert note["sections"][0]["sentences"][1]["text"] == "이 업종은 수주 대금을 미리 받아 빚으로 잡혀요."
