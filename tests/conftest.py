@@ -8,3 +8,11 @@ from hanjang import mail
 @pytest.fixture(autouse=True)
 def no_real_mail(monkeypatch):
     monkeypatch.setattr(mail, "env", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def no_real_first_note(monkeypatch):
+    """테스트는 새 종목을 담아도 진짜 DART·AI 를 부르지 않는다 (web.FIRST — 담자마자 바로 받기)."""
+    from hanjang import web
+
+    monkeypatch.setattr(web, "FIRST", lambda ticker: False)

@@ -85,22 +85,10 @@ def save_news(con: sqlite3.Connection, picked: list[tuple[str, str]], today: dat
     return len(rows)
 
 
-def main(today: date) -> None:
-    con = db.connect()
-    # 문장마다 바로 저장 — 받기는 몇 분 걸려서, 끝에 한 번 저장하면 그동안 화면이 DB 에 못 써서 오류가 난다 (2026-10-08 사이트 500)
-    con.isolation_level = None
-    dart = sources.Dart()
-    # 노트를 쓰는 종목 = universe.txt(코스피 큰 회사 100곳) + 누군가 담은 종목(코스닥 포함). 나머지 상장사는 검색에만
-    listed = dart.listed(today)
-    picked = sources.kospi_universe()
-    held = {t for (t,) in con.execute("select distinct ticker from holdings")} - {t for t, _ in picked}
-    names = dict(con.execute("select ticker, name from stocks")) | dict(listed)  # 막 상장해 정기보고서가 아직 없는 회사도 담겼으면 쓴다
-    extra = [(t, names[t]) for t in sorted(held) if t in names and not t.startswith("ETF")]  # ETF 는 etf.py 가 따로
-    picked += extra
-    tickers = [t for t, _ in picked]
-    save_universe(con, picked, dart.corps(), listed)
-    print(f"종목 {len(tickers)}개 (universe.txt + 담은 종목 {len(extra)}개) · 상장사 {len(listed)}곳")
-
+def per_stock(con: sqlite3.Connection, dart: "sources.Dart", tickers: list[str], today: date) -> None:
+    """종목마다 받는 것 — 재무 5년 · 분기 · 공시 90일 · 업종·홈페이지 · 자사주 금액 · 배당 · 지분 보고 · 일정 · 회사채.
+    매일 실행(main)과 새로 담은 종목 바로 받기(first)가 같이 쓴다."""
+    lo = today - timedelta(days=DISCLOSURE_DAYS)
     fin = [f for y in range(today.year - 1, today.year - 6, -1) for f in dart.financials(tickers, y)]  # 5년 — 노트 위 차트
     save_financials(con, fin)
     print(f"재무 {len(fin)}행 ({today.year - 5}~{today.year - 1})")
@@ -111,15 +99,15 @@ def main(today: date) -> None:
                       x.revenue_ytd_prev, x.op_ytd_prev, x.rcept_no, x.basis) for x in qs])  # fmt: skip
     print(f"분기 실적 {len(qs)}줄 ({today.year - 1}~{today.year})")
 
-    lo = today - timedelta(days=DISCLOSURE_DAYS)
     ds = dart.disclosures(lo, today, set(tickers))
     save_disclosures(con, ds)
     # 받은 기간 안에서 이번 목록에 없는 공시 = 정정되어 최종본이 아닌 옛 판 → 지운다 (같은 공시가 두 번 나오지 않게)
     con.execute("create temp table if not exists got (r text primary key)")
     con.execute("delete from got")
     con.executemany("insert or ignore into got values (?)", [(d.rcept_no,) for d in ds])
-    gone = con.execute("delete from disclosures where date between ? and ? and rcept_no not in (select r from got)",
-                       (lo.isoformat(), today.isoformat())).rowcount  # fmt: skip
+    # 받은 종목 것만 — 새 종목 하나만 받을 때(first) 다른 종목 공시를 지우지 않게
+    gone = con.execute(f"delete from disclosures where date between ? and ? and rcept_no not in (select r from got)"
+                       f" and ticker in ({','.join('?' * len(tickers))})", (lo.isoformat(), today.isoformat(), *tickers)).rowcount  # fmt: skip
     print(f"  정정되어 옛 판이 된 공시 {gone}건 정리")
 
     for (t,) in con.execute("select ticker from stocks where active = 1 and (induty_code is null or homepage is null)").fetchall():
@@ -149,13 +137,54 @@ def main(today: date) -> None:
     con.executemany("insert or replace into events values (?, ?, ?, ?, ?)", evs)
     print(f"  일정 {len(evs)}건 (공시 {len(todo)}건에서)")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
-    print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
     by_corp = {c: t for t, c in dart.corps().items()}
     bs = [b for b in dart.bonds(lo, today, set(tickers)) if b.corp_code in by_corp]
     con.executemany("insert or replace into bonds values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(b.rcept_no, b.tm, by_corp[b.corp_code], b.pay.isoformat(), b.amount, b.maturity and b.maturity.isoformat(),
                       b.rate, b.lead, json.dumps(b.uses, ensure_ascii=False)) for b in bs])  # fmt: skip
     print(f"회사채 {len(bs)}회차 (증권신고서 · 채무증권)")
+
+
+def first(ticker: str, today: date | None = None) -> bool:
+    """새로 담은 종목 — 그 종목 자료만 바로 받고 첫 노트를 쓴다(1~2분). 다음 아침까지 기다리지 않게 (사용자 10/9).
+    DART 가 쉬면(점검) 아무것도 하지 않고 False — 다음 매일 실행이 받는다. 화면 서버가 따로 띄운 실에서 부른다."""
+    from hanjang import notes
+
+    today = today or date.today()
+    con = db.connect()
+    try:
+        con.isolation_level = None
+        dart = sources.Dart()
+        dart.corps()  # DART 가 쉬면(점검) 여기서 멈춘다 — 빈 목록을 받아 기존 공시를 지우지 않게
+        con.execute("update stocks set active = 1 where ticker = ?", (ticker,))
+        per_stock(con, dart, [ticker], today)
+        notes.main([ticker], today)
+        return bool(con.execute("select 1 from notes where ticker = ?", (ticker,)).fetchone())
+    except Exception as err:  # noqa: BLE001 — 실패해도 화면은 멀쩡해야 한다. 다음 아침 실행이 다시 받는다
+        print(f"새 종목 바로 받기 실패 {ticker}: {type(err).__name__} {err}", flush=True)
+        return False
+    finally:
+        con.close()
+
+
+def main(today: date) -> None:
+    con = db.connect()
+    # 문장마다 바로 저장 — 받기는 몇 분 걸려서, 끝에 한 번 저장하면 그동안 화면이 DB 에 못 써서 오류가 난다 (2026-10-08 사이트 500)
+    con.isolation_level = None
+    dart = sources.Dart()
+    # 노트를 쓰는 종목 = universe.txt(코스피 큰 회사 100곳) + 누군가 담은 종목(코스닥 포함). 나머지 상장사는 검색에만
+    listed = dart.listed(today)
+    picked = sources.kospi_universe()
+    held = {t for (t,) in con.execute("select distinct ticker from holdings")} - {t for t, _ in picked}
+    names = dict(con.execute("select ticker, name from stocks")) | dict(listed)  # 막 상장해 정기보고서가 아직 없는 회사도 담겼으면 쓴다
+    extra = [(t, names[t]) for t in sorted(held) if t in names and not t.startswith("ETF")]  # ETF 는 etf.py 가 따로
+    picked += extra
+    tickers = [t for t, _ in picked]
+    save_universe(con, picked, dart.corps(), listed)
+    print(f"종목 {len(tickers)}개 (universe.txt + 담은 종목 {len(extra)}개) · 상장사 {len(listed)}곳")
+
+    per_stock(con, dart, tickers, today)
+    print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
 
     con.execute("delete from macro where series_id = 'ECOS:731Y001:0000001'")  # 서울외국환중개 작성 — 예전에 받은 것 지움
     for sid, name in sources.MACRO.items():
