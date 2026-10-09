@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, notes, policy, sources
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, policy, sources
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -1669,6 +1669,8 @@ class App:
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
                  '</header>'
+                 # 아침 한 장 — 내 종목 소식 · 이번 주 · 꿀팁 (docs/growth.md §3-1). 화면에선 AI 를 부르지 않는다(문장은 매일 실행이 미리)
+                 + (f'<div class="px-margin pb-2">{morning.html(morning.build(self.con, [r[0] for r in rows], date.today(), uid))}</div>' if rows else "")
                  # 전체 / 국내 / 미국 — 스위치가 아니라 보기 거르기 (노트·메일은 늘 둘 다, docs/stage3-us.md)
                  + ('<nav class="px-margin pb-1 flex gap-1.5" id="market-chips">' + "".join(
                      f'<button type="button" data-m="{m}" class="mchip px-3 py-1 rounded-full text-[12px] font-semibold border {"bg-primary text-on-primary border-primary" if m == "all" else "border-outline-variant/60 text-on-surface-variant"}">{label}</button>'

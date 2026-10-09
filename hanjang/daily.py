@@ -8,7 +8,7 @@ import sys
 import traceback
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, etf, gurus, holders, nps, llm, mail, notes, sources, us
+from hanjang import articles, backup, collect, db, etf, gurus, holders, morning, nps, llm, mail, notes, sources, us
 
 
 def src(con: sqlite3.Connection, rno: str | None) -> str:
@@ -61,6 +61,7 @@ def main(today: date) -> None:
     notes.main([], today, only_changed=not monday)
     etf.main(today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
     articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
+    print(f"아침 한 장 문장 {morning.prepare(db.connect(), today)}건")  # 코드 풀이가 없는 공시만 AI 한 문장 — 공시마다 한 번
     holders.main(today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
     gurus.main(today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
     nps.main(today)  # 국민연금 한국+미국 — 1년에 한 번 새 공시(공공데이터포털), 같은 날 13F

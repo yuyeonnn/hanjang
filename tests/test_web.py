@@ -871,3 +871,31 @@ def test_offsite_backup_is_create_only_and_skipped_without_bucket(tmp_path, monk
     assert backup.offsite(f, key).startswith("gs://b/hanjang-20261010-")
     assert sent["params"]["ifGenerationMatch"] == "0" and sent["headers"]["Authorization"] == "Bearer tok"  # 덮어쓰지 않는다
     assert gzip.decompress(sent["content"]) == b"db"
+
+
+def test_morning_card_on_home(monkeypatch):
+    from datetime import timedelta
+    from hanjang import llm, morning
+
+    app, con = _app()
+    today = date.today()
+    lo = morning.since(today).isoformat()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('042660', '한화오션', 'x', 1), ('128940', '한미약품', 'y', 1)")
+    con.execute("insert into holdings values (1, '042660', '2026-10-01'), (1, '128940', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '042660', ?, '유상증자결정', 'RIGHTS_ISSUE', 3, -1), ('2', '128940', ?, '투자판단관련주요경영사항 (에페 품목허가 승인)', 'OTHER', 2, 0)", (lo, lo))
+    con.execute("insert into events values ('042660', ?, 'EARNINGS', '실적 발표', '3')", ((today + timedelta(days=2)).isoformat(),))
+    con.commit()
+    asked = []
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: asked.append(a[2]) or a[3]({"sentence": "에페 주사제가 팔아도 된다는 품목허가를 받았다고 알렸어요."}))
+    assert morning.prepare(con, today) == 1 and len(asked) == 1  # 코드 풀이가 있는 유상증자는 AI 를 부르지 않는다
+    assert morning.prepare(con, today) == 0 and len(asked) == 1  # 공시마다 한 번
+    body = call(app, "/", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "아침 한 장" in body and "한화오션</a>은 새 주식을 찍어 팔아" in body and "품목허가를 받았다고 알렸어요" in body
+    assert "실적 발표" in body and "유상증자 공시는 이렇게 읽어요" in body
+    try:
+        morning.check({"sentence": "매출이 30% 늘 거예요."}, "단일판매공급계약")
+        raise AssertionError
+    except ValueError:
+        pass
