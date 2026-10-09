@@ -746,3 +746,14 @@ def test_prebuilt_css_has_every_class():
     missing = sorted(t for t in toks - not_tailwind if sel(t) not in css)
     assert len(toks) > 300 and not missing, missing
     assert "cdn.tailwindcss.com" not in call(_app()[0], "/")[2]
+
+
+def test_learn_story_box():
+    from hanjang import learn
+
+    for slug, paras in learn.STORY.items():  # 이야기에도 권유·예측 말은 없다 · 핵심 한 줄 + 사례 1~2개
+        assert slug in learn.BY_SLUG and 2 <= len(paras) <= 3, slug
+        assert not any(notes.FORBIDDEN.search(x.replace("**", "")) for x in paras), slug
+    app, con = _app()
+    ck = _login(app)
+    assert "이야기로 보면" in call(app, "/learn/stock-bond", cookie=ck)[2]

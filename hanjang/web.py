@@ -538,8 +538,8 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
     """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
-    조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
+    겹치면 위아래로 비킨다. 조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -550,7 +550,9 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
     cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
-    slices, sides, a = [], {True: [], False: []}, -math.pi / 2  # 12시 방향에서 시계 방향으로
+    # 원을 돌려 큰 종목들이 3시 방향을 가운데로 모이게 — 작은 조각이 한 귀퉁이에 몰려 선이 쏟아지지 않게(국민연금, 사용자 10/10)
+    top = sum(p for k, p in parts if k != "기타")
+    slices, sides, a = [], {True: [], False: []}, -top / 100 * math.pi
     for (k, pct), col in zip(parts, cols):
         b = a + pct / 100 * 2 * math.pi
         x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
@@ -563,32 +565,41 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     def column(right: bool) -> str:
         # 휴대폰·태블릿은 이름 밑에 %(같은 크기), 컴퓨터 화면이면 한 줄 — 긴 이름은 칸 안에서 말줄임
         rows = "".join(
-            f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
+            f'<li class="absolute inset-x-0 flex items-start gap-1.5 {"" if right else "flex-row-reverse"}" style="top:calc({50 + 48 * math.sin(m):.1f}% - 10px)">'
             f'<span data-ang="{m:.4f}" class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
             f'<span class="min-w-0 flex flex-col lg:flex-row lg:gap-1.5 {"items-start" if right else "items-end"}">'
             f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
             f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
             for _, k, pct, col, m in sorted(sides[right]))  # fmt: skip
-        return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
+        return f'<ul class="relative flex-1 min-w-0 self-stretch">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div data-pie class="relative mt-4 flex items-center gap-6 lg:gap-10">' + column(False)
+            '<div data-pie class="relative mt-2 py-6 flex items-center gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 
 
-# 파이 조각 → 이름 옆 색 네모까지 곧은 선 하나 (조각 가장자리에서 네모 앞까지, 꺾지 않고 점도 없이 — 사용자 10/10)
-PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
-var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
-var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
-box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
-var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,tx=right?q.left-o.left-4:q.right-o.left+4;
-out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>';});
-lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
+# 파이 이름 놓기 · 선 긋기. 이름(색 네모 가운데)을 조각 가장자리 높이에 두고, 겹치면 아래로 밀고, 넘치면 위로 당긴다(원 위아래 24px 여유).
+# 한쪽에 이름이 많아 원보다 높아지면 상자를 키운다(원은 가운데 그대로). 선은 조각 가장자리 → 색 네모 앞 — 거의 수평
+PIE_LINES = """<script>(function(){if(window.pieLines)return;
+function place(box){var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
+var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,H=o.height,need=0,out='';
+[true,false].forEach(function(right){var it=[].slice.call(box.querySelectorAll('[data-ang]')).filter(function(d){return (Math.cos(+d.dataset.ang)>=0)==right})
+.map(function(d){var li=d.closest('li'),a=+d.dataset.ang,off=d.offsetTop+d.offsetHeight/2,uo=li.parentNode.getBoundingClientRect().top-o.top;return {d:d,li:li,a:a,off:off,uo:uo,h:li.offsetHeight,t:cy+r*Math.sin(a)-off-uo}}).sort(function(x,y){return x.t-y.t});
+for(var i=1;i<it.length;i++)it[i].t=Math.max(it[i].t,it[i-1].t+it[i-1].h+6);
+var n=it.length;if(n){var uo=it[0].uo,over=it[n-1].t+it[n-1].h-(H-uo);if(over>0)it.forEach(function(x){x.t-=over});var under=-uo-it[0].t;if(under>0)it.forEach(function(x){x.t+=under});
+need=Math.max(need,it[n-1].t+it[n-1].h-it[0].t)}
+it.forEach(function(x){x.li.style.top=x.t+'px';var px=cx+r*Math.cos(x.a),py=cy+r*Math.sin(x.a),y=x.uo+x.t+x.off,q=x.d.getBoundingClientRect(),tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<line x1="'+px+'" y1="'+py+'" x2="'+tx+'" y2="'+y+'" stroke="#c0c8c4" stroke-width="1"/>'})});
+lay.innerHTML=out;return need>H+1?need:0}
+window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){box.style.minHeight='';var need=place(box);if(need){box.style.minHeight=need+'px';place(box)}})};
+addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
     """13F 회사 이름 — 우리 종목이면 한글 이름, 아니면 대문자 줄임말을 보기 좋게(「MAGNA INTL INC」→「Magna Intl Inc」)."""
+    if not ours and gurus.sector("", issuer) == "ETF(지수 펀드)":  # 「INVESCO EXCH TRADED FD TR II …」 → 「Invesco ETF」
+        return issuer.split()[0].title() + " ETF"
     return ours or (issuer.title() if issuer.isupper() else issuer)
 
 
@@ -2234,6 +2245,40 @@ class App:
                 '<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">국민연금·운용사 같은 기관이 5% 넘게 가진 회사들이에요. 공시로 알려진 것만 보여요.</p>'
                 f'<div class="flex flex-col divide-y divide-surface-container-high/80">{items}</div></section>')  # fmt: skip
 
+    def nps_portfolio(self) -> str:
+        """국민연금 주식 — 한국(국민연금 연간 공시 평가액)과 미국(같은 날 13F, 한국은행 환율로 원화)을 금액 큰 순 하나로. 파이도 그 비중."""
+        rows = self.con.execute(
+            "select p.market, p.name, p.ticker, p.won, s.name, s.homepage, exists(select 1 from notes n where n.ticker = p.ticker)"
+            " from nps_port p left join stocks s on s.ticker = p.ticker order by p.won desc").fetchall()  # fmt: skip
+        meta = self.con.execute("select asof, fx from nps_meta order by asof desc limit 1").fetchone()
+        if not rows or not meta:
+            return ""
+        total = sum(r[3] for r in rows)
+        n_kr = sum(r[0] == "KR" for r in rows)
+        won_kr = sum(r[3] for r in rows if r[0] == "KR")
+
+        def label(r):
+            mkt, name, _, _, kname, *_ = r
+            return name if mkt == "KR" else issuer_name(name, kname)
+
+        def line(i, r):
+            mkt, _, t, won, _, home, has_note = r
+            tag = ('<span class="ml-1.5 px-1.5 py-px rounded text-[10px] font-semibold align-middle '
+                   + ("bg-surface-container-high text-on-surface-variant\">한국" if mkt == "KR" else "bg-secondary-container text-on-secondary-container\">미국") + "</span>")
+            inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label(r), home, "w-9 h-9")}'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label(r))}{tag}</span>'
+                     f'<span class="text-[12px] text-on-surface-variant">비중 {won / total * 100:.1f}% · {e(sources.won_short(won))}</span></span>')  # fmt: skip
+            return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
+
+        return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">주식 포트폴리오 · 한국+미국</h2>'
+                f'<p class="mt-1 text-[12px] text-outline">{len(rows):,}종목 · {e(sources.won_short(total))} · {kdate(meta[0])} 기준 · 한국 {won_kr / total * 100:.0f}% · 미국 {100 - won_kr / total * 100:.0f}%</p>'
+                + pie([(label(r), r[3]) for r in rows])
+                + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:20], 1)) + "</div>"
+                + f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - 20:,}종목</p>'
+                + '<p class="mt-2 text-[11px] text-outline leading-relaxed">한국 주식은 국민연금이 공개한 종목별 평가액(공공데이터포털 「국민연금공단_국내주식 투자정보」), '
+                + f'미국 주식은 같은 날 미국 증권거래위원회(SEC)에 낸 보유 신고(13F)예요. 달러는 그날 한국은행 환율(1달러 {meta[1]:,.1f}원)로 바꿨어요. '
+                + f'한국 {n_kr:,}종목 · 미국 {len(rows) - n_kr:,}종목. 1년에 한 번 나오는 공시라 지금과 다를 수 있어요.</p></section>')  # fmt: skip
+
     def us_portfolio(self, key: str) -> str:
         """기관의 미국 주식 — 13F 로 보유 전체가 공개된다(국내 5% 보고와 달리). 파이 + 큰 10종목."""
         rows = self.con.execute(
@@ -2332,6 +2377,9 @@ class App:
         if key not in holders.BIG:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, _, intro = holders.BIG[key]
+        (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
+        (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
+        us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
         rows = self.con.execute(
             "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
             " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
@@ -2351,14 +2399,14 @@ class App:
 
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
                 f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳</span></div></header>'
+                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
                 f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
                 + bars([sector(x) for x in inds], [1] * len(inds), "곳", "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.")
+                + (self.nps_portfolio() or self.us_portfolio(key) if key == "nps" else self.us_portfolio(key))  # 국내 목록(수백 곳) 위에 — 맨 아래에 두면 아무도 못 본다(사용자 10/10)
                 + (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 늘리고 줄인 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                    + "".join(row(i, r) for i, r in enumerate(recent, 1)) + "</div></section>" if recent else "")
                 + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">지분이 큰 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                 + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
-                + self.us_portfolio(key)
                 + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
                 "지분율은 가장 최근 보고 기준이에요. 따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
@@ -2387,6 +2435,17 @@ class App:
     def marked(text: str) -> str:
         """「**핵심 말**」 → 진한 초록 굵은 글씨. 나머지는 그대로 이스케이프."""
         return re.sub(r"\*\*(.+?)\*\*", r'<strong class="font-semibold text-primary">\1</strong>', e(text))
+
+    def story(self, slug: str) -> str:
+        """「이야기로 보면」 — 실제로 있었던 사건·회사 사례 하나 (사용자 10/10)."""
+        paras = learn.STORY.get(slug)
+        if not paras:
+            return ""
+        # 상자가 아니라 노트처럼 소제목 + 본문 글씨로 — 첫 문단은 제목에 대한 답, 그다음 사례 (사용자 10/10)
+        return ('<h2 class="mt-space-xl mb-space-sm flex items-center gap-2 font-headline-md text-headline-md text-on-surface">'
+                '<span class="w-2 h-2 rounded-full bg-primary shrink-0"></span>이야기로 보면</h2>'
+                + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in paras)
+                + '<div class="mb-space-lg"></div>')  # fmt: skip
 
     @staticmethod
     def related(slug: str) -> str:
@@ -2427,6 +2486,7 @@ class App:
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][1:])
+                     + self.story(slug)
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'

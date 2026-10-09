@@ -354,3 +354,15 @@ def test_fifth_review_fixes():
         "RevenuesNetOfInterestExpense": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-12-31", "val": 3613, "accn": "a", "filed": "2026-02-01", "form": "10-K"}]}}}}}
     assert us.financial_rows(facts, "1231")[0]["revenue"] == 619 and us.financial_rows(facts, "1231", True)[0]["revenue"] == 3613  # 금융회사는 총수익
     assert notes.PREDICT.search("이런 큰 계약은 앞으로 매출에 영향을 줄 수 있어요.") and notes.PREDICT.search("눈여겨볼 만해요")
+
+
+def test_sixth_review_fixes():
+    cat = "Caterpillar Q2 results. Profit per share of $4.72. Deliveries of machines rose."
+    assert us.classify_8k("2.02,9.01", cat)[3] == "실적 발표 (8-K 2.02)"  # 「profit per share」도 실적이다
+    assert us.classify_8k("2.02", "Q3 production and deliveries: 50,000 vehicles. Results will be announced on Oct 22.")[3].startswith("판매")
+    assert us.classify_8k("3.02,9.01")[1] == 2  # 3.02 는 헤드라인을 다투지 않는다
+    new = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [{"start": "2026-04-01", "end": "2026-06-30", "val": 1}]}}}}}
+    old = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-12-31", "val": 9}]}}}, "NetIncomeLoss": {}}}
+    assert len(us.merged_facts(new, old)["facts"]["us-gaap"]["Revenues"]["units"]["USD"]) == 2
+    smci = "Supermicro Provides Fourth Quarter Preliminary Business Update. Revenues are estimated to be near the low end. Orders to be delivered over future quarters."
+    assert us.classify_8k("2.02,9.01", smci)[3] == "예비 실적 알림 (8-K 2.02)"
