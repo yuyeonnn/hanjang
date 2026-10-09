@@ -28,7 +28,7 @@ def test_facts_match_sample_note():
     assert fs["F1"] == "2025년 매출 333.6조원(전년보다 +10.9%)"
     assert fs["F2"] == "2025년 영업이익 43.6조원(전년보다 +33.2%)"
     assert "부채비율 29.9%" in fs["F3"] and "ROE 10.4%" in fs["F4"]
-    assert fs["D1"].startswith("8월 21일 자사주 매입 공시") and "반가운" in fs["D1"]
+    assert fs["D1"].startswith("8월 21일 자사주 매입 공시") and "반가운" not in fs["D1"]  # 좋다·나쁘다 꼬리표는 사실 문장에 넣지 않는다 (tone 은 따로)
 
 
 def test_won_units():
@@ -564,3 +564,15 @@ def test_margin_power_is_decided_by_code():
 def test_per_100_won_shows_decimal_when_rounding_hides_the_change():
     r = notes.relation(1000, 1000, 44, 36)
     assert (r["백원당"], r["전년백원당"], r["힘"]) == ("4.4원", "3.6원", "더 세졌")
+
+
+def test_sector_context_finance_and_industry_median():
+    con = _con()
+    con.execute("update stocks set induty_code = '6612' where ticker = '005930'")  # 증권사라고 치면
+    assert notes.industry_mid(con, "005930") == {"금융": True}
+    fs = {f["id"]: f for f in notes.facts(con, "005930", date(2026, 10, 7))}
+    assert "F3" not in fs  # 금융회사는 부채비율을 싣지 않는다
+    assert notes.is_finance("6612") and not notes.is_finance("64992") and not notes.is_finance("2611")
+    assert notes.when(date(2026, 10, 5), date(2026, 10, 9)) == "이번 주" and notes.when(date(2026, 7, 23), date(2026, 10, 9)) == "7월"
+    with pytest.raises(ValueError):
+        notes.check_sentence({"text": "주식을 없애기로 해 주주에게 반가운 쪽이에요.", "refs": ["D1"]}, list(fs.values()))

@@ -64,7 +64,7 @@ TITLE_PLAIN = (
     (r"(?<!무)유상증자결정", "새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
     (r"발행가액|발행가격", "새로 찍는 주식을 한 주에 얼마에 팔지 값이 정해졌어요"),
     (r"증권신고서", "주식·채권을 팔기 전에 금융감독원에 내는 신고서예요 — 얼마를 왜 모으는지 적혀 있어요"),
-    (r"결산실적공시예고", "1년 실적을 언제 발표할지 미리 알렸어요"),
+    (r"결산실적공시예고", "1년치 결산 실적을 발표할 날짜를 미리 알렸어요 — 아직 숫자는 없어요"),
     (r"기업설명회", "투자자에게 회사를 설명하는 자리(IR)를 연다고 알렸어요"),
     (r"발행결과", "앞서 정한 증자·채권 발행을 실제로 마쳤다는 결과 보고예요"),
     (r"무상증자결정", "주주에게 새 주식을 공짜로 나눠 주기로 했어요"),
@@ -73,7 +73,8 @@ TITLE_PLAIN = (
     (r"교환사채권발행결정", "회사가 가진 다른 주식으로 바꿔 줄 수 있는 채권을 팔아 돈을 빌리기로 했어요"),
     (r"배당결정", "번 돈의 일부를 주주에게 배당으로 나눠 주기로 했어요"),
     (r"주주명부폐쇄|기준일설정", "배당 등을 받을 주주를 정하는 기준일을 알렸어요"),
-    (r"영업\(잠정\)실적|매출액또는손익구조", "최근 실적(매출·이익)을 미리 알렸어요"),
+    (r"영업\(잠정\)실적", "회계 감사 전의 실적 숫자(잠정 실적: 매출·영업이익)를 먼저 공개했어요"),
+    (r"매출액또는손익구조", "매출이나 이익이 전년보다 크게(30% 넘게) 달라졌다고 알렸어요"),
     (r"단일판매공급계약", "큰 판매·공급 계약을 맺었어요"),
     (r"소송등의제기", "회사가 소송을 걸었거나 소송을 당했어요"),
     (r"소송등의판결", "진행 중이던 소송에 판결이 나왔어요"),
@@ -131,7 +132,7 @@ FORBIDDEN = re.compile(r"매수|매도|(?<![가-힣])(사라|사세요|팔아라
 DEBT_GOOD, DEBT_BAD = 100, 200  # 부채비율 %
 ROE_GOOD = 10  # %. 0 미만(적자)은 걱정
 TONE_RULE = ("좋게 본 것·걱정되는 것은 코드가 정한 기준으로 나눴어요 — 매출·영업이익이 늘었나 줄었나, 흑자·적자 전환, "
-             f"부채비율 {DEBT_GOOD}% 미만·{DEBT_BAD}% 초과, ROE {ROE_GOOD}% 이상·0% 미만, "
+             f"부채비율 {DEBT_GOOD}% 미만·{DEBT_BAD}% 초과(같은 업종 중간값의 1.5배도 넘을 때만 · 금융회사는 보지 않음), ROE {ROE_GOOD}% 이상·0% 미만, "
              "공시 종류(자사주 매입·대형 계약 / 증자·전환사채·소송·거래정지).")
 # 예측 말투 — 지난 사실을 「~할 전망」으로 쓰면 틀린 말이고 예측이 된다 (불변식 1). 기사(N)만 근거인 문장은
 # 「기사는 ~라고 써요」로 남의 전망을 옮기는 자리라 예외
@@ -143,8 +144,9 @@ SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
 # 읽기 검사 (사용자 10/9: 깨진 이음·되풀이·어려운 말이 하나라도 있으면 안 된다) — 걸리면 다시 쓰게 한다
 HARD = re.compile(r"유상증자|신주|발행가액|공정공시|기재정정|단일판매|전환사채|자기주식|잠정실적|결산실적")  # 괄호 밖에서 — 쉬운 말로 바꿔 쓴다
 STEM = re.compile(r"(늘었|줄었|많았|적었|높았|낮았|돌아섰|이어졌|늘렸|줄였)(?![어고는지으다던기을거네죠습음])")  # 줄기 뒤에 끝이 없음
+JUDGE = re.compile(r"반가운|반갑|호재|악재|좋은 소식|나쁜 소식|긍정적인 신호|부정적인 신호")
 REPEAT = re.compile(r"([가-힣][가-힣 ]{6,}[가-힣])[^.]*?\1")  # 한 문장 안에서 같은 말(8자 넘게)이 두 번
-TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
+TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "최근 소식", "임원·큰손은 어떻게 움직였나요?")  # 「이번 주」라 하면서 석 달 전 공시가 섞였다 (사용자 10/9)  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
 
@@ -527,6 +529,45 @@ def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
              "slots": {"연도": f"{seg['year']}년", "첫부문": rows[0]["name"]}}]  # fmt: skip
 
 
+AD = re.compile(r"이벤트|캠페인|경품|사은|프로모션|청약 (접수|개시|진행|실시)|청약을 (받|연)|출시 기념|가입 고객|고객 대상|특판")
+FINANCE_CODES = ("641", "642", "649", "65", "66")  # 은행·신탁·여신·보험·증권 — 고객 돈이 빚으로 잡혀 부채비율이 원래 높다. 지주회사(64992)는 아니다
+
+
+def is_finance(code: str | None) -> bool:
+    return bool(code) and code.startswith(FINANCE_CODES) and not code.startswith("64992")
+
+
+def industry_mid(con: sqlite3.Connection, ticker: str) -> dict:
+    """같은 업종(우리 종목 안) 중간값 — 100원당 남긴 돈 · 부채비율. 셋 이상일 때만. 금융회사면 {"금융": True}.
+    업종마다 원래 빚이 많거나(조선 선수금·항공 리스) 조금 남기는(유통·상사) 구조가 있어, 절대 기준만으로 판단하지 않게 (사용자 10/9)."""
+    me = con.execute("select induty_code from stocks where ticker = ?", (ticker,)).fetchone()
+    code = me and me[0]
+    rows = con.execute(
+        "select s.ticker, s.induty_code, f.revenue, f.operating_income, f.equity, f.liabilities from stocks s join financials f"
+        " on f.ticker = s.ticker and f.fiscal_year = (select max(fiscal_year) from financials g where g.ticker = s.ticker) where s.active = 1").fetchall()  # fmt: skip
+    mine = next((r for r in rows if r[0] == ticker), None)
+    if is_finance(code) or (mine and mine[2] is None):
+        return {"금융": True}
+    label = sources.industry_label(code)
+    peers = [r for r in rows if label and sources.industry_label(r[1]) == label and not is_finance(r[1]) and r[2]]
+    out = {}
+    margins = [r[3] / r[2] * 100 for r in peers if r[2] > 0 and r[3] is not None and abs(r[3] / r[2]) <= 1]
+    debts = [r[5] / r[4] * 100 for r in peers if r[4] and r[4] > 0 and r[5] is not None]
+    if len(margins) >= 3:
+        out["백원당"] = statistics.median(margins)
+    if len(debts) >= 3:
+        out["부채비율"] = statistics.median(debts)
+    if out:
+        out |= {"업종": label, "곳수": len(peers)}
+    return out
+
+
+def when(d: date, today: date) -> str:
+    """공시가 얼마나 지난 일인지 — 「최근 소식」에서 이번 주 일과 지난 일을 나눠 말하게 (사용자 10/9: 「이번 주」라며 7월 공시)."""
+    days = (today - d).days
+    return "이번 주" if days <= 7 else "지난주" if days <= 14 else f"{d.month}월"
+
+
 def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
@@ -552,17 +593,28 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
                         "slots": slots})  # fmt: skip
         # 은행·보험은 예금·보험금이 빚으로 잡혀 부채비율이 수백~천 % — 초보자에게 오해만 준다.
         # 금융회사는 DART 에 「매출액」이 없다 → 그걸로 가린다
-        if li is not None and eq and eq > 0 and rev is not None:
-            r = f"{li / eq * 100:.1f}%"
-            out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})", "url": url,
-                        "tone": 1 if li / eq * 100 < DEBT_GOOD else -1 if li / eq * 100 > DEBT_BAD else 0,
-                        "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}})  # fmt: skip
+        mid = industry_mid(con, ticker)
+        if li is not None and eq and eq > 0 and rev is not None and not mid.get("금융"):
+            d = li / eq * 100
+            r = f"{d:.1f}%"
+            usual = mid.get("부채비율")  # 같은 업종 중간값 — 조선(선수금)·항공(리스)·전력처럼 원래 높은 업종이 있다
+            bad = d > DEBT_BAD and (usual is None or d > usual * 1.5)
+            out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
+                        + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
+                        "tone": 1 if d < DEBT_GOOD else -1 if bad else 0,
+                        "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
+                        | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})})  # fmt: skip
         if ni is not None and eq and eq > 0:
             r = f"{ni / eq * 100:.1f}%"
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
                         "tone": 1 if ni / eq * 100 >= ROE_GOOD else -1 if ni < 0 else 0,
                         "slots": {"연도": yy, "비율": r, "순이익": won(ni), "자기돈": won(eq)}})  # fmt: skip
-        out += story_facts(fin, url, yy)
+        story = story_facts(fin, url, yy)
+        for f in story:  # 100원당 남긴 돈 — 같은 업종 중간값도 (유통·상사·정유는 원래 몇 원, 소프트웨어는 수십 원)
+            if f["id"] == "F5" and mid.get("백원당") is not None:
+                f["slots"] |= {"업종보통": f"{mid['백원당']:.0f}원", "업종": mid["업종"]}
+                f["text"] += f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {mid['백원당']:.0f}원"
+        out += story
     biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
     if biz and (segs := json.loads(biz[0]).get("segments")):  # 무엇으로 버나 — 사업보고서의 부문별 매출 비중 (큰 것 둘)
         top = sorted(segs, key=lambda x: -float(x["share"].rstrip("%") or 0))[:2]
@@ -576,17 +628,18 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
     for k, (rno, d, title, code, dr) in enumerate(evs, 1):  # 중요한 것부터(D1 이 가장 중요), 같으면 최근 것부터
         d = date.fromisoformat(d)
-        tone = {1: " — 주주에게 반가운 쪽으로 분류", -1: " — 주주에게 걸리는 쪽으로 분류"}.get(dr, "")
+        tone = ""
         day = f"{d.month}월 {d.day}일"
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": DART.format(rno),
-                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"} | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
+                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」", "시기": when(d, today)}
+                    | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
                        " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터
                        (ticker, (today - timedelta(days=NEWS_DAYS)).isoformat())).fetchall()  # fmt: skip
     # 목표주가·매수 같은 말이 든 소식은 싣지 않는다 — 옮기기만 해도 권유가 된다 (불변식 1)
-    news = [n for n in news if not FORBIDDEN.search(n[3] + " " + (n[4] or ""))]
+    news = [n for n in news if not FORBIDDEN.search(n[3] + " " + (n[4] or "")) and not AD.search(n[3])]
     for k, (url, d, press, title, summary) in enumerate(news, 1):
         d = date.fromisoformat(d)
         day = f"{d.month}월 {d.day}일"
@@ -824,6 +877,8 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
     outside = re.sub(r"\([^()]*\)|「[^」]*」", "", text)
     if not all(r.startswith("N") for r in refs) and HARD.search(outside):
         raise ValueError(f"어려운 말: {text!r}")
+    if JUDGE.search(outside):
+        raise ValueError(f"좋다·나쁘다를 단정: {text!r}")
     if STEM.search(outside):
         raise ValueError(f"끝이 잘린 말: {text!r}")
     if any(REPEAT.search(x) for x in re.split(r"(?<=[.?!])\s", outside)):
