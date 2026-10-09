@@ -2337,6 +2337,8 @@ class App:
         if key not in holders.BIG:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, _, intro = holders.BIG[key]
+        (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
+        us_n = f" · 미국 주식 {n_us:,}종목" if n_us else ""
         rows = self.con.execute(
             "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
             " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
@@ -2356,14 +2358,14 @@ class App:
 
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
                 f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳</span></div></header>'
+                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
                 f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
                 + bars([sector(x) for x in inds], [1] * len(inds), "곳", "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.")
+                + self.us_portfolio(key)  # 국내 목록(수백 곳) 위에 — 맨 아래에 두면 아무도 못 본다(사용자 10/10)
                 + (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 늘리고 줄인 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                    + "".join(row(i, r) for i, r in enumerate(recent, 1)) + "</div></section>" if recent else "")
                 + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">지분이 큰 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                 + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
-                + self.us_portfolio(key)
                 + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
                 "지분율은 가장 최근 보고 기준이에요. 따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
