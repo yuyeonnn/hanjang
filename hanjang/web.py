@@ -548,7 +548,9 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
     cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
-    slices, sides, a = [], {True: [], False: []}, -math.pi / 2  # 12시 방향에서 시계 방향으로
+    # 원을 돌려 큰 종목들이 3시 방향을 가운데로 모이게 — 작은 조각이 한 귀퉁이에 몰려 선이 쏟아지지 않게(국민연금, 사용자 10/10)
+    top = sum(p for k, p in parts if k != "기타")
+    slices, sides, a = [], {True: [], False: []}, -top / 100 * math.pi
     for (k, pct), col in zip(parts, cols):
         b = a + pct / 100 * 2 * math.pi
         x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
