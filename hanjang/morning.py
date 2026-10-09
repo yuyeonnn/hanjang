@@ -209,7 +209,8 @@ def text(m: dict) -> str:
 
 def html(m: dict) -> str:
     """홈 맨 위에 놓을 카드 한 장 — 회사마다 한 문단(이름에 원문 링크) · 이번 주는 날짜 타임라인 · 꿀팁."""
-    h3 = '<h3 class="font-label-regular text-label-regular text-primary font-semibold">{}</h3>'
+    # 소제목 — 노트의 「무엇으로 돈을 버나요?」처럼 초록 점 + 굵은 글씨, 크기는 본문과 비슷하게 (사용자 10/10)
+    h3 = '<div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span><h3 class="text-[16px] font-bold text-on-surface">{}</h3></div>'
     link = 'class="text-on-surface font-semibold underline underline-offset-2"'
     paras = "".join(f'<p class="mt-2 font-body-reading text-body-reading text-on-surface leading-relaxed">'
                     + e(x["text"]).replace(e(x["name"]), f'<a {link} href="{e(x["url"])}">{e(x["name"])}</a>', 1) + "</p>" for x in m["news"])  # fmt: skip
@@ -234,7 +235,8 @@ def html(m: dict) -> str:
     ipo = f'<a class="mt-1 block font-body-compact text-body-compact text-on-surface-variant hover:underline" href="/calendar">{e(m["ipo"])} →</a>' if m["ipo"] else ""
     week = (f'<div class="mt-space-md">{h3.format("이번 주")}<ul class="mt-1">{"".join(rows)}</ul>{ipo}</div>') if rows or ipo else ""
     head, body, more = m["tip"]
-    tip = (f'<div class="mt-space-md">{h3.format("알아 두면 좋아요 · " + e(head))}'
+    tip = (f'<div class="mt-space-md">{h3.format("알아 두면 좋아요")}'
+           f'<p class="mt-2 text-[15px] font-semibold text-on-surface">{e(head)}</p>'
            f'<p class="mt-1 font-body-reading text-body-reading text-on-surface leading-relaxed">{e(body)}</p>'
            + (f'<a class="mt-1 inline-block font-label-regular text-label-regular text-primary" href="{e(more[1])}">{e(more[0])} →</a>' if more else "") + "</div>")  # fmt: skip
     return (f'<section class="mt-space-lg rounded-xl bg-surface-container-low px-margin py-space-md">'
