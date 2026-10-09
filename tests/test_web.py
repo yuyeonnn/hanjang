@@ -710,3 +710,14 @@ def test_learn_related_tips():
     ck = _login(app)
     body = call(app, "/learn/dividend", cookie=ck)[2]
     assert "함께 읽으면 좋은 팁" in body and 'href="/learn/disclosure"' in body
+
+
+def test_learn_story_box():
+    from hanjang import learn
+
+    for slug, paras in learn.STORY.items():  # 이야기에도 권유·예측 말은 없다 · 핵심 한 줄 + 사례 1~2개
+        assert slug in learn.BY_SLUG and 2 <= len(paras) <= 3, slug
+        assert not any(notes.FORBIDDEN.search(x.replace("**", "")) for x in paras), slug
+    app, con = _app()
+    ck = _login(app)
+    assert "이야기로 보면" in call(app, "/learn/stock-bond", cookie=ck)[2]

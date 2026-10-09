@@ -2327,6 +2327,17 @@ class App:
         """「**핵심 말**」 → 진한 초록 굵은 글씨. 나머지는 그대로 이스케이프."""
         return re.sub(r"\*\*(.+?)\*\*", r'<strong class="font-semibold text-primary">\1</strong>', e(text))
 
+    def story(self, slug: str) -> str:
+        """「이야기로 보면」 — 실제로 있었던 사건·회사 사례 하나 (사용자 10/10)."""
+        paras = learn.STORY.get(slug)
+        if not paras:
+            return ""
+        # 상자가 아니라 노트처럼 소제목 + 본문 글씨로 — 첫 문단은 제목에 대한 답, 그다음 사례 (사용자 10/10)
+        return ('<h2 class="mt-space-xl mb-space-sm flex items-center gap-2 font-headline-md text-headline-md text-on-surface">'
+                '<span class="w-2 h-2 rounded-full bg-primary shrink-0"></span>이야기로 보면</h2>'
+                + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in paras)
+                + '<div class="mb-space-lg"></div>')  # fmt: skip
+
     @staticmethod
     def related(slug: str) -> str:
         """글 아래 「함께 읽으면 좋은 팁」 — 이어 읽을 글 세 편 (사용자 10/10)."""
@@ -2366,6 +2377,7 @@ class App:
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][1:])
+                     + self.story(slug)
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
