@@ -536,8 +536,58 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
+SPREAD = ("#154539", "#22503f", "#2f5b4a", "#3d6656", "#4b7262", "#5a7e6f", "#6a8b7c", "#7b9889", "#8ca597", "#9eb3a6")  # 진한 초록에서 열 걸음
+
+
+def squarify(vals: list[float], x: float, y: float, w: float, h: float) -> list[tuple[float, float, float, float]]:
+    """트리맵 칸 나누기(squarified) — 큰 순 값들을 w×h 안에 정사각형에 가깝게. [(x, y, w, h)] 같은 순서."""
+    total, out, i = sum(vals), [], 0
+    area = [v / total * w * h for v in vals]
+
+    def worst(row, side):
+        s_ = sum(row)
+        return max(side * side * max(row) / (s_ * s_), s_ * s_ / (side * side * min(row)))
+
+    while i < len(area):
+        side, row = min(w, h), [area[i]]
+        while i + len(row) < len(area) and worst(row + [area[i + len(row)]], side) <= worst(row, side):
+            row.append(area[i + len(row)])
+        s_ = sum(row)
+        if w >= h:  # 왼쪽에 세로 한 줄
+            cw, yy = s_ / h, y
+            for r in row:
+                out.append((x, yy, cw, r / cw))
+                yy += r / cw
+            x, w = x + cw, w - cw
+        else:  # 위에 가로 한 줄
+            ch, xx = s_ / w, x
+            for r in row:
+                out.append((xx, y, r / ch, ch))
+                xx += r / ch
+            y, h = y + ch, h - ch
+        i += len(row)
+    return out
+
+
+def treemap(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 10) -> str:
+    """넓게 나눠 가진 포트폴리오 — 상위 n 종목만 트리맵(네모 크기 = 금액, 기타는 그리지 않는다 · 사용자 10/10).
+    칸 위치는 % 로 — 화면 너비가 바뀌어도 그대로. 좁은 칸은 이름을 빼고 마우스를 올리면 보인다."""
+    total = sum(v for _, v in items)
+    top = items[:n]
+    boxes = squarify([v for _, v in top], 0, 0, 100, 62)  # 100×62 — 그림 비율(가로:세로)
+    cells = "".join(
+        f'<div title="{e(k)} {v / total * 100:.1f}%" class="absolute p-1.5 lg:p-2 overflow-hidden border-2 border-surface rounded-md" '
+        f'style="left:{x:.3f}%;top:{y / 62 * 100:.3f}%;width:{w:.3f}%;height:{h / 62 * 100:.3f}%;background:{SPREAD[i]};color:{"#fff" if i < 6 else "#0f2e25"}">'
+        + (f'<div class="text-[12px] lg:text-[14px] font-semibold leading-tight truncate">{e(k)}</div><div class="text-[11px] lg:text-[13px] tabular-nums opacity-90">{v / total * 100:.1f}%</div>'
+           if w > 13 and h > 9 else "") + "</div>"
+        for i, ((k, v), (x, y, w, h)) in enumerate(zip(top, boxes)))  # fmt: skip
+    return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
+            f'<p class="mt-1 text-[12px] text-outline">상위 {len(top)}종목만 그렸어요 · 전체의 {sum(v for _, v in top) / total * 100:.0f}%</p>'
+            f'<div class="relative mt-3 w-full" style="aspect-ratio:100/62">{cells}</div></section>')  # fmt: skip
+
+
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
+    """포트폴리오 파이 — 금액이 큰 n 종목만(기타 없이). 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
     오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
     겹치면 위아래로 비킨다. 조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
@@ -546,17 +596,16 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     total = sum(v for _, v in items)
     if not items or total <= 0:
         return ""
+    if sum(v for _, v in items[:n]) / total < 0.5:  # 큰 다섯이 절반도 안 되면 넓게 나눈 곳 — 트리맵 상위 10(국민연금, 사용자 10/10)
+        return treemap(items, title)
+    # 기타는 그리지 않는다 — 상위 n 종목끼리 원을 나누고, 글자는 전체 중 비중 그대로(사용자 10/10)
     parts = [(k, v / total * 100) for k, v in items[:n]]
-    rest = 100 - sum(p for _, p in parts)
-    parts += [("기타", rest)] if rest >= 0.05 else []
-    cols = DONUT[: len(parts) - 1] + DONUT[-1:] if parts[-1][0] == "기타" else DONUT
-    # 원을 돌려 큰 종목들이 3시 방향을 가운데로 모이게 — 작은 조각이 한 귀퉁이에 몰려 선이 쏟아지지 않게(국민연금, 사용자 10/10)
-    top = sum(p for k, p in parts if k != "기타")
-    slices, sides, a = [], {True: [], False: []}, -top / 100 * math.pi
+    cols, shown = DONUT, sum(p for _, p in parts)
+    slices, sides, a = [], {True: [], False: []}, -math.pi * parts[0][1] / shown  # 가장 큰 조각을 3시 방향 가운데로
     for (k, pct), col in zip(parts, cols):
-        b = a + pct / 100 * 2 * math.pi
+        b = a + pct / shown * 2 * math.pi
         x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
-        slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= 99.99 else
+        slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= shown - 0.01 else
                       f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>')  # fmt: skip
         m = (a + b) / 2
         sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col, m))
@@ -574,7 +623,8 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
         return f'<ul class="relative flex-1 min-w-0 self-stretch">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div data-pie class="relative mt-2 py-6 flex items-center gap-6 lg:gap-10">' + column(False)
+            + (f'<p class="mt-1 text-[12px] text-outline">상위 {len(parts)}종목만 그렸어요 · 전체의 {shown:.0f}%</p>' if shown < 99.95 else "")
+            + '<div data-pie class="relative mt-2 py-6 flex items-start gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 
@@ -2343,7 +2393,6 @@ class App:
             return ""
         total = sum(r[3] for r in rows)
         n_kr = sum(r[0] == "KR" for r in rows)
-        won_kr = sum(r[3] for r in rows if r[0] == "KR")
 
         def label(r):
             mkt, name, _, _, kname, *_ = r
@@ -2359,7 +2408,6 @@ class App:
             return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}</a>' if has_note else f'<div class="py-3 flex items-center gap-3">{inner}</div>'
 
         return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-on-surface">주식 포트폴리오 · 한국+미국</h2>'
-                f'<p class="mt-1 text-[12px] text-outline">{len(rows):,}종목 · {e(sources.won_short(total))} · {kdate(meta[0])} 기준 · 한국 {won_kr / total * 100:.0f}% · 미국 {100 - won_kr / total * 100:.0f}%</p>'
                 + pie([(label(r), r[3]) for r in rows])
                 + '<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/70">' + "".join(line(i, r) for i, r in enumerate(rows[:20], 1)) + "</div>"
                 + f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - 20:,}종목</p>'
