@@ -806,6 +806,44 @@ def metrics(fins: list[tuple]) -> str:
             f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">{"".join(cells)}</div></div>')  # fmt: skip
 
 
+FILLED = "font-variation-settings:'FILL' 1,'wght' 600"  # 꽉 찬 검은 그림 — 톱니바퀴 같은 인포그래픽 모양
+
+
+def figure(f: dict | None) -> str:
+    """읽기 팁 인포그래픽 — 상자·흰 바탕 없이 큰 검은 그림과 글. flow 는 휴대폰에서 세로·넓은 화면에서 가로로 (사용자 10/10)."""
+    if not f:
+        return ""
+    head = (f'<figure class="my-space-xl"><figcaption class="mb-5 text-[13px] font-semibold tracking-wide text-outline">{e(f["title"])}</figcaption>')
+    icon = lambda name, size: f'<span class="material-symbols-outlined {size} text-on-surface leading-none" style="{FILLED}" aria-hidden="true">{e(name)}</span>'
+    if f["type"] == "flow":
+        n = len(f["steps"])
+        parts = []
+        for k, (ic, t, d) in enumerate(f["steps"]):
+            parts.append(f'<li class="flex items-start gap-4 lg:flex-1 lg:flex-col lg:items-center lg:text-center lg:gap-3">{icon(ic, "text-[44px] lg:text-[56px]")}'
+                         f'<span class="flex flex-col pt-1 lg:pt-0"><b class="text-[15px] leading-[22px] text-on-surface"><span class="text-primary mr-1">{k + 1}</span>{e(t)}</b>'
+                         + (f'<span class="text-[13px] leading-[19px] text-on-surface-variant mt-0.5">{e(d)}</span>' if d else "") + "</span></li>")
+            if k < n - 1:
+                parts.append('<li aria-hidden="true" class="pl-3 lg:pl-0 lg:pt-4 text-outline-variant"><span class="material-symbols-outlined text-[22px] lg:hidden">arrow_downward</span>'
+                             '<span class="material-symbols-outlined text-[26px] hidden lg:inline">arrow_forward</span></li>')
+        return head + f'<ol class="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3">{"".join(parts)}</ol></figure>'
+    if f["type"] == "compare":
+        (i1, c1), (i2, c2) = f["cols"]
+        top = ('<div class="grid grid-cols-[28%_1fr_1fr] lg:grid-cols-[22%_1fr_1fr] gap-3 items-end pb-3"><span></span>'
+               + "".join(f'<span class="flex flex-col items-start gap-1.5">{icon(ic, "text-[40px] lg:text-[52px]")}<b class="text-[15px] text-on-surface">{e(c)}</b></span>'
+                         for ic, c in ((i1, c1), (i2, c2))) + "</div>")  # fmt: skip
+        rows = "".join(f'<div class="grid grid-cols-[28%_1fr_1fr] lg:grid-cols-[22%_1fr_1fr] gap-3 py-2.5 text-[14px] leading-[21px]">'
+                       f'<span class="text-on-surface-variant">{e(k)}</span><span class="text-on-surface">{e(x)}</span><span class="text-on-surface">{e(y)}</span></div>'
+                       for k, x, y in f["rows"])  # fmt: skip
+        return head + top + f'<div class="divide-y divide-surface-container-high">{rows}</div></figure>'
+    if f["type"] == "equation":
+        rows = "".join(f'<div class="flex items-baseline flex-wrap gap-x-2 gap-y-1 py-1"><span class="text-[15px] text-on-surface">{e(x)}</span><span class="text-[18px] text-outline">{e(op)}</span>'
+                       f'<span class="text-[15px] text-on-surface">{e(y)}</span><span class="text-[18px] text-outline">=</span><b class="text-[20px] text-primary">{e(z)}</b></div>'
+                       for x, op, y, z in f["rows"])  # fmt: skip
+        return (head + f'<div class="flex items-center gap-5">{icon("calculate", "text-[56px] lg:text-[72px]")}'
+                f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-1 flex-1">{rows}</div></div></figure>')
+    return ""
+
+
 def chapter(title: str, body: str, extra: str = "") -> str:
     return ('<article class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
@@ -2436,16 +2474,11 @@ class App:
         """「**핵심 말**」 → 진한 초록 굵은 글씨. 나머지는 그대로 이스케이프."""
         return re.sub(r"\*\*(.+?)\*\*", r'<strong class="font-semibold text-primary">\1</strong>', e(text))
 
-    def story(self, slug: str) -> str:
-        """「이야기로 보면」 — 실제로 있었던 사건·회사 사례 하나 (사용자 10/10)."""
-        paras = learn.STORY.get(slug)
-        if not paras:
-            return ""
-        # 상자가 아니라 노트처럼 소제목 + 본문 글씨로 — 첫 문단은 제목에 대한 답, 그다음 사례 (사용자 10/10)
-        return ('<h2 class="mt-space-xl mb-space-sm flex items-center gap-2 font-headline-md text-headline-md text-on-surface">'
-                '<span class="w-2 h-2 rounded-full bg-primary shrink-0"></span>이야기로 보면</h2>'
-                + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in paras)
-                + '<div class="mb-space-lg"></div>')  # fmt: skip
+    def flow(self, paras: list[str]) -> str:
+        """읽기 팁 본문 — 짧은 문단을 둘씩 묶어 한 덩어리로, 줄 간격은 노트보다 조금 촘촘하게.
+        한두 문장짜리 문단이 하나씩 떨어져 보여 글이 끊겨 읽히던 것 (사용자 10/10)."""
+        groups = [" ".join(paras[k:k + 2]) for k in range(0, len(paras), 2)]
+        return "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-[1.8] mb-5">{self.marked(g)}</p>' for g in groups)
 
     @staticmethod
     def related(slug: str) -> str:
@@ -2482,11 +2515,11 @@ class App:
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
                      f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
-                     + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
+                     + self.flow(a["body"][:1])
+                     + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
-                     + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][1:])
-                     + self.story(slug)
+                     + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
