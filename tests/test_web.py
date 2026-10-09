@@ -669,3 +669,24 @@ def test_regram_cards_note_like_my_stock_and_article_like_feed_row():
     call(app, "/regram", "POST", f"k=article&r={aid}&w=", ck)
     me = call(app, "/me", cookie=ck)[2]
     assert "자사주 산다" in me and "max-w-[180px]" in me and "lg:w-full" not in me.split("내 리그램")[1]
+
+
+def test_follow_notice_and_lists():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
+    con.commit()
+    a, b, aid, bid = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}", 1, 2
+    assert "알림 1개" not in call(app, "/", cookie=a)[2]
+    call(app, "/follow", "POST", f"u={aid}&back=" + quote(f"/f/{aid}?tab=followers"), b)
+    assert "알림 1개" in call(app, "/", cookie=a)[2]  # 위쪽 알림 단추에 빨간 숫자
+    n = call(app, "/me/notices", cookie=a)[2]
+    assert "나나" in n and "회원님을 팔로우하기 시작했어요" in n and "팔로우</button>" in n  # 맞팔로우 단추
+    assert "알림 1개" not in call(app, "/", cookie=a)[2]  # 열어 보면 사라진다
+    f = call(app, f"/f/{aid}?tab=followers", cookie=a)[2]
+    assert "팔로워 1명" in f and "팔로잉 0명" in f and "나나" in f
+    assert "가가" in call(app, f"/f/{bid}?tab=following", cookie=a)[2]
+
+
+def test_industry_chip_icon():
+    assert "settings" in web.industry_chip("29") and ">기계<" in web.industry_chip("29")
+    assert web.industry_chip(None) == ""

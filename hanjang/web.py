@@ -72,7 +72,7 @@ def check_login(token: str, secret: str, now: float) -> str | None:
 # --- 시안 공통 머리 (Stitch 시안의 <head> 그대로) ---
 
 HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-container": "#2e6e4e", "secondary-fixed": "#aef1c9", "outline-variant": "#c0c8c4", "tertiary": "#741f11", "on-background": "#1b1b1d", "surface-container-low": "#f6f3f5", "on-tertiary-fixed-variant": "#802919", "surface-container-lowest": "#ffffff", "surface-container": "#f0edef", "surface-dim": "#dcd9dc", "outline": "#717975", "primary-fixed": "#bceddc", "primary-container": "#2f5d50", "error": "#ba1a1a", "error-container": "#ffdad6", "on-error": "#ffffff", "tertiary-fixed": "#ffdad3", "surface-bright": "#fcf8fb", "surface": "#fcf8fb", "on-primary-fixed-variant": "#204f42", "background": "#fcf8fb", "primary-fixed-dim": "#a0d1c0", "primary": "#154539", "surface-variant": "#e4e2e4", "on-secondary": "#ffffff", "on-primary-fixed": "#002019", "secondary-container": "#abeec6", "surface-tint": "#396759", "on-primary": "#ffffff", "surface-container-highest": "#e4e2e4", "tertiary-fixed-dim": "#ffb4a5", "on-tertiary": "#ffffff", "on-secondary-fixed-variant": "#095134", "on-tertiary-fixed": "#3f0400", "on-surface": "#1b1b1d", "inverse-primary": "#a0d1c0", "secondary": "#296a4a", "tertiary-container": "#933625", "inverse-on-surface": "#f3f0f2", "on-error-container": "#93000a", "on-secondary-fixed": "#002112", "on-surface-variant": "#404945", "inverse-surface": "#303032", "on-tertiary-container": "#ffb8aa", "on-primary-container": "#a3d4c3", "surface-container-high": "#eae7ea", "secondary-fixed-dim": "#93d5ae" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-md": "0.875rem", "margin": "1rem", "space-xs": "0.25rem", "space-xl": "2rem", "space-lg": "1.25rem", "gutter": "0.75rem", "space-sm": "0.5rem" }, "fontFamily": { "headline-lg": ["Newsreader"], "label-regular": ["Be Vietnam Pro"], "body-reading-strong": ["Be Vietnam Pro"], "label-micro": ["Be Vietnam Pro"], "headline-sm": ["Be Vietnam Pro"], "citation-ref": ["Be Vietnam Pro"], "body-reading": ["Be Vietnam Pro"], "display-editorial": ["Newsreader"], "headline-md": ["Be Vietnam Pro"], "body-compact": ["Be Vietnam Pro"] }, "fontSize": { "headline-lg": ["24px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "label-regular": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}], "body-reading-strong": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "label-micro": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "citation-ref": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "body-reading": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "display-editorial": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "body-compact": ["14px", {"lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400"}] } } } };</script>"""
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}body{word-break:keep-all;overflow-wrap:anywhere;}p,h1,h2,h3,li,span{text-wrap:pretty;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-container": "#2e6e4e", "secondary-fixed": "#aef1c9", "outline-variant": "#c0c8c4", "tertiary": "#741f11", "on-background": "#1b1b1d", "surface-container-low": "#f6f3f5", "on-tertiary-fixed-variant": "#802919", "surface-container-lowest": "#ffffff", "surface-container": "#f0edef", "surface-dim": "#dcd9dc", "outline": "#717975", "primary-fixed": "#bceddc", "primary-container": "#2f5d50", "error": "#ba1a1a", "error-container": "#ffdad6", "on-error": "#ffffff", "tertiary-fixed": "#ffdad3", "surface-bright": "#fcf8fb", "surface": "#fcf8fb", "on-primary-fixed-variant": "#204f42", "background": "#fcf8fb", "primary-fixed-dim": "#a0d1c0", "primary": "#154539", "surface-variant": "#e4e2e4", "on-secondary": "#ffffff", "on-primary-fixed": "#002019", "secondary-container": "#abeec6", "surface-tint": "#396759", "on-primary": "#ffffff", "surface-container-highest": "#e4e2e4", "tertiary-fixed-dim": "#ffb4a5", "on-tertiary": "#ffffff", "on-secondary-fixed-variant": "#095134", "on-tertiary-fixed": "#3f0400", "on-surface": "#1b1b1d", "inverse-primary": "#a0d1c0", "secondary": "#296a4a", "tertiary-container": "#933625", "inverse-on-surface": "#f3f0f2", "on-error-container": "#93000a", "on-secondary-fixed": "#002112", "on-surface-variant": "#404945", "inverse-surface": "#303032", "on-tertiary-container": "#ffb8aa", "on-primary-container": "#a3d4c3", "surface-container-high": "#eae7ea", "secondary-fixed-dim": "#93d5ae" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-md": "0.875rem", "margin": "1rem", "space-xs": "0.25rem", "space-xl": "2rem", "space-lg": "1.25rem", "gutter": "0.75rem", "space-sm": "0.5rem" }, "fontFamily": { "headline-lg": ["Newsreader"], "label-regular": ["Be Vietnam Pro"], "body-reading-strong": ["Be Vietnam Pro"], "label-micro": ["Be Vietnam Pro"], "headline-sm": ["Be Vietnam Pro"], "citation-ref": ["Be Vietnam Pro"], "body-reading": ["Be Vietnam Pro"], "display-editorial": ["Newsreader"], "headline-md": ["Be Vietnam Pro"], "body-compact": ["Be Vietnam Pro"] }, "fontSize": { "headline-lg": ["24px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "label-regular": ["13px", {"lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "500"}], "body-reading-strong": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "label-micro": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "citation-ref": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "body-reading": ["16px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "display-editorial": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "body-compact": ["14px", {"lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "400"}] } } } };</script>"""
 
 
 # 카카오톡·문자로 링크를 보낼 때 뜨는 미리보기 카드 — 어느 쪽을 보내도 같은 소개 (로그인 같은 화면 이름은 빼고)
@@ -92,7 +92,7 @@ def share_tags() -> str:
 # 좋아요·리그램은 화면을 다시 불러오지 않는다 — 누르면 맨 위로 튀어 올라가던 것 (사용자 10/9).
 # 보내고 나서 같은 화면을 받아 이 두 단추 묶음만 바꿔 끼운다(숫자·눌림 상태가 서버 기준 그대로). 자바스크립트가 없으면 예전처럼 새로 불러온다
 STAY = ("<script>document.addEventListener('submit',async ev=>{const f=ev.target;const a=f.getAttribute('action');"
-        "if(a!=='/like'&&a!=='/regram')return;ev.preventDefault();const sel='form[action=\"/like\"],form[action=\"/regram\"]';"
+        "if(a!=='/like'&&a!=='/regram'&&a!=='/follow')return;ev.preventDefault();const sel='form[action=\"/like\"],form[action=\"/regram\"],form[action=\"/follow\"]';"
         "try{await fetch(a,{method:'POST',body:new URLSearchParams(new FormData(f,ev.submitter))});"
         "const doc=new DOMParser().parseFromString(await (await fetch(location.href)).text(),'text/html');"
         "const old=[...document.querySelectorAll(sel)],neu=[...doc.querySelectorAll(sel)];"
@@ -105,8 +105,64 @@ def page(title: str, body_attr: str, inner: str) -> str:
             f'<body class="{body_attr}">{inner}{STAY}</body></html>')  # fmt: skip
 
 
+# 업종마다 작은 그림 하나 — 노트 머리에 귀엽게 (사용자 10/10: 톱니바퀴 같은 것). Material Symbols(Apache 2.0) 아이콘 이름
+INDUSTRY_ICON = {"반도체": "memory", "전자부품": "developer_board", "전자·통신장비": "devices", "통신": "cell_tower",
+                 "은행": "account_balance", "금융": "account_balance", "금융서비스": "account_balance", "증권": "candlestick_chart", "보험": "health_and_safety",
+                 "지주회사": "domain", "제약·바이오": "medication", "연구개발": "biotech", "화학": "science", "석유정제": "oil_barrel",
+                 "2차전지": "battery_charging_full", "전지": "battery_charging_full", "자동차": "directions_car", "타이어·고무": "tire_repair",
+                 "조선": "directions_boat", "해운": "sailing", "무역·도매": "storefront", "물류": "local_shipping", "건설": "construction",
+                 "엔지니어링": "engineering", "기계": "settings", "전기장비": "electric_bolt", "전선·케이블": "cable", "전력·가스": "bolt",
+                 "항공우주": "rocket_launch", "방위산업": "shield", "항공": "flight", "철강·금속": "hardware", "금속가공": "hardware",
+                 "인터넷 플랫폼": "language", "소프트웨어": "code", "IT 서비스": "dns", "게임": "sports_esports", "화장품": "spa",
+                 "식료품": "restaurant", "엔터테인먼트": "music_note", "철도차량": "train", "담배": "local_florist", "생활 서비스": "home"}  # fmt: skip
+
+
+def industry_chip(code: str | None) -> str:
+    """노트 머리 — 업종 그림 + 이름 (예: ⚙ 기계). 업종을 모르면 빈 문자열."""
+    label = industry_label(code)
+    if not label:
+        return ""
+    icon = INDUSTRY_ICON.get(label, "category")
+    return (f'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-fixed/60 text-primary">'
+            f'<span class="material-symbols-outlined text-[15px]" aria-hidden="true">{icon}</span><span class="text-[12px] font-semibold">{e(label)}</span></span>')  # fmt: skip
+
+
+def ago(at: str) -> str:
+    """알림 시각 — 「방금」「12분 전」「3시간 전」「10월 9일」."""
+    try:
+        secs = (datetime.now() - datetime.fromisoformat(at)).total_seconds()
+    except ValueError:
+        return ""
+    if secs < 60:
+        return "방금"
+    if secs < 3600:
+        return f"{int(secs // 60)}분 전"
+    if secs < 86400:
+        return f"{int(secs // 3600)}시간 전"
+    d = datetime.fromisoformat(at)
+    return f"{d.month}월 {d.day}일"
+
+
+class Me(str):
+    """위쪽 동그라미에 넣을 것(사진 주소나 첫 글자) + 안 읽은 알림 수 — avatar() 가 알림 단추를 함께 그린다."""
+    unread = 0
+
+
+def bell(unread: int) -> str:
+    dot = (f'<span class="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-tertiary text-on-tertiary text-[10px] leading-4 text-center font-semibold">{min(unread, 99)}</span>'
+           if unread else "")  # fmt: skip
+    return (f'<a href="/me/notices" aria-label="알림{f" {unread}개" if unread else ""}" class="relative w-8 h-8 flex items-center justify-center text-on-surface-variant hover:text-on-surface">'
+            f'<span class="material-symbols-outlined text-[22px]">notifications</span>{dot}</a>')  # fmt: skip
+
+
 def avatar(initial: str) -> str:
-    """시안의 프로필 사진 자리 — 사진(「/p/…」 주소)이 있으면 사진, 없으면 첫 글자 동그라미. 누르면 내 프로필."""
+    """시안의 프로필 사진 자리 — 사진(「/p/…」 주소)이 있으면 사진, 없으면 첫 글자 동그라미. 누르면 내 프로필. 옆에 알림 단추."""
+    if isinstance(initial, Me):
+        return bell(initial.unread) + _avatar(initial)
+    return _avatar(initial)
+
+
+def _avatar(initial: str) -> str:
     inside = (f'<img alt="" class="w-full h-full object-cover" src="{e(initial)}">' if initial.startswith("/p/") else e(initial.upper()))
     return (f'<a href="/me" aria-label="내 프로필" class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high flex items-center justify-center '
             f'text-on-surface-variant font-label-regular text-label-regular hover:bg-surface-container-highest transition-colors">{inside}</a>')  # fmt: skip
@@ -780,7 +836,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         # 머리 — 로고·이름 한 줄, 업종 · 날짜 · 읽음 한 줄 (글자를 줄였다, 사용자 10/8)
         f'<header class="mt-space-sm mb-space-lg"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
-        f'<p class="mt-1.5 text-[12px] text-outline">{e(" · ".join(x for x in (industry_label(industry), md(made), f"읽음 {stats[0]:,}") if x))}</p></header>',
+        f'<p class="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 text-[12px] text-outline">{industry_chip(industry)}<span>{e(" · ".join(x for x in (md(made), f"읽음 {stats[0]:,}") if x))}</span></p></header>',
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
@@ -910,8 +966,11 @@ class App:
 
     def initial(self, uid: int) -> str:
         """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 이메일 첫 글자."""
-        row = self.con.execute("select email, photo_at from users where id = ?", (uid,)).fetchone()
-        return (photo_url(uid, row[1]) or row[0][:1]) if row else "?"
+        row = self.con.execute("select email, photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
+        me = Me((photo_url(uid, row[1]) or row[0][:1]) if row else "?")
+        if row:
+            me.unread = self.con.execute("select count(*) from follows where followee_id = ? and at > ?", (uid, row[2])).fetchone()[0]
+        return me
 
     def simple(self, title: str, msg: str) -> str:
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
@@ -992,7 +1051,8 @@ class App:
                 if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
                     self.con.execute("insert into follows values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
                 self.con.commit()
-            return self.see(f"/u/{other}" if other else "/feed")
+            back = form.get("back", "")
+            return self.see(back if back.startswith("/") and not back.startswith("//") else f"/u/{other}" if other else "/feed")
         if path == "/regram" and method == "POST":
             return self.regram(uid, form)
         if path == "/me/profile" and method == "POST":
@@ -1017,6 +1077,10 @@ class App:
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
+        if path == "/me/notices":
+            return self.notices(uid)
+        if path.startswith("/f/") and path[3:].isdigit():
+            return self.follow_page(uid, int(path[3:]), query.get("tab", "followers"))
         if path == "/me":
             self.log(uid, "me")
             return "200 OK", [], self.profile(uid)
@@ -1662,8 +1726,61 @@ class App:
 
     def follow_line(self, uid: int) -> str:
         fer, fing = self.counts(uid)
-        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant">팔로워 <b class="text-on-surface">{fer:,}</b>'
-                f'<span class="mx-2 text-outline-variant">|</span>팔로잉 <b class="text-on-surface">{fing:,}</b></p>')  # fmt: skip
+        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant"><a class="hover:underline" href="/f/{uid}?tab=followers">팔로워 <b class="text-on-surface">{fer:,}</b></a>'
+                f'<span class="mx-2 text-outline-variant">|</span><a class="hover:underline" href="/f/{uid}?tab=following">팔로잉 <b class="text-on-surface">{fing:,}</b></a></p>')  # fmt: skip
+
+    def follow_button(self, uid: int, other: int, back: str) -> str:
+        """목록·알림 줄 오른쪽 — 이미 팔로우하면 「팔로잉」(회색, 누르면 취소), 아니면 「팔로우」(초록). 나 자신은 없음."""
+        if other == uid:
+            return ""
+        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        cls = "bg-surface-container text-on-surface" if on else "bg-primary text-on-primary"
+        return (f'<form method="post" action="/follow" class="shrink-0"><input type="hidden" name="u" value="{other}"><input type="hidden" name="back" value="{e(back)}">'
+                f'<button type="submit" class="px-4 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{"팔로잉" if on else "팔로우"}</button></form>')  # fmt: skip
+
+    def person_row(self, uid: int, other: int, nick: str, bio: str | None, pat: str | None, back: str, note: str = "") -> str:
+        return (f'<div class="py-3 flex items-center gap-3"><a href="/u/{other}" class="flex items-center gap-3 min-w-0 flex-1">{self.face(nick, "w-12 h-12", photo_url(other, pat))}'
+                f'<span class="flex flex-col min-w-0"><b class="text-[15px] text-on-surface truncate">{e(nick)}</b>'
+                f'<span class="text-[13px] text-on-surface-variant truncate">{note or e(bio or "")}</span></span></a>{self.follow_button(uid, other, back)}</div>')  # fmt: skip
+
+    def follow_page(self, uid: int, who: int, tab: str):
+        """인스타그램처럼 — 위에 「팔로워 N명 | 팔로잉 N명」 탭, 아래에 사람 목록과 팔로우 단추 (사용자 10/10)."""
+        row = self.con.execute("select nickname from users where id = ?", (who,)).fetchone()
+        if not row:
+            return "404 Not Found", [], self.simple("없음", "없는 사람이에요.")
+        tab = tab if tab in ("followers", "following") else "followers"
+        fer, fing = self.counts(who)
+        col, by = ("follower_id", "followee_id") if tab == "followers" else ("followee_id", "follower_id")
+        people = self.con.execute(f"select u.id, u.nickname, u.bio, u.photo_at from follows f join users u on u.id = f.{col}"
+                                  f" where f.{by} = ? and u.nickname is not null order by f.at desc", (who,)).fetchall()  # fmt: skip
+        back = f"/f/{who}?tab={tab}"
+        tabs = "".join(f'<a href="/f/{who}?tab={k}" class="flex-1 text-center py-3 text-[15px] {"font-semibold text-on-surface border-b-2 border-on-surface" if k == tab else "text-on-surface-variant border-b border-surface-container-high"}">{label} {n:,}명</a>'
+                       for k, label, n in (("followers", "팔로워", fer), ("following", "팔로잉", fing)))  # fmt: skip
+        rows = "".join(self.person_row(uid, i, n, b, p, back) for i, n, b, p in people)
+        none = f'<p class="py-10 text-center text-[14px] text-outline">{"아직 팔로워가 없어요." if tab == "followers" else "아직 팔로우한 사람이 없어요."}</p>'
+        home = "/me" if who == uid else f"/u/{who}"
+        inner = (top_bar(self.initial(uid)) + '<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 min-h-screen"><div class="px-margin">'
+                 f'<div class="flex items-center gap-3 py-3"><a href="{home}" aria-label="뒤로" class="text-on-surface"><span class="material-symbols-outlined">arrow_back</span></a>'
+                 f'<h1 class="text-[20px] font-semibold text-on-surface">{e(row[0] or "")}</h1></div>'
+                 f'<nav class="flex">{tabs}</nav><div class="flex flex-col">{rows or none}</div></div></main>' + bottom_nav("me"))  # fmt: skip
+        return "200 OK", [], page("팔로워" if tab == "followers" else "팔로잉", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def notices(self, uid: int):
+        """알림 — 누가 나를 팔로우했는지, 최신 먼저. 이 화면을 열면 빨간 점이 사라진다."""
+        seen = self.con.execute("select coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()[0]
+        rows = self.con.execute("select u.id, u.nickname, u.bio, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
+                                " where f.followee_id = ? and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
+        self.con.execute("update users set notices_seen = ? where id = ?", (datetime.now().isoformat(), uid))
+        self.con.commit()
+        items = "".join(
+            f'<div class="{"bg-primary-fixed/30 -mx-margin px-margin" if at > seen else ""}">'
+            + self.person_row(uid, i, n, b, p, "/me/notices", f"회원님을 팔로우하기 시작했어요 · {ago(at)}") + "</div>"
+            for i, n, b, p, at in rows)  # fmt: skip
+        none = '<p class="py-10 text-center text-[14px] text-outline">아직 알림이 없어요. 누가 팔로우하면 여기에 알려 드려요.</p>'
+        inner = (top_bar(self.initial(uid)) + '<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 min-h-screen"><div class="px-margin">'
+                 '<h1 class="py-3 text-[20px] font-semibold text-on-surface">알림</h1>'
+                 f'<div class="flex flex-col">{items or none}</div></div></main>' + bottom_nav("me"))  # fmt: skip
+        return "200 OK", [], page("알림", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def save_photo(self, uid: int, img: str):
         """프로필 사진 — JPEG 만, 작게(PHOTO_MAX). 브라우저가 이미 256px 정사각형으로 잘라 보낸다."""

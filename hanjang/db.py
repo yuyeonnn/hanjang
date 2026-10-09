@@ -105,7 +105,8 @@ def connect(path=PATH) -> sqlite3.Connection:
     # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
     for table, col, typ in (("financials", "basis", "text"), ("stocks", "induty_code", "text"),
                             ("disclosures", "amount", "integer"),
-                            ("articles", "photo", "text"),  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
+                            ("articles", "photo", "text"),
+                            ("users", "notices_seen", "text"),  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
                             ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
