@@ -845,10 +845,15 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
             "good": keep(j["good"]), "concern": keep(j["concern"])}  # fmt: skip
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
-    if note["good"]:
-        note["good_title"] = short_title(j["good_title"], "긍정")
-    if note["concern"]:
-        note["concern_title"] = short_title(j["concern_title"], "부정")
+    for key, sign in (("good", 1), ("concern", -1)):
+        if not note[key]:
+            note[key] = [{"text": mend(say(f)), "refs": [f["id"]]} for f in fs if f["tone"] == sign][:3]
+    for key, what in (("good", "긍정"), ("concern", "부정")):
+        if note[key]:
+            try:
+                note[f"{key}_title"] = short_title(j.get(f"{key}_title"), what)
+            except ValueError:  # 소제목이 틀리면 비워 둔다 — finish 가 코드로 짓는다
+                pass
     return check_note(note, fs)
 
 
@@ -875,8 +880,7 @@ def code_headline(fs: list[dict]) -> str:
     pick = (next((f for f in ds if f["tone"] == -1), None) or (by.get("F2") if "방향" in by.get("F2", {}).get("slots", {}) else None)
             or next((f for f in ds if f["tone"] == 1), None) or (by.get("F1") if "방향" in by.get("F1", {}).get("slots", {}) else None))  # fmt: skip
     if pick and pick["id"][0] == "D":
-        s = pick["slots"]
-        return f"{s['날짜']}에 {s['종류']} 공시가 있었어요."
+        return mend(say(pick))
     if pick:
         s, what = pick["slots"], "영업이익" if pick["id"] == "F2" else "매출"
         chg = f", {s['변화']}" if s.get("변화", "").startswith(("+", "-")) else ""
