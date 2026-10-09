@@ -585,3 +585,11 @@ def test_debt_reason_is_added_when_ai_skips_it():
          "sections": [{"title": "회사 사정은 어떤가요?", "sentences": [{"text": "빚이 자기 돈보다 많아요(부채비율 {F3.비율}).", "refs": ["F3"]}]}]}
     note = notes.fill_note(j, fs)
     assert note["sections"][0]["sentences"][1]["text"] == "이 업종은 수주 대금을 미리 받아 빚으로 잡혀요."
+
+
+def test_this_week_only_for_this_weeks_events_and_short_second_date():
+    fs = [{"id": "D1", "text": "10월 1일 실적 공시", "tone": 0, "url": "u", "slots": {"날짜": "10월 1일", "시기": "지난주"}}]
+    j = {"headline": "", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
+         "sections": [{"title": "최근 소식", "sentences": [{"text": "이번 주에는 실적을 먼저 알렸어요.", "refs": ["D1"]}]}]}
+    assert notes.fill_note(j, fs)["sections"][0]["sentences"][0]["text"] == "최근 실적을 먼저 알렸어요."
+    assert notes.mend("10월 8일과 7일에 돈을 모으기로 했어요.") == "돈을 모으기로 했어요(10월 8일과 7일)."

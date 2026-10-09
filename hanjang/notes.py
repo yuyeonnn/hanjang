@@ -440,6 +440,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
         out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
                     "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
+    if industry_mid(con, ticker).get("금융"):  # 금융회사는 「100원당」이 다른 업종과 같은 잣대가 아니다
+        for f in out:
+            for k in ("백원당", "전년백원당", "힘"):
+                f["slots"].pop(k, None)
     for f in out:  # 100원당 남긴 돈도 사실 문장에 — 출처 창에 보이고, 숫자 대조(빈칸 값)도 통과하게
         if "전년백원당" in f["slots"]:
             f["text"] += f" · 100원어치 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})"
@@ -658,7 +662,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         day = f"{d.month}월 {d.day}일"
         # text 에 요약문까지 — AI 는 여기 적힌 숫자만 그대로 옮길 수 있다(fill 의 토큰 대조). 기사 본문은 없다
         out.append({"id": f"N{k}", "text": f"{day} {press} 소식 「{title}」" + (f" — {summary}" if summary else ""), "url": url, "tone": 0,
-                    "slots": {"날짜": day, "매체": press, "제목": f"「{title}」"}})  # fmt: skip
+                    "slots": {"날짜": day, "매체": press, "제목": f"「{title}」", "시기": when(d, today)}})  # fmt: skip
     return out
 
 
@@ -764,7 +768,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
     text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
     # 날짜로 시작하는 문장 — 날짜는 문장 끝 괄호로 (사용자 10/9: 날짜가 앞에서 오가면 요점이 안 보인다)
-    text = re.sub(r"(?:^|(?<=[.!?] ))(\d+월 \d+일(?:(?:과|와|,| ·) \d+월 \d+일)*)(?:에는|에도|에|엔|,)?\s+([^.!?]+?)([.!?])",
+    text = re.sub(r"(?:^|(?<=[.!?] ))(\d+월 \d+일(?:(?:과|와|,| ·) (?:\d+월 )?\d+일)*)(?:에는|에도|에|엔|,)?\s+([^.!?]+?)([.!?])",
                   lambda m: f"{m[2][:1].upper()}{m[2][1:]}({m[1]}){m[3]}", text)
     text = re.sub(r"(았|었)에(?=\s)", r"\1던 해에", text)  # 「4번째로 많았에 머물렀어요」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
@@ -923,6 +927,8 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
             try:
                 y = fill(x, by)
                 check_sentence(y, fs)
+                if "이번 주" in y["text"] and not any(by.get(r, {}).get("slots", {}).get("시기") == "이번 주" for r in y["refs"]):
+                    y["text"] = re.sub(r"이번 주(?:에는|엔|에|의)?\s*", "최근 ", y["text"])
                 if "같은 날" in y["text"] and (not out or not days(y["refs"]) or not days(y["refs"]) <= days(out[-1]["refs"])):
                     raise ValueError(f"「같은 날」인데 날짜가 다름: {y['text']!r}")
                 out.append(y)
