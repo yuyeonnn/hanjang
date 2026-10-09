@@ -252,7 +252,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
         roe = f" 대신 자기 돈으로 1년에 얼마를 벌었는지(ROE {ni / eq * 100:.1f}%)를 봐요." if ni is not None and eq and eq > 0 else ""
         return ('<div class="py-space-md my-space-xs border-b border-outline-variant/30"><div class="font-label-regular text-label-regular text-on-surface font-semibold">금융회사는 잣대가 달라요</div>'
                 '<p class="mt-1 text-[13px] leading-relaxed text-on-surface-variant">고객이 맡긴 돈이 「빚」으로 잡혀 부채비율이 원래 수백~천 %이고, 사고판 금액이 「매출」로 잡혀 100원당 남긴 돈이 작게 나와요. '
-                f'그래서 이 두 그림은 싣지 않아요.{e(roe)}</p></div>')  # fmt: skip
+                f'그래서 이 두 그림은 싣지 않아요.{e(roe)}</p>'
+                '<a class="mt-1 inline-block text-[12px] text-primary underline" href="/learn/sector-finance">금융회사는 어떻게 봐요? →</a></div>')  # fmt: skip
     out = []
     if rev and rev > 0 and oi is not None and ni is not None:
         rows = [("매출 — 판 돈", rev, "bg-primary"), ("영업이익 — 본업으로 남긴 돈", oi, "bg-secondary"), ("순이익 — 세금·이자까지 내고 남은 돈", ni, "bg-secondary/60")]
@@ -262,7 +263,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
             f'<span class="w-11 text-right text-[12px] font-semibold tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{"적자" if v < 0 else f"{v / rev * 100:.0f}원"}</span></div>'
             for k, v, col in rows)  # fmt: skip
         usual = (f'<p class="text-[11px] text-outline mt-0.5">같은 업종({e(mid["업종"])}) {mid["곳수"]}곳 보통(중간값): 영업이익 {mid["백원당"]:.0f}원'
-                 f'{" — 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""}</p>' if mid.get("백원당") is not None else "")  # fmt: skip
+                 f'{". 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""} · <a class="text-primary underline" href="/learn/sector-margin">업종마다 달라요</a></p>'
+                 if mid.get("백원당") is not None else "")  # fmt: skip
         out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold">{y}년, 100원 팔면 얼마 남았나</div>{bars}{usual}')
         if eq and eq > 0 and li is not None:
             ratio = li / eq * 100
@@ -273,7 +275,8 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
                        f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
                        f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. '
                        + (f'같은 업종({e(mid["업종"])}) 보통(중간값)은 {mid["부채비율"]:,.0f}%예요. ' if mid.get("부채비율") is not None else "")
-                       + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}.' if mid.get("빚이유") else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
+                       + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}. <a class="text-primary underline" href="/learn/sector-debt">더 보기</a>' if mid.get("빚이유")
+                          else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
                        + '</p>')  # fmt: skip
     if not out:
         return ""
@@ -355,7 +358,7 @@ def risk_block(biz: dict | None, fins: list[tuple] | None = None) -> str:
     items = "".join(f'<li class="flex gap-2"><span class="material-symbols-outlined text-tertiary text-[16px] mt-1" aria-hidden="true">error</span><span>{e(r)}{watch(r, fins or [], used)}</span></li>' for r in biz["risks"])
     return chapter("회사가 꼽은 위험", f'<ul class="flex flex-col gap-1.5">{items}</ul>',
                    '<p class="font-label-micro text-label-micro text-outline">회사가 사업보고서에 스스로 적은 위험이에요. 한장의 판단이 아니에요.'
-                   + (' 「살펴볼 숫자」는 그 위험과 관련해 이 노트에 있는 숫자예요 — 앞날을 말하는 게 아니에요.' if used else "") + '</p>')  # fmt: skip
+                   + (' 「살펴볼 숫자」는 그 위험과 관련해 이 노트에 있는 숫자예요. 앞날을 말하는 게 아니에요.' if used else "") + '</p>')  # fmt: skip
 
 
 # 큰 업종 — 통계청 산업분류 코드 앞 두 자리로 묶는다 (도넛 조각을 열 개 안쪽으로)
@@ -755,7 +758,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + (('<div class="pt-space-sm pb-1 flex flex-col gap-1.5"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
                          + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"]) + "</div></div>")
                         if body.get("keywords") else "")
-                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요 — 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
+                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
@@ -780,7 +783,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         parts.append('<section class="mb-12 flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">좋게 볼 점과 주의해서 볼 점</h3></div>'
                      + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
-                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
+                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요. 기준은 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
@@ -794,7 +797,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                  f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지예요 — <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
+                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지 알려줘요. <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
                  '<div class="pt-1"><p class="font-label-regular text-label-regular text-on-surface leading-relaxed font-medium">사라·팔아라는 의견도, 목표주가도, 앞으로의 예측도 없어요. 투자 판단은 본인이 해요.</p></div></footer>')  # fmt: skip
     dialog = ('<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-end justify-center px-margin pb-6" id="citation-dialog" onclick="closeCitation(event)"><div class="bg-surface-container-lowest w-full max-w-[440px] rounded-2xl p-space-lg shadow-xl flex flex-col gap-space-sm" onclick="event.stopPropagation()"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded font-citation-ref text-citation-ref bg-primary-fixed text-on-primary-fixed font-bold" id="citation-badge"></span><span class="font-label-regular text-label-regular font-bold text-on-surface" id="citation-title"></span></div><button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container" onclick="hideCitation()" type="button"><span class="material-symbols-outlined text-[20px]">close</span></button></div><div class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed" id="citation-body"></div><div class="flex items-center justify-between pt-2"><span class="font-label-micro text-label-micro text-outline font-mono" id="citation-meta"></span><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="#" id="citation-link" rel="noopener noreferrer" target="_blank">원문 확인<span class="material-symbols-outlined text-[14px]">open_in_new</span></a></div></div></div>'
               # JSON 안의 </script> 를 막으려고 < 를 < 로
@@ -1103,7 +1106,7 @@ class App:
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
         parts = [f"{len(added)}종목을 담았어요 ({', '.join(added[:5])}{' 외' if len(added) > 5 else ''})."] if added else []
         if unknown:
-            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요 — 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
+            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요. 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
         if full:
             parts.append(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요.")
         return " ".join(parts) or "담을 종목을 찾지 못했어요."
@@ -1153,8 +1156,8 @@ class App:
         out = []
         for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or ("첫 노트를 만들고 있어요 — 1~2분 뒤 새로고침해 보세요." if t in self.making else
-                                          "새로 담은 종목이에요 — 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
+            head = b.get("headline") or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
+                                          "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
