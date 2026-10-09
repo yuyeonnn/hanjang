@@ -348,7 +348,8 @@ def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
         slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": f"{round(m)}원"}
         prev = fin[1] if len(fin) > 1 else None
         if prev and prev[1] and prev[2] is not None and prev[1] > 0:
-            slots |= {"전년비율": f"{prev[2] / prev[1] * 100:.1f}%", "전년연도": f"{prev[0]}년"}
+            was = prev[2] / prev[1] * 100
+            slots |= {"전년비율": f"{was:.1f}%", "전년연도": f"{prev[0]}년", "힘": power(m, was)}
         out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100원어치 팔아 본업으로 {slots['백원당']}을 남김"
                     + (f" ({slots['전년연도']} {slots['전년비율']})" if "전년비율" in slots else ""), "url": url, "tone": 0, "slots": slots})  # fmt: skip
     rows = [r for r in fin if r[1] is not None or r[2] is not None]
@@ -398,11 +399,20 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
         out["백원당"] = f"{round(op / rev * 100)}원"
         if rp and rp > 0 and opp is not None:
             out["전년백원당"] = f"{round(opp / rp * 100)}원"
+            out["힘"] = power(op / rev * 100, opp / rp * 100)
     if rev and rp and rp > 0 and op is not None and opp and opp > 0:
         r, o = rev / rp - 1, op / opp - 1
         out["관계"] = (RELATIONS[0] if r > 0 and o > r else RELATIONS[1] if r > 0 and 0 <= o <= r else
                       RELATIONS[2] if r > 0 and o < 0 else RELATIONS[3] if r <= 0 and o > 0 else RELATIONS[4])  # fmt: skip
     return out
+
+
+def power(now: float, was: float) -> str:
+    """100원당 남긴 돈(영업이익률 %)이 1년 전보다 — 「남기는 힘이 {힘}어요」의 줄기. 0.2%p 안쪽만 비슷."""
+    return "더 세졌" if now - was >= 0.2 else "약해졌" if was - now >= 0.2 else "비슷했"
+
+
+STRONGER, WEAKER = re.compile(r"세졌|커졌|좋아졌|나아졌|높아졌"), re.compile(r"약해졌|작아졌|나빠졌|낮아졌")
 
 
 RELATIONS = ("판 돈보다 남긴 돈이 더 빨리 늘었", "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았",
@@ -738,6 +748,11 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
     raw = re.sub(r"(?:판 돈|남긴 돈|매출|영업이익)[^.{}]*?(\{F\d+\.관계\})", r"\1", raw)
     if REL_WORDS.search(SLOT.sub("", raw)):
         raise ValueError(f"관계는 빈칸으로만: {raw!r}")
+    for fid in {f for f, _ in SLOT.findall(raw)} | set(refs):  # 남기는 힘을 직접 썼다면 코드가 정한 쪽과 맞는지
+        way = by.get(fid, {}).get("slots", {}).get("힘")
+        bare_ = SLOT.sub("", raw)
+        if way and ((STRONGER.search(bare_) and way != "더 세졌") or (WEAKER.search(bare_) and way != "약해졌")):
+            raise ValueError(f"남기는 힘이 사실과 반대: {raw!r}")
     text = mend(dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었")))
     text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
     text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」
@@ -797,6 +812,8 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"금지어: {text!r}")
     if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
         raise ValueError(f"예측 말투: {text!r}")
+    if text.count("(") != text.count(")") or text.count("「") != text.count("」"):
+        raise ValueError(f"괄호 짝이 안 맞음: {text!r}")
     outside = re.sub(r"\([^()]*\)|「[^」]*」", "", text)
     if not all(r.startswith("N") for r in refs) and HARD.search(outside):
         raise ValueError(f"어려운 말: {text!r}")
@@ -860,10 +877,15 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     note["sections"] = [sec for sec in note["sections"] if sec["sentences"]]
     if total and len(dropped) > total * 0.3:  # 너무 많이 빠지면 이어지지 않는다 — 다시 쓰게
         raise ValueError(f"문장 {len(dropped)}/{total}개 탈락: {dropped[0]}")
-    if note["good"]:
-        note["good_title"] = short_title(j["good_title"], "긍정")
-    if note["concern"]:
-        note["concern_title"] = short_title(j["concern_title"], "부정")
+    for key, sign in (("good", 1), ("concern", -1)):
+        if not note[key]:
+            note[key] = [{"text": mend(say(f)), "refs": [f["id"]]} for f in fs if f["tone"] == sign][:3]
+    for key, what in (("good", "긍정"), ("concern", "부정")):
+        if note[key]:
+            try:
+                note[f"{key}_title"] = short_title(j.get(f"{key}_title"), what)
+            except ValueError:  # 소제목이 틀리면 비워 둔다 — finish 가 코드로 짓는다
+                pass
     return check_note(note, fs)
 
 
@@ -890,8 +912,7 @@ def code_headline(fs: list[dict]) -> str:
     pick = (next((f for f in ds if f["tone"] == -1), None) or (by.get("F2") if "방향" in by.get("F2", {}).get("slots", {}) else None)
             or next((f for f in ds if f["tone"] == 1), None) or (by.get("F1") if "방향" in by.get("F1", {}).get("slots", {}) else None))  # fmt: skip
     if pick and pick["id"][0] == "D":
-        s = pick["slots"]
-        return f"{s['날짜']}에 {s['종류']} 공시가 있었어요."
+        return mend(say(pick))
     if pick:
         s, what = pick["slots"], "영업이익" if pick["id"] == "F2" else "매출"
         chg = f", {s['변화']}" if s.get("변화", "").startswith(("+", "-")) else ""
