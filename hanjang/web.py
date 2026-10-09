@@ -510,8 +510,9 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
 
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 이름 목록(사용자 10/10: 선을 그은 원형 배치는 어수선).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로. 색 네모로 조각과 잇는다.
+    """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬) — 위에서부터 조각 순서대로.
+    조각에서 이름 옆 색 네모까지 꺾은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
     import math
 
@@ -529,24 +530,34 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
         slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= 99.99 else
                       f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>')  # fmt: skip
         m = (a + b) / 2
-        sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col))
+        sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col, m))
         a = b
 
     def column(right: bool) -> str:
-        # 휴대폰은 이름 밑에 %(같은 크기), 넓으면 한 줄 — 긴 이름은 칸 안에서 말줄임
+        # 휴대폰·태블릿은 이름 밑에 %(같은 크기), 컴퓨터 화면이면 한 줄 — 긴 이름은 칸 안에서 말줄임
         rows = "".join(
             f'<li class="w-full flex items-start gap-1.5 {"" if right else "flex-row-reverse"}">'
-            f'<span class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
-            f'<span class="min-w-0 flex flex-col sm:flex-row sm:gap-1.5 {"items-start" if right else "items-end"}">'
+            f'<span data-ang="{m:.4f}" class="w-2.5 h-2.5 mt-[5px] rounded-sm shrink-0" style="background:{col}"></span>'
+            f'<span class="min-w-0 flex flex-col lg:flex-row lg:gap-1.5 {"items-start" if right else "items-end"}">'
             f'<span class="max-w-full text-[13px] leading-5 text-on-surface-variant truncate">{e(k)}</span>'
             f'<span class="text-[13px] leading-5 font-semibold text-on-surface tabular-nums shrink-0">{pct:.1f}%</span></span></li>'
-            for _, k, pct, col in sorted(sides[right]))  # fmt: skip
+            for _, k, pct, col, m in sorted(sides[right]))  # fmt: skip
         return f'<ul class="flex-1 min-w-0 flex flex-col justify-center gap-3">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div class="mt-4 flex items-center gap-3 sm:gap-5">' + column(False)
-            + f'<svg viewBox="0 0 100 100" class="w-28 h-28 sm:w-40 sm:h-40 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
-            + column(True) + "</div></section>")  # fmt: skip
+            '<div data-pie class="relative mt-4 flex items-center gap-6 lg:gap-10">' + column(False)
+            + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
+            + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
+
+
+# 파이 조각 → 이름 옆 색 네모까지 꺾은 선. 조각 가장자리 점에서 원 바깥으로 조금 나와 꺾고, 네모 앞까지 가로로
+PIE_LINES = """<script>(function(){if(window.pieLines)return;window.pieLines=function(){document.querySelectorAll('[data-pie]').forEach(function(box){
+var o=box.getBoundingClientRect(),pie=box.querySelector('svg[role=img]').getBoundingClientRect(),lay=box.lastElementChild;
+var cx=pie.left+pie.width/2-o.left,cy=pie.top+pie.height/2-o.top,r=pie.width*0.48,out='';
+box.querySelectorAll('[data-ang]').forEach(function(d){var a=+d.dataset.ang,q=d.getBoundingClientRect(),right=Math.cos(a)>=0;
+var px=cx+r*Math.cos(a),py=cy+r*Math.sin(a),y=q.top+q.height/2-o.top,ex=cx+(r+10)*(right?1:-1),tx=right?q.left-o.left-4:q.right-o.left+4;
+out+='<polyline points="'+px+','+py+' '+ex+','+y+' '+tx+','+y+'" fill="none" stroke="#c0c8c4" stroke-width="1"/><circle cx="'+px+'" cy="'+py+'" r="2.2" fill="'+d.style.background+'" stroke="#fcf8fb"/>';});
+lay.innerHTML=out;});};addEventListener('load',pieLines);addEventListener('resize',pieLines);document.fonts&&document.fonts.ready.then(pieLines);})();pieLines&&pieLines();</script>"""
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
