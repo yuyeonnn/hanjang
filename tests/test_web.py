@@ -858,7 +858,7 @@ def test_notices_this_week():
     con.execute("insert into holdings values (3, '005930', ?)", (now,))
     week = app.this_week()
     assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
-    assert "NEW" in week and "시 업데이트" in week  # 하루 전엔 없던 종목
+    assert "NEW" not in week and "올랐어요" in week and "시 업데이트" in week  # 하루 전보다 담은 사람이 늘었다 — NEW 는 쓰지 않는다
 
 
 def test_health_says_what_is_wrong(tmp_path, monkeypatch):

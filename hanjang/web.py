@@ -2458,33 +2458,34 @@ class App:
                 f'<div class="mt-space-sm -mx-margin px-margin flex gap-4 overflow-x-auto pb-2">{cards}</div></section>'
                 "<script>try{if(sessionStorage.getItem('hideSuggest'))document.getElementById('suggest').remove()}catch(e){}</script>")  # fmt: skip
 
-    def ranks(self, end: datetime) -> tuple[list, list]:
-        """end 앞 7일 동안 많이 담은 종목·많이 읽은 노트, 각 5개 [(ticker, name)]. 3명 이상일 때만 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
+    def tally(self, end: datetime) -> tuple[list, list]:
+        """end 앞 7일 — 담은 종목 [(ticker, name, 담은 사람, 담은 사람)] · 읽은 노트 [(ticker, name, 읽은 사람, 조회수)], 많은 순."""
         a, b = (end - timedelta(days=7)).isoformat(), end.isoformat()
-        held = self.con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.added_at >= ? and h.added_at < ?"
-                                + " group by s.ticker having count(*) >= 3 order by count(*) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
-        read = self.con.execute("select s.ticker, s.name from views v join stocks s using(ticker) where v.page = 'note' and v.at >= ? and v.at < ?"
-                                + " group by s.ticker having count(distinct v.user_id) >= 3 order by count(distinct v.user_id) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
+        held = self.con.execute("select s.ticker, s.name, count(*), count(*) from holdings h join stocks s using(ticker) where h.added_at >= ? and h.added_at < ?"
+                                " group by s.ticker order by count(*) desc, s.name", (a, b)).fetchall()  # fmt: skip
+        read = self.con.execute("select s.ticker, s.name, count(distinct v.user_id), count(*) from views v join stocks s using(ticker) where v.page = 'note' and v.at >= ? and v.at < ?"
+                                " group by s.ticker order by count(distinct v.user_id) desc, count(*) desc, s.name", (a, b)).fetchall()  # fmt: skip
         return held, read
 
     def this_week(self) -> str:
-        """이번 주 한장 — 몇 명인지는 적지 않고, 하루 전 순위와 견준 오르내림·NEW 만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다.
-        한 시간 전과 견주면 거의 늘 그대로(–)라 움직임이 안 보였다 (사용자 10/10)."""
+        """이번 주 한장 — 몇 명인지는 적지 않고 오르내림만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다.
+        하루 전보다 담은 사람·조회수가 조금이라도 늘면 ▲, 줄면 ▼, 같으면 – (NEW 는 쓰지 않는다, 사용자 10/10).
+        3명 이상일 때만 순위에 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
         now = datetime.now().replace(minute=0, second=0, microsecond=0)
-        cur, prev = self.ranks(now), self.ranks(now - timedelta(days=1))
+        cur, prev = self.tally(now), self.tally(now - timedelta(days=1))
         up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
         down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'
         same = '<span class="text-outline-variant text-[12px]" aria-label="그대로">–</span>'
-        new = '<span class="px-1.5 py-px rounded-md bg-[#D6457F] text-white text-[10px] font-bold">NEW</span>'
 
         def col(title, rows, before):
+            rows = [r for r in rows if r[2] >= 3][:5]
             if not rows:
                 return ""
-            was = {t: k for k, (t, _) in enumerate(before)}
-            mark = lambda t, k: new if t not in was else up if was[t] > k else down if was[t] < k else same  # noqa: E731
+            was = {t: v for t, _, _, v in before}
+            mark = lambda t, v: up if v > was.get(t, 0) else down if v < was.get(t, 0) else same  # noqa: E731
             items = "".join(f'<a href="/n/{e(t)}" class="py-2.5 flex items-center gap-3"><b class="w-5 text-[16px] text-on-surface tabular-nums">{k + 1}</b>'
-                            f'<span class="flex-1 text-[15px] text-on-surface truncate">{e(n)}</span>{mark(t, k)}</a>'
-                            for k, (t, n) in enumerate(rows))  # fmt: skip
+                            f'<span class="flex-1 text-[15px] text-on-surface truncate">{e(n)}</span>{mark(t, v)}</a>'
+                            for k, (t, n, _, v) in enumerate(rows))  # fmt: skip
             return f'<div><h3 class="text-[13px] font-semibold text-outline">{title}</h3><div class="flex flex-col">{items}</div></div>'
 
         body = col("많이 담은 종목", cur[0], prev[0]) + col("많이 읽은 노트", cur[1], prev[1])
