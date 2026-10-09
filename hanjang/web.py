@@ -263,7 +263,7 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
             f'<span class="w-11 text-right text-[12px] font-semibold tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{"적자" if v < 0 else f"{v / rev * 100:.0f}원"}</span></div>'
             for k, v, col in rows)  # fmt: skip
         usual = (f'<p class="text-[11px] text-outline mt-0.5">같은 업종({e(mid["업종"])}) {mid["곳수"]}곳 보통(중간값): 영업이익 {mid["백원당"]:.0f}원'
-                 f'{" — 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""} · <a class="text-primary underline" href="/learn/sector-margin">업종마다 달라요</a></p>'
+                 f'{". 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""} · <a class="text-primary underline" href="/learn/sector-margin">업종마다 달라요</a></p>'
                  if mid.get("백원당") is not None else "")  # fmt: skip
         out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold">{y}년, 100원 팔면 얼마 남았나</div>{bars}{usual}')
         if eq and eq > 0 and li is not None:
@@ -1106,7 +1106,7 @@ class App:
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
         parts = [f"{len(added)}종목을 담았어요 ({', '.join(added[:5])}{' 외' if len(added) > 5 else ''})."] if added else []
         if unknown:
-            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요 — 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
+            parts.append(f"「{', '.join(unknown[:5])}」은(는) 코스피·코스닥 상장사에서 찾지 못했어요. 회사 이름이나 종목 코드 6자리로 다시 찾아 주세요.")
         if full:
             parts.append(f"종목은 {MAX_STOCKS}개까지 담을 수 있어요.")
         return " ".join(parts) or "담을 종목을 찾지 못했어요."
@@ -1156,8 +1156,8 @@ class App:
         out = []
         for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or ("첫 노트를 만들고 있어요 — 1~2분 뒤 새로고침해 보세요." if t in self.making else
-                                          "새로 담은 종목이에요 — 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
+            head = b.get("headline") or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
+                                          "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'

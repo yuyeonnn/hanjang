@@ -112,7 +112,7 @@ def tidy(title: str) -> str:
 
 def plain(title: str) -> str:
     t = re.sub(r"[\s·ㆍ・]", "", title)
-    return next((s for pat, s in TITLE_PLAIN if re.search(pat, t)), "")
+    return undash(next((s for pat, s in TITLE_PLAIN if re.search(pat, t)), ""))
 
 
 # 제목이 코드 정의와 반대인 것 — 규칙·AI 분류 뒤에 덧씌운다 (퀀트점프 RECODE 중 자주 걸리는 것)
@@ -887,6 +887,12 @@ def dedupe(text: str) -> str:
     return re.sub(r" ?\(「[^」]*」(?:(?:, ?| ?· ?)「[^」]*」)*\)", "", text)
 
 
+def undash(text: str) -> str:
+    """줄표(—) 대신 매끄러운 문장으로 — 「알렸어요 — 아직 숫자는 없어요」 → 「알렸어요. 아직 숫자는 없어요」 (사용자 10/9)."""
+    text = re.sub(r"(요|다)\s*—\s*", r"\1. ", text)
+    return re.sub(r"\s*—\s*", ", ", text)
+
+
 def mend(text: str) -> str:
     """빈칸 값(낱말 줄기 「4번째로 많았」「줄였」, 「2021년」)에 AI 가 토씨·글자를 또 붙여 깨진 이음을 고친다.
     fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」 (사용자 10/9 검토)."""
@@ -902,6 +908,7 @@ def mend(text: str) -> str:
                   lambda m: f"{m[2][:1].upper()}{m[2][1:]}({m[1]}){m[3]}", text)
     text = re.sub(r"(았|었)에(?=\s)", r"\1던 해에", text)  # 「4번째로 많았에 머물렀어요」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
+    text = undash(text)
     return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
 
 
