@@ -360,30 +360,30 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
     if rev and rev > 0 and oi is not None and ni is not None:
         rows = [("매출 — 판 돈", rev, "bg-primary"), ("영업이익 — 본업으로 남긴 돈", oi, "bg-secondary"), ("순이익 — 세금·이자까지 내고 남은 돈", ni, "bg-secondary/60")]
         bars = "".join(
-            f'<div class="flex items-center gap-2 py-0.5"><span class="w-[52%] text-[12px] leading-4 text-on-surface-variant">{e(k)}</span>'
+            f'<div class="flex items-center gap-3 py-1.5"><span class="w-[52%] text-[12px] leading-4 text-on-surface-variant">{e(k)}</span>'
             f'<span class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><span class="block h-full {col} rounded-full" style="width:{max(min(v / rev * 100, 100), 0):.1f}%"></span></span>'
             f'<span class="w-11 text-right text-[12px] font-semibold tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{"적자" if v < 0 else f"{v / rev * 100:.0f}원"}</span></div>'
             for k, v, col in rows)  # fmt: skip
-        usual = (f'<p class="text-[11px] text-outline mt-0.5">같은 업종({e(mid["업종"])}) {mid["곳수"]}곳 보통(중간값): 영업이익 {mid["백원당"]:.0f}원'
+        usual = (f'<p class="text-[11px] text-outline mt-2">같은 업종({e(mid["업종"])}) {mid["곳수"]}곳 보통(중간값): 영업이익 {mid["백원당"]:.0f}원'
                  f'{". 이 업종은 원래 조금씩 남겨요" if mid["백원당"] < 5 else ""} · <a class="text-primary underline" href="/learn/sector-margin">업종마다 달라요</a></p>'
                  if mid.get("백원당") is not None else "")  # fmt: skip
-        out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold">{y}년, 100원 팔면 얼마 남았나</div>{bars}{usual}')
+        out.append(f'<div class="font-label-regular text-label-regular text-on-surface font-semibold mb-2">{y}년, 100원 팔면 얼마 남았나</div>{bars}{usual}')
         if eq and eq > 0 and li is not None:
             ratio = li / eq * 100
             a, b = eq / (eq + li) * 100, li / (eq + li) * 100
-            out.append(f'<div class="mt-space-sm font-label-regular text-label-regular text-on-surface font-semibold">빚과 내 돈 — 부채비율 {ratio:,.0f}%</div>'
-                       '<div class="mt-1 h-3 w-full rounded-full overflow-hidden flex">'
+            out.append(f'<div class="mt-8 font-label-regular text-label-regular text-on-surface font-semibold">빚과 내 돈 — 부채비율 {ratio:,.0f}%</div>'
+                       '<div class="mt-3 h-3 w-full rounded-full overflow-hidden flex">'
                        f'<span class="h-full bg-primary" style="width:{a:.1f}%"></span><span class="h-full" style="width:{b:.1f}%;background:#F4806A"></span></div>'
-                       f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-1"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
-                       f'<p class="text-[11px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. '
+                       f'<div class="flex justify-between text-[11px] text-on-surface-variant mt-2"><span>내 돈(자본) {notes.won(eq)}</span><span>빚(부채) {notes.won(li)}</span></div>'
+                       f'<p class="mt-1.5 text-[11px] leading-[18px] text-outline">내 돈 100원에 빚 {ratio:,.0f}원이 있다는 뜻이에요. '
                        + (f'같은 업종({e(mid["업종"])}) 보통(중간값)은 {mid["부채비율"]:,.0f}%예요. ' if mid.get("부채비율") is not None else "")
                        + (f'{e(mid["업종"])} 업종은 {e(mid["빚이유"])}. <a class="text-primary underline" href="/learn/sector-debt">더 보기</a>' if mid.get("빚이유")
                           else "" if mid.get("부채비율") is not None else "업종마다 보통 수준이 달라요.")
                        + '</p>')  # fmt: skip
     if not out:
         return ""
-    return ('<div class="py-space-md my-space-xs border-b border-outline-variant/30">' + "".join(out)
-            + '<p class="mt-2 text-[11px] text-outline">연결재무제표 기준 · 자료: DART 사업보고서</p></div>')  # fmt: skip
+    return ('<div class="py-6 my-space-sm border-b border-outline-variant/30">' + "".join(out)
+            + '<p class="mt-5 text-[11px] text-outline">연결재무제표 기준 · 자료: DART 사업보고서</p></div>')  # fmt: skip
 
 
 def returns_html(divs: list[tuple], buys: list[tuple]) -> str:
@@ -699,18 +699,18 @@ def metrics(fins: list[tuple]) -> str:
         top = max(abs(cur), abs(prev)) or 1
         _, _, chg = notes.trend(cur, prev)
         tone = "text-secondary" if chg.startswith("+") or chg == "흑자 전환" else "text-tertiary"
-        bar = lambda v, col, yr: (f'<div class="flex items-center gap-2 mt-1"><span class="w-9 text-[11px] text-outline tabular-nums">{yr}</span>'
+        bar = lambda v, col, yr: (f'<div class="flex items-center gap-3 mt-2.5"><span class="w-9 text-[11px] text-outline tabular-nums">{yr}</span>'
                                   f'<span class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><span class="block h-full rounded-full {col}" style="width:{max(v, 0) / top * 100:.1f}%"></span></span>'
                                   f'<span class="w-16 text-right text-[12px] tabular-nums {"text-tertiary" if v < 0 else "text-on-surface"}">{e(notes.won(v))}</span></div>')  # fmt: skip
-        cells.append(f'<div class="py-1"><div class="flex items-baseline justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{e(label)}</span>'
+        cells.append(f'<div class="py-1"><div class="flex items-baseline justify-between mb-0.5"><span class="font-label-micro text-label-micro text-on-surface-variant">{e(label)}</span>'
                      f'<span class="font-label-micro text-label-micro {tone} font-semibold">{e(chg)}</span></div>'
                      + bar(prev, "bg-outline-variant", py) + bar(cur, "bg-primary", y) + "</div>")  # fmt: skip
     if not cells:
         return ""
-    return ('<div class="py-space-md my-space-xs border-y border-outline-variant/30"><div class="flex justify-between items-center mb-space-xs">'
+    return ('<div class="py-6 my-space-sm border-y border-outline-variant/30"><div class="flex justify-between items-center mb-4">'
             '<span class="font-label-regular text-label-regular text-on-surface font-semibold">주요 실적 한눈에 보기</span>'
             f'<span class="font-label-micro text-label-micro text-on-surface-variant">{py}년 → {y}년</span></div>'
-            f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-space-md gap-y-space-sm">{"".join(cells)}</div></div>')  # fmt: skip
+            f'<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">{"".join(cells)}</div></div>')  # fmt: skip
 
 
 def chapter(title: str, body: str, extra: str = "") -> str:
