@@ -233,32 +233,32 @@ def html(m: dict) -> str:
                     + (f'<span class="text-[12px] text-on-surface-variant">{e(x["note"])}</span>' if x.get("note") else "")
                     + f'</span><span class="shrink-0 self-start px-2 py-0.5 rounded-full bg-primary-fixed/60 text-primary text-[12px] font-semibold">{e(x["tag"])}</span></li>')  # fmt: skip
     ipo = f'<a class="mt-1 block font-body-compact text-body-compact text-on-surface-variant hover:underline" href="/calendar">{e(m["ipo"])} →</a>' if m["ipo"] else ""
-    week = (f'<div class="mt-3 rounded-xl bg-surface-container-low px-4 py-3.5">{h3.format("이번 주")}<ul class="mt-1">{"".join(rows)}</ul>{ipo}</div>') if rows or ipo else ""
+    week = (f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("이번 주")}<ul class="mt-1">{"".join(rows)}</ul>{ipo}</div>') if rows or ipo else ""
     head, body, more = m["tip"]
-    news = f'<div class="mt-3 rounded-xl bg-surface-container-low px-4 py-3.5">{h3.format("내 종목 소식 · " + e(m["when"]))}{paras}</div>'
-    tip = (f'<div class="mt-3 rounded-xl bg-surface-container-low px-4 py-3.5">{h3.format("알아 두면 좋아요")}'
+    news = f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("내 종목 소식 · " + e(m["when"]))}{paras}</div>'
+    tip = (f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("알아 두면 좋아요")}'
            f'<p class="mt-2 text-[15px] font-semibold text-on-surface">{e(head)}</p>'
            f'<p class="mt-1 font-body-reading text-body-reading text-on-surface leading-relaxed">{e(body)}</p>'
            + (f'<a class="mt-1 inline-block font-label-regular text-label-regular text-primary" href="{e(more[1])}">{e(more[0])} →</a>' if more else "") + "</div>")  # fmt: skip
     lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요. 이번 주 일정과 꿀팁을 담았어요."
     chips = [f"새 공시 {len(m['news']) + m['more']}곳" if m["news"] else "새 공시 없음"] + ([f"이번 주 일정 {len(m['week'])}개"] if m["week"] else []) + ["꿀팁 하나"]
-    chip = "".join(f'<span class="px-2 py-0.5 rounded-full bg-surface-container-lowest/80 border border-primary-fixed text-[11px] font-semibold text-primary">{e(c)}</span>' for c in chips)
+    chip = "".join(f'<span class="px-2 py-0.5 rounded-full bg-primary-fixed/50 text-[11px] font-semibold text-primary">{e(c)}</span>' for c in chips)
     # 접힌 카드 한 장(눌러서 펼침) → 위에 뜨는 카드(<dialog>, ✕·바깥 누르면 닫힘) — 사용자 10/10: 「진짜 카드 한 장」 느낌, 입체감
     card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" '
-            'class="group mt-space-md w-full text-left rounded-2xl border border-primary-fixed bg-gradient-to-br from-primary-fixed/70 via-surface-container-lowest to-surface-container-lowest '
+            'class="group mt-space-md w-full text-left rounded-2xl border border-surface-container-high bg-surface-container-lowest '
             'shadow-[0_10px_24px_-12px_rgba(21,69,57,0.45)] hover:shadow-[0_14px_30px_-12px_rgba(21,69,57,0.55)] hover:-translate-y-0.5 transition-all px-4 py-4 flex items-center gap-3">'
             '<span class="w-11 h-11 shrink-0 rounded-xl bg-primary text-on-primary flex items-center justify-center shadow-sm"><span class="material-symbols-outlined">wb_sunny</span></span>'
             f'<span class="flex-1 min-w-0 flex flex-col gap-0.5"><span class="text-[12px] font-semibold text-primary">아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
             f'<span class="text-[15px] font-semibold text-on-surface line-clamp-2">{e(lead)}</span><span class="mt-1 flex flex-wrap gap-1.5">{chip}</span></span>'
             '<span class="material-symbols-outlined shrink-0 text-primary transition-transform group-hover:translate-x-0.5">chevron_right</span></button>')  # fmt: skip
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
-             'class="w-[calc(100%-32px)] max-w-[460px] max-h-[85vh] p-0 rounded-2xl bg-surface-container-lowest shadow-2xl backdrop:bg-black/45 overflow-y-auto">'
-             '<div class="sticky top-0 z-10 px-5 pt-4 pb-4 bg-gradient-to-br from-primary to-primary-container text-on-primary">'
-             '<p class="text-[12px] font-semibold flex items-center gap-1 opacity-90"><span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장</p>'
-             f'<h2 class="mt-1 text-[20px] font-bold">{e(m["title"])}</h2>'
-             '<form method="dialog" class="absolute top-3 right-3"><button aria-label="닫기" class="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center">'
+             'class="w-[calc(100%-32px)] max-w-[460px] max-h-[85vh] p-0 rounded-2xl bg-surface-container-lowest shadow-2xl backdrop:bg-transparent overflow-y-auto">'
+             '<div class="sticky top-0 z-10 px-5 pt-4 pb-4 bg-surface-container-lowest border-b border-surface-container-high">'
+             '<p class="text-[12px] font-semibold flex items-center gap-1 text-primary"><span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장</p>'
+             f'<h2 class="mt-1 text-[20px] font-bold text-on-surface">{e(m["title"])}</h2>'
+             '<form method="dialog" class="absolute top-3 right-3"><button aria-label="닫기" class="w-9 h-9 rounded-full text-on-surface-variant hover:bg-surface-container flex items-center justify-center">'
              '<span class="material-symbols-outlined">close</span></button></form></div>'
-             f'<div class="px-4 pt-1 pb-5">{news}{week}{tip}</div></dialog>')  # fmt: skip
+             f'<div class="px-5 pb-2">{news}{week}{tip}</div></dialog>')  # fmt: skip
     return card + sheet
 
 
