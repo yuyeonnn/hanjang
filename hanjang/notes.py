@@ -408,8 +408,8 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
 
 
 def power(now: float, was: float) -> str:
-    """100원당 남긴 돈(영업이익률 %)이 1년 전보다 — 「남기는 힘이 {힘}어요」의 줄기. 0.5%p 안쪽은 비슷."""
-    return "더 세졌" if now - was >= 0.5 else "약해졌" if was - now >= 0.5 else "비슷했"
+    """100원당 남긴 돈(영업이익률 %)이 1년 전보다 — 「남기는 힘이 {힘}어요」의 줄기. 0.2%p 안쪽만 비슷."""
+    return "더 세졌" if now - was >= 0.2 else "약해졌" if was - now >= 0.2 else "비슷했"
 
 
 STRONGER, WEAKER = re.compile(r"세졌|커졌|좋아졌|나아졌|높아졌"), re.compile(r"약해졌|작아졌|나빠졌|낮아졌")
