@@ -358,7 +358,7 @@ def risk_block(biz: dict | None, fins: list[tuple] | None = None) -> str:
     items = "".join(f'<li class="flex gap-2"><span class="material-symbols-outlined text-tertiary text-[16px] mt-1" aria-hidden="true">error</span><span>{e(r)}{watch(r, fins or [], used)}</span></li>' for r in biz["risks"])
     return chapter("회사가 꼽은 위험", f'<ul class="flex flex-col gap-1.5">{items}</ul>',
                    '<p class="font-label-micro text-label-micro text-outline">회사가 사업보고서에 스스로 적은 위험이에요. 한장의 판단이 아니에요.'
-                   + (' 「살펴볼 숫자」는 그 위험과 관련해 이 노트에 있는 숫자예요 — 앞날을 말하는 게 아니에요.' if used else "") + '</p>')  # fmt: skip
+                   + (' 「살펴볼 숫자」는 그 위험과 관련해 이 노트에 있는 숫자예요. 앞날을 말하는 게 아니에요.' if used else "") + '</p>')  # fmt: skip
 
 
 # 큰 업종 — 통계청 산업분류 코드 앞 두 자리로 묶는다 (도넛 조각을 열 개 안쪽으로)
@@ -758,7 +758,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + (('<div class="pt-space-sm pb-1 flex flex-col gap-1.5"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
                          + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"]) + "</div></div>")
                         if body.get("keywords") else "")
-                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요 — 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
+                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸과 언론사가 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
@@ -783,7 +783,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         parts.append('<section class="mb-12 flex flex-col gap-space-md"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span><h3 class="font-headline-md text-headline-md text-on-surface">좋게 볼 점과 주의해서 볼 점</h3></div>'
                      + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
-                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요 — 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
+                     + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요. 기준은 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
@@ -797,7 +797,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                  f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
-                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지예요 — <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
+                 f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지 알려줘요. <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
                  '<div class="pt-1"><p class="font-label-regular text-label-regular text-on-surface leading-relaxed font-medium">사라·팔아라는 의견도, 목표주가도, 앞으로의 예측도 없어요. 투자 판단은 본인이 해요.</p></div></footer>')  # fmt: skip
     dialog = ('<div class="fixed inset-0 z-50 bg-on-surface/40 backdrop-blur-sm hidden items-end justify-center px-margin pb-6" id="citation-dialog" onclick="closeCitation(event)"><div class="bg-surface-container-lowest w-full max-w-[440px] rounded-2xl p-space-lg shadow-xl flex flex-col gap-space-sm" onclick="event.stopPropagation()"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded font-citation-ref text-citation-ref bg-primary-fixed text-on-primary-fixed font-bold" id="citation-badge"></span><span class="font-label-regular text-label-regular font-bold text-on-surface" id="citation-title"></span></div><button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container" onclick="hideCitation()" type="button"><span class="material-symbols-outlined text-[20px]">close</span></button></div><div class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed" id="citation-body"></div><div class="flex items-center justify-between pt-2"><span class="font-label-micro text-label-micro text-outline font-mono" id="citation-meta"></span><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="#" id="citation-link" rel="noopener noreferrer" target="_blank">원문 확인<span class="material-symbols-outlined text-[14px]">open_in_new</span></a></div></div></div>'
               # JSON 안의 </script> 를 막으려고 < 를 < 로
