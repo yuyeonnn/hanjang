@@ -373,13 +373,14 @@ MEMBER_KO = {
 def member_name(m: str) -> str:
     """「nvda:ProfessionalVisualizationMember」 → 「전문가용 그래픽」 — 모르는 건 영어 낱말을 띄어 쓴다."""
     local = m.split(":")[-1]
-    local = re.sub(r"Member$", "", local)
+    local = re.sub(r"(Member)+$", "", local)
     if local in MEMBER_KO:
         return MEMBER_KO[local]
-    local = re.sub(r"Segment$", "", local)
+    local = re.sub(r"(Operating)?Segment$", "", local)
     if local in MEMBER_KO:
         return MEMBER_KO[local]
-    return re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", local).replace(" And ", " & ")
+    local = re.sub(r"(?<=[a-z])(and|including|excluding|of)(?=[A-Z])", lambda m: " " + m[1] + " ", local)  # 「AssetandWealth」「Chinaincluding」
+    return re.sub(r"\s+", " ", re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", local).replace(" And ", " & ").replace(" and ", " & ")).strip()
 
 
 def ixbrl_parts(html: str, start: str, end: str) -> dict[str, list[dict]]:
@@ -423,6 +424,11 @@ def finest(rows: list[dict]) -> list[dict]:
     return [r for r in rows if r["member"] not in drop]
 
 
+def covering(total: float, *groups: list[dict]) -> list[dict]:
+    """매출의 대부분(60% 이상)을 덮는 첫 묶음 — 일부 표만 잡히면(유나이티드헬스 「제품 12% · 서비스 9%」, 나머지는 보험료) 엉뚱한 비중이 된다."""
+    return next((g for g in groups if g and sum(r.get("revenue") or 0 for r in g) >= total * 0.6), [])
+
+
 def shares(rows: list[dict], total: float) -> list[dict]:
     """매출 비중 — 코드가 나눈다. 큰 것부터 다섯, 1% 밑은 뺀다."""
     out = [{"name": r["name"], "share": f"{r['revenue'] / total * 100:.1f}%"} for r in sorted(rows, key=lambda r: -(r.get("revenue") or 0))
@@ -458,7 +464,7 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     accn, doc, cik = row
     fin = con.execute("select fiscal_year, period_start, period_end, revenue from financials where ticker = ? and rcept_no = ?"
                       " order by fiscal_year desc limit 1", (ticker, accn)).fetchone()  # fmt: skip
-    if not fin or not fin[3]:
+    if not fin:
         return False
     fy, start, end, total = fin
     html = sec.doc(cik, accn, doc)
@@ -472,7 +478,8 @@ def read_10k(con: sqlite3.Connection, sec: "Edgar", ticker: str) -> bool:
     old = {r["member"]: r for r in before["segment"]}
     seg_rows = [{"name": r["name"], "revenue": r.get("revenue"), "op": r.get("op"), "op_prev": old.get(r["member"], {}).get("op"),
                  "revenue_prev": old.get(r["member"], {}).get("revenue")} for r in parts["segment"]]  # fmt: skip
-    body = got | {"segments": shares(finest(parts["product"]) or parts["segment"], total), "geo": shares(finest(parts["geo"]), total),
+    body = got | {"segments": shares(covering(total, finest(parts["product"]), parts["segment"]), total) if total else [],  # 매출이 아직 없는 회사(오클로)는 비중 없이
+                  "geo": shares(covering(total, finest(parts["geo"])), total) if total else [],
                   "seg": {"year": notes.span_label(start, end), "rows": seg_rows} if sum(r["op"] is not None for r in seg_rows) >= 2 else None,
                   "year": fy, "market": "US"}  # fmt: skip
     con.execute("insert or replace into business values (?, ?, ?, ?, ?)",
