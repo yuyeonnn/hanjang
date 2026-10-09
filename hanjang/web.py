@@ -536,6 +536,26 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
+SPREAD = ("#154539", "#22503f", "#2f5b4a", "#3d6656", "#4b7262", "#5a7e6f", "#6a8b7c", "#7b9889", "#8ca597", "#9eb3a6")  # 진한 초록에서 열 걸음
+
+
+def spread(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 10) -> str:
+    """넓게 나눠 가진 포트폴리오 — 긴 막대 하나에 큰 n 종목을 비율대로, 나머지는 연한 회색 한 칸. 밑에 이름·% 두 줄씩.
+    파이는 큰 다섯이 절반도 안 되면 「기타」만 보인다 — 막대는 「상위 10종목이 몇 %」로 얼마나 고르게 나눴는지가 바로 보인다."""
+    total = sum(v for _, v in items)
+    top = [(k, v / total * 100) for k, v in items[:n]]
+    rest = 100 - sum(p for _, p in top)
+    cells = [(k, p, c) for (k, p), c in zip(top, SPREAD)] + ([(f"나머지 {len(items) - len(top):,}종목", rest, DONUT[-1])] if rest >= 0.05 else [])
+    segs = "".join(f'<span class="h-full" style="width:{p:.2f}%;background:{c}" title="{e(k)} {p:.1f}%"></span>' for k, p, c in cells)
+    keys = "".join(f'<li class="flex items-center gap-2 min-w-0"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:{c}"></span>'
+                   f'<span class="flex-1 text-[13px] text-on-surface-variant truncate">{e(k)}</span>'
+                   f'<span class="text-[13px] font-semibold text-on-surface tabular-nums">{p:.1f}%</span></li>' for k, p, c in cells)  # fmt: skip
+    return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
+            f'<p class="mt-1 text-[13px] text-on-surface-variant">상위 {len(top)}종목이 전체의 <b class="text-on-surface">{100 - rest:.0f}%</b> — 나머지는 아주 많은 종목에 조금씩 나눠 가졌어요.</p>'
+            f'<div class="mt-3 flex h-5 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'
+            f'<ul class="mt-4 grid grid-cols-2 gap-x-5 gap-y-2.5">{keys}</ul></section>')  # fmt: skip
+
+
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
     """포트폴리오 파이 — 금액이 큰 n 종목 + 나머지는 기타. 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
     오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
@@ -546,6 +566,8 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
     total = sum(v for _, v in items)
     if not items or total <= 0:
         return ""
+    if sum(v for _, v in items[:n]) / total < 0.5:  # 큰 다섯이 절반도 안 되면 파이는 「기타」 덩어리뿐 — 긴 막대로(국민연금, 사용자 10/10)
+        return spread(items, title)
     parts = [(k, v / total * 100) for k, v in items[:n]]
     rest = 100 - sum(p for _, p in parts)
     parts += [("기타", rest)] if rest >= 0.05 else []
@@ -574,7 +596,7 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
         return f'<ul class="relative flex-1 min-w-0 self-stretch">{rows}</ul>'
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
-            '<div data-pie class="relative mt-2 py-6 flex items-center gap-6 lg:gap-10">' + column(False)
+            '<div data-pie class="relative mt-2 py-6 flex items-start gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
 

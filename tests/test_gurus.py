@@ -93,3 +93,12 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("지분이 큰 순서")
     assert web.pie([("가", 50), ("나", 30), ("다", 20)], n=2).count("<path") == 3 and ">기타</span>" in web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
+
+
+def test_spread_out_portfolio_gets_a_bar_not_a_pie():
+    from hanjang import web
+
+    many = [(f"종목{i}", 3) for i in range(30)]  # 큰 다섯이 17% — 파이면 「기타」 덩어리뿐
+    h = web.pie(many)
+    assert "data-pie" not in h and "상위 10종목이 전체의 <b class=\"text-on-surface\">33%</b>" in h and ">나머지 20종목</span>" in h
+    assert "data-pie" in web.pie([("가", 50), ("나", 30), ("다", 20)])  # 몰려 있으면 그대로 파이
