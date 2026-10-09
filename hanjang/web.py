@@ -627,31 +627,31 @@ def index_chart(got: dict) -> str:
     def xy(d, v):
         return f"{P + (ds.index(d) / (len(ds) - 1)) * (W - P - 4):.1f},{H - 18 - (math.log(v) - lo) / (hi - lo) * (H - 30):.1f}"
 
-    color = {"한국": "text-primary", "미국": "text-secondary"}
-    polys = "".join(f'<polyline class="{color.get(n, "text-outline")}" fill="none" stroke="currentColor" stroke-width="1.6"{' stroke-dasharray="3 2"' if n != "한국" else ""} points="{" ".join(xy(d, v) for d, v in pts)}"/>'
+    # 실선 + 색으로만 구분 — 점선은 끊겨 보이고, 화면 폭에 따라 굵기가 변하지 않게 non-scaling-stroke (사용자 10/9)
+    color = {"한국": "#154539", "미국": "#b4532a"}
+    polys = "".join(f'<polyline stroke="{color.get(n, "#717975")}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="{" ".join(xy(d, v) for d, v in pts)}"/>'
                     for n, pts in lines.items())  # fmt: skip
     years = sorted({d[:4] for d in ds if d[:4].endswith(("0", "5")) and d[5:7] == "01"})
     ticks = "".join(f'<text x="{xy(f"{y}-01-01", math.exp(lo)).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{y}</text>'
                     for y in years if f"{y}-01-01" in ds and int(y) % 10 == 0)  # fmt: skip
-    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {color.get(n, "")} border-t-2 {"border-dashed" if n != "한국" else ""} border-current"></span>{e(n)}</span>' for n in lines)
-    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">주가지수 흐름 (로그 눈금)</figcaption>'
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 h-[2px] rounded-full" style="background:{color.get(n, "#717975")}"></span>{e(n)}</span>' for n in lines)
+    return ('<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">주가지수 흐름 (로그 눈금)</figcaption>'
             f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="한국과 미국 주가지수 흐름">{polys}{ticks}</svg>'
             f'<div class="flex gap-3 font-label-micro text-label-micro text-on-surface-variant">{legend}</div></figure>')  # fmt: skip
 
 
-RATE_LOOK = {"기준금리": ("text-outline", "4 3"), "국고채 3년": ("text-primary", ""), "국고채 10년": ("text-primary", "2 2"),
-             "회사채 AA-": ("text-secondary", ""), "회사채 BBB-": ("text-tertiary", "")}  # fmt: skip
-RATE_BAR = {"text-outline": "bg-outline", "text-primary": "bg-primary", "text-secondary": "bg-secondary", "text-tertiary": "bg-tertiary"}
+# 금리 다섯 가지의 색 — 모두 실선, 색으로만 구분 (점선은 끊겨 보인다, 사용자 10/9)
+RATE_LOOK = {"기준금리": "#9aa19d", "국고채 3년": "#154539", "국고채 10년": "#5f9e88", "회사채 AA-": "#c8902e", "회사채 BBB-": "#a33a24"}
 
 
 def rate_ladder(now: dict, month: str) -> str:
     """그달 금리 사다리 — 낮은 것부터 막대. 신용·기간에 따라 이자가 어떻게 달라지는지 한눈에."""
     top = max(now.values())
     rows = "".join(f'<div class="flex items-center gap-2 py-1"><span class="w-20 font-label-regular text-label-regular text-on-surface">{e(n)}</span>'
-                   f'<div class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><div class="{RATE_BAR[RATE_LOOK[n][0]]} h-full rounded-full" style="width:{v / top * 100:.0f}%"></div></div>'
+                   f'<div class="flex-1 h-2.5 rounded-full bg-surface-container overflow-hidden"><div class="h-full rounded-full" style="width:{v / top * 100:.0f}%;background:{RATE_LOOK[n]}"></div></div>'
                    f'<span class="w-12 text-right font-label-regular text-label-regular text-on-surface font-semibold">{v:.2f}%</span></div>'
                    for n, v in sorted(now.items(), key=lambda x: x[1]))  # fmt: skip
-    return (f'<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">{int(month[:4])}년 {int(month[5:7])}월 금리 (연, 월평균)</figcaption>'
+    return (f'<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">{int(month[:4])}년 {int(month[5:7])}월 금리 (연, 월평균)</figcaption>'
             f'{rows}<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
 
 
@@ -665,15 +665,13 @@ def rate_chart(got: dict) -> str:
     def xy(d, v):
         return f"{P + pos[d] / (len(ds) - 1) * (W - P - 4):.1f},{H - 18 - v / hi * (H - 30):.1f}"
 
-    polys = "".join(f'<polyline class="{RATE_LOOK[n][0]}" fill="none" stroke="currentColor" stroke-width="1.4"'
-                    + (f' stroke-dasharray="{RATE_LOOK[n][1]}"' if RATE_LOOK[n][1] else "") + f' points="{" ".join(xy(d, v) for d, v in pts)}"/>'
-                    for n, pts in got.items())  # fmt: skip
+    polys = "".join(f'<polyline stroke="{RATE_LOOK[n]}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="{" ".join(xy(d, v) for d, v in pts)}"/>' for n, pts in got.items())
     grid = "".join(f'<text x="2" y="{H - 18 - y / hi * (H - 30) + 3:.1f}" font-size="9" fill="currentColor" class="text-outline">{y}%</text>'
                    for y in range(0, int(hi) + 1, 5))  # fmt: skip
     ticks = "".join(f'<text x="{xy(d, 0).split(",")[0]}" y="{H - 4}" font-size="9" text-anchor="middle" fill="currentColor" class="text-outline">{d[:4]}</text>'
                     for d in ds if d[5:7] == "01" and int(d[:4]) % 5 == 0)  # fmt: skip
-    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 {RATE_LOOK[n][0]} border-t-2 {"border-dashed" if RATE_LOOK[n][1] else ""} border-current"></span>{e(n)}</span>' for n in got)
-    return ('<figure class="my-space-md"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">금리 흐름 (연 %, 월평균)</figcaption>'
+    legend = " ".join(f'<span class="inline-flex items-center gap-1"><span class="w-4 h-[2px] rounded-full" style="background:{RATE_LOOK[n]}"></span>{e(n)}</span>' for n in got)
+    return ('<figure class="my-space-md max-w-[560px]"><figcaption class="font-label-regular text-label-regular text-on-surface font-semibold mb-1">금리 흐름 (연 %, 월평균)</figcaption>'
             f'<svg viewBox="0 0 {W} {H}" class="w-full h-auto" role="img" aria-label="기준금리·국고채·회사채 금리 흐름">{grid}{polys}{ticks}</svg>'
             f'<div class="flex flex-wrap gap-x-3 gap-y-1 font-label-micro text-label-micro text-on-surface-variant">{legend}</div>'
             '<p class="font-label-micro text-label-micro text-outline mt-1">자료: 한국은행 ECOS</p></figure>')
@@ -730,7 +728,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 text-[12px] text-outline">{e(" · ".join(x for x in (industry_label(industry), md(made), f"읽음 {stats[0]:,}") if x))}</p></header>',
         price_chart(prices) if prices else "",
-        f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary relative"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">"{e(notes.mend(body["headline"]))}"</p></aside>',
+        f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p></aside>',
     ]  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
@@ -1369,7 +1367,8 @@ class App:
                     chips.append(f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></a>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
-                cells.append(f'<div class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else ""}">{cell}</div>')
+                pick = f' data-day="{iso}" onclick="if(!event.target.closest(&quot;a&quot;))pickDay(this.dataset.day)"' if d.month == m else ""  # 칩(원문 링크) 말고 칸을 누르면 그 날 일정
+                cells.append(f'<div{pick} class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 rounded-lg flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else "cursor-pointer hover:bg-surface-container-low"}">{cell}</div>')
         items = []
         for rs in mine:
             d, name, code, title, rno, dr, t, _ = rs[0]
@@ -1377,61 +1376,65 @@ class App:
             label, chip = TONE_TAG.get(dr or 0, TONE_TAG[0])
             src = "DART 공시: " + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
             title = clean_title(title, code) + (f" 외 {len(rs) - 1}건" if len(rs) > 1 else "")
-            items.append((1, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
+            items.append((1, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
                          f'<span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · {e(name)} ({e(t)})</span>'
                          f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></div>'
                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(title)}</h3>'
                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(EVENT_EXPLAIN.get(code, ""))}</p>'
-                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><span class="">{e(src)}</span></div></article></a>'))  # fmt: skip
+                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface">{e(src)}</a></div></article>'))  # fmt: skip
         soon = [(d, *x) for d in sorted(ahead) if d[:7] == f"{y}-{m:02d}" for x in ahead[d]]
-        items += [(0, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
+        items += [(0, d, f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
                  f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{(dd := date.fromisoformat(d)).month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})</span> · {e(name)} <b>{e(what)}</b></span>'
-                 '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold flex-shrink-0">일정</span></article></a>')
+                 f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a><span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold">일정</span></span></article>')
                   for d, name, _, what, rno in soon]  # fmt: skip
         for rno, pay, name, t, total, mats, uses, lead in bonds:  # 내 종목 회사채 — 공시와 같은 자리
             if pay[:7] != f"{y}-{m:02d}":
                 continue
             dp = date.fromisoformat(pay)
-            spans = "·".join(dict.fromkeys(x for x in (notes.span(dp, date.fromisoformat(v)) for v in (mats or "").split(",") if v) if x))
-            used: dict[str, int] = {}
-            for u in (uses or "").split("|"):
-                for k, v in (json.loads(u) if u else {}).items():
-                    used[k] = used.get(k, 0) + v
-            use_txt = " · ".join(f"{notes.USE_PLAIN.get(k.replace(' ', ''), k)} {notes.won(v)}" for k, v in sorted(used.items(), key=lambda kv: -kv[1]))
-            say = (f"회사가 채권을 팔아 {notes.won(total)}을 빌려요" + (f" — {spans} 뒤에 갚는 조건이에요" if spans else "") + "."
-                   + (f" 빌린 돈은 {use_txt}에 쓴다고 적었어요." if use_txt else "") + (f" 대표 주관 {lead}." if lead else ""))  # fmt: skip
-            items.append((1, pay, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
+            say = "회사가 채권을 팔아 돈을 빌려요."
+            items.append((1, pay, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
                           f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{dp.month}월 {dp.day}일 ({"월화수목금토일"[dp.weekday()]}) 납입 · {e(name)} ({e(t)})</span>'
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-semibold">회사채</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 회사채 {e(notes.won(total))}</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          '<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(채무증권)</span></article></a>'))  # fmt: skip
+                          f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(채무증권)</a></article>'))  # fmt: skip
         for name, a, b, listed, price, total, lead, uses, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
             d = a if a[:7] == f"{y}-{m:02d}" else listed if listed and listed[:7] == f"{y}-{m:02d}" else None
             if not d:
                 continue
             da, db_ = date.fromisoformat(a), date.fromisoformat(b)
-            bits = [f"1주 {price:,}원(증권신고서 기준)" if price else "", f"모으는 돈 {sources.won_short(total)}" if total else "", f"대표 주관 {lead}" if lead else ""]
-            say = ("주식시장에 새로 들어오려는 회사가 주식을 팔아 돈을 모아요. " + " · ".join(x for x in bits if x) + "."
-                   + (f" 모은 돈은 {uses}에 쓴다고 적었어요." if uses else "")
-                   + (f" 상장 예정일은 {(dl := date.fromisoformat(listed)).month}월 {dl.day}일이에요." if listed else ""))  # fmt: skip
-            items.append((9, d, f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
+            say = "새로 상장하려는 회사가 주식을 팔아 돈을 모아요."
+            items.append((9, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
                           f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{da.month}월 {da.day}일 ~ {db_.month}월 {db_.day}일 청약 · 시장 전체</span>'
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 공모주 청약</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          '<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</span></article></a>'))  # fmt: skip
+                          f'<a href="{e(notes.DART.format(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</a></article>', {x for x in (a, listed) if x}))  # fmt: skip
         for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
             if d[:7] != f"{y}-{m:02d}":
                 continue
             dd, (who, url) = date.fromisoformat(d), sources.MACRO_SOURCE[nat + kind]
-            items.append((1 + sources.MACRO_RANK[kind], d, f'<a href="{e(url)}" target="_blank" rel="noopener"><article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
+            items.append((1 + sources.MACRO_RANK[kind], d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
                           f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · 시장 전체</span>'
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-dashed border-outline-variant text-on-surface-variant font-semibold">시장 일정</span></div>'
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(what)}</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(sources.MACRO_EXPLAIN[(kind, nat)])}</p>'
-                          f'<span class="font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</span></article></a>'))  # fmt: skip
-        items = [html_ for _, _, html_ in sorted(items, key=lambda x: (x[0], x[1]))]  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
+                          f'<a href="{e(url)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</a></article>'))  # fmt: skip
+        items.sort(key=lambda x: (x[0], x[1]))  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
+        days: dict[str, list] = {}  # 달력에서 고른 날의 일정 — 같은 순서로, 공모주는 청약 첫날·상장일 둘 다
+        for x in items:
+            for dd_ in x[3] if len(x) > 3 else {x[1]}:
+                days.setdefault(dd_, []).append(x[2])
+        items = [x[2] for x in items]
+        pick = today.isoformat() if (today.year, today.month) == (y, m) else f"{y}-{m:02d}-01"  # 처음엔 오늘, 다른 달이면 1일
+        day_lists = "".join(f'<div data-list="{d}"{"" if d == pick else " hidden"}>{"".join(h)}</div>' for d, h in days.items() if d[:7] == f"{y}-{m:02d}")
+        day_none = f'<p data-list="none" class="py-3.5 font-body-compact text-body-compact text-on-surface-variant"{" hidden" if pick in days else ""}>이 날은 일정이 없어요.</p>'
+        pick_js = ("<script>function pickDay(d){var t=new Date(d+'T00:00');"
+                   f"document.getElementById('day-title').textContent=d=='{today.isoformat()}'?'오늘 일정':(t.getMonth()+1)+'월 '+t.getDate()+'일 ('+'일월화수목금토'[t.getDay()]+') 일정';"
+                   "var hit=false;document.querySelectorAll('[data-list]').forEach(function(x){var on=x.dataset.list==d;x.hidden=!on;hit=hit||on});"
+                   "document.querySelector('[data-list=none]').hidden=hit;"
+                   "document.querySelectorAll('[data-day]').forEach(function(c){c.classList.toggle('bg-primary-fixed',c.dataset.day==d)})}"
+                   f"pickDay('{pick}')</script>")  # fmt: skip
         if not items:
             items.append('<p class="py-3.5 font-body-compact text-body-compact text-on-surface-variant">이 달엔 내 종목의 큰 공시가 없어요.</p>')
         # 이 달 일정에 나온 공시 종류마다 그에 맞는 읽기 팁 글 — 많이 나온 종류부터, 같은 글은 한 번, 최대 3편
@@ -1467,13 +1470,14 @@ class App:
                  '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
-                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
+                 '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="pb-2 border-b border-surface-container-highest"><h2 id="day-title" class="font-headline-md text-headline-md text-on-surface">오늘 일정</h2></div>'
+                 f'{day_lists}{day_none}</section><section class="flex flex-col"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
                  f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
                  f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'
                  '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당), 점선 칩은 금리·물가·고용·선거 같은 시장 일정이에요. 공휴일: 한국천문연구원.</p></footer>'
-                 "</div></main>" + bottom_nav("calendar"))  # fmt: skip
+                 "</div></main>" + bottom_nav("calendar") + pick_js)  # fmt: skip
         return page("캘린더", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
@@ -1899,7 +1903,7 @@ class App:
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     f'<aside class="mb-space-lg py-space-md px-space-lg bg-surface-container-low rounded-xl border-l-2 border-primary"><p class="font-body-reading-strong text-body-reading-strong text-primary leading-relaxed">{self.marked(a["lead"])}</p></aside>'
+                     f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p></aside>'
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
