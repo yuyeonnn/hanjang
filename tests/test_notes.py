@@ -158,7 +158,7 @@ def test_fallback_headline_is_the_companys_biggest_issue():
     con = _con()
     collect.save_disclosures(con, [sources.Disclosure("20261001000001", "005930", date(2026, 10, 1), "유상증자결정")])
     con.execute("update disclosures set code='RIGHTS_ISSUE', importance=3, direction=-1 where rcept_no='20261001000001'")
-    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "10월 1일에 유상증자 공시가 있었어요."
+    assert notes.code_headline(notes.facts(con, "005930", date(2026, 10, 7))) == "새 주식을 찍어 팔아 돈을 모으기로 했어요(10월 1일)."  # 어려운 말 대신 무슨 일인지
 
 
 def test_year_may_be_written_but_nothing_else():
@@ -363,7 +363,7 @@ def test_unit_after_slot_is_not_doubled():
 def test_story_facts_say_where_this_year_stands():
     fin = [(2025, 300, 30, 0, 0, 0, "r", "CFS"), (2024, 250, 10, 0, 0, 0, "r", "CFS"), (2023, 200, -5, 0, 0, 0, "r", "CFS")]
     f5, f6 = notes.story_facts(fin, "u", "2025년")
-    assert f5["slots"] == {"연도": "2025년", "비율": "10.0%", "백원당": "10원", "전년비율": "4.0%", "전년연도": "2024년"}
+    assert f5["slots"] == {"연도": "2025년", "비율": "10.0%", "백원당": "10원", "전년비율": "4.0%", "전년연도": "2024년", "힘": "더 세졌"}
     assert f6["slots"]["매출자리"] == "가장 많았" and f6["slots"]["이익바닥해"] == "2023년" and f6["slots"]["기간"] == "2023~2025년"
 
 
@@ -453,7 +453,7 @@ def test_tidy_broken_joins():
 
 def test_relation_says_what_numbers_mean():
     r = notes.relation(130, 100, 123, 100)
-    assert r == {"백원당": "95원", "전년백원당": "100원", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
+    assert r == {"백원당": "95원", "전년백원당": "100원", "힘": "약해졌", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
     assert notes.relation(110, 100, 150, 100)["관계"] == "판 돈보다 남긴 돈이 더 빨리 늘었"
     assert notes.relation(90, 100, 80, 100)["관계"] == "판 돈도 남긴 돈도 줄었"
     assert "관계" not in notes.relation(100, None, 10, None)
@@ -527,6 +527,18 @@ def test_no_credit_falls_back_to_code_without_more_calls(monkeypatch):
     assert len(calls) == 1  # 한 번 막히면 그 뒤로는 묻지 않는다
 
 
+def test_empty_concern_is_filled_by_code_and_code_headline_is_plain():
+    fs = [{"id": "F2", "text": "2025년 영업이익 1조원(전년보다 -10.0%)", "tone": -1, "url": "u",
+           "slots": {"연도": "2025년", "값": "1조원", "변화": "-10.0%", "방향": "줄었", "폭": "10.0%"}},
+          {"id": "D1", "text": "9월 14일 유상증자 공시 — 무슨 일: 새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주주에게 걸리는 쪽으로 분류",
+           "tone": -1, "url": "u", "slots": {"날짜": "9월 14일", "종류": "유상증자", "무슨일": "새 주식을 찍어 팔아 돈을 모으기로 했어요"}}]
+    j = {"headline": "", "summary": [{"text": "장사가 줄었어요.", "refs": ["F2"]}], "sections": [], "good": [], "concern": [],
+         "good_title": "", "concern_title": ""}
+    note = notes.fill_note(j, fs)
+    assert [s["refs"] for s in note["concern"]] == [["F2"], ["D1"]]
+    assert "유상증자" not in notes.code_headline(fs) and "(9월 14일)" in notes.code_headline(fs)
+
+
 def test_industry_uses_median_and_skips_ratios_beyond_100pct():
     con = db.connect(":memory:")
     co = [("A1", 100, 2), ("A2", 100, 9), ("A3", 100, 12), ("A4", 100, 13), ("SQ", 100, 623)]  # SQ: 지분 이익이 영업이익(623%)
@@ -537,3 +549,13 @@ def test_industry_uses_median_and_skips_ratios_beyond_100pct():
     assert "4곳 가운데" in f["text"] and "중간값 10.5%" in f["text"] and "SQ" not in f["text"] and f["slots"]["중간값"] == "10.5%"
     assert notes.industry_fact(con, "SQ") == []  # 같은 잣대가 아닌 회사는 견주지 않는다
     assert "2번째로 높았" in notes.industry_fact(con, "A3")[0]["text"] and "가장 낮았" in f["text"]
+
+
+def test_margin_power_is_decided_by_code():
+    assert notes.relation(100, 100, 44, 47)["힘"] == "약해졌" and notes.power(13.1, 10.9) == "더 세졌" and notes.power(9.0, 9.1) == "비슷했" and notes.power(1.5, 1.9) == "약해졌"
+    by = {"F8": {"id": "F8", "text": "100원당 44원 · 47원", "tone": 0, "slots": {"백원당": "44원", "전년백원당": "47원", "힘": "약해졌"}}}
+    with pytest.raises(ValueError):
+        notes.fill({"text": "본업으로 {F8.백원당}을 남겼어요(1년 전엔 {F8.전년백원당}). 남기는 힘이 더 세졌어요.", "refs": ["F8"]}, by)
+    assert notes.fill({"text": "남기는 힘이 {F8.힘}어요.", "refs": ["F8"]}, by)["text"] == "남기는 힘이 약해졌어요."
+    with pytest.raises(ValueError):
+        notes.check_sentence({"text": "더 빨리 증가).", "refs": ["F8"]}, [by["F8"]])
