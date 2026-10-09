@@ -733,6 +733,21 @@ def test_learn_related_tips():
     assert "함께 읽으면 좋은 팁" in body and 'href="/learn/disclosure"' in body
 
 
+def test_prebuilt_css_has_every_class():
+    """화면 CSS 는 미리 만든 파일이다 — 클래스를 새로 쓰고 다시 만들지 않으면 그 모양이 사라진다.
+    실패하면: npx tailwindcss@3.4.17 -c tailwind.config.js -o hanjang/static/app.css --minify"""
+    from pathlib import Path
+
+    css = (web.STATIC / "app.css").read_text(encoding="utf-8")
+    not_tailwind = {"material-symbols-outlined", "pb-safe", "pt-safe", "shadow-xs"}  # 구글 글꼴 · 머리의 <style> · 시안에 있지만 Tailwind 3 에 없는 것(CDN 때도 없었다)
+    toks = {t for f in Path(web.__file__).parent.glob("*.py")
+            for m in re.finditer(r'class="([^"{}\']*)"', f.read_text(encoding="utf-8")) for t in m.group(1).split()}
+    sel = lambda t: "." + re.sub(r"[^a-zA-Z0-9_-]", lambda c: "\\2c " if c.group() == "," else "\\" + c.group(), t)  # Tailwind 의 이름 적기
+    missing = sorted(t for t in toks - not_tailwind if sel(t) not in css)
+    assert len(toks) > 300 and not missing, missing
+    assert "cdn.tailwindcss.com" not in call(_app()[0], "/")[2]
+
+
 def test_learn_story_box():
     from hanjang import learn
 
