@@ -596,6 +596,11 @@ def test_this_week_only_for_this_weeks_events_and_short_second_date():
 
 
 def test_no_dashes_in_sentences():
-    assert notes.mend("결산 실적 발표 날짜를 미리 알렸어요 — 아직 숫자는 없어요.") == "결산 실적 발표 날짜를 미리 알렸어요. 아직 숫자는 없어요."
+    assert notes.mend("새 주식을 찍어 팔기로 했어요 — 주식 수가 늘어요.") == "새 주식을 찍어 팔기로 했어요. 주식 수가 늘어요."
     assert notes.mend("보도가 있었어요 — 적자 전환이 불가피하다는 전망이에요.") == "보도가 있었어요. 적자 전환이 불가피하다는 전망이에요."
     assert "—" not in notes.plain("결산실적공시예고") and "—" not in notes.plain("유상증자결정")
+
+
+def test_earnings_date_notice_is_not_a_yearly_result():
+    assert notes.mend("1년치 결산 실적을 발표할 날짜를 미리 알렸어요. 아직 숫자는 없어요(7월 29일).") == "실적을 발표할 날짜를 미리 알렸어요(7월 29일)."
+    assert notes.plain("결산실적공시예고") == "실적을 발표할 날짜를 미리 알렸어요"
