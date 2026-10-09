@@ -552,7 +552,7 @@ def test_industry_uses_median_and_skips_ratios_beyond_100pct():
 
 
 def test_margin_power_is_decided_by_code():
-    assert notes.relation(100, 100, 44, 47)["힘"] == "약해졌" and notes.power(13.1, 10.9) == "더 세졌" and notes.power(9.0, 9.2) == "비슷했"
+    assert notes.relation(100, 100, 44, 47)["힘"] == "약해졌" and notes.power(13.1, 10.9) == "더 세졌" and notes.power(9.0, 9.1) == "비슷했" and notes.power(1.5, 1.9) == "약해졌"
     by = {"F8": {"id": "F8", "text": "100원당 44원 · 47원", "tone": 0, "slots": {"백원당": "44원", "전년백원당": "47원", "힘": "약해졌"}}}
     with pytest.raises(ValueError):
         notes.fill({"text": "본업으로 {F8.백원당}을 남겼어요(1년 전엔 {F8.전년백원당}). 남기는 힘이 더 세졌어요.", "refs": ["F8"]}, by)
