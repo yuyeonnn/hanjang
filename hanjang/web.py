@@ -269,7 +269,7 @@ def mini(href: str, mark: str, title: str, excerpt: str, source: str, day: str, 
 def gist(body: dict) -> str:
     """요약 한 줄 — 한 장 요약의 첫 문장, 없으면 첫 절의 첫 문장."""
     first = body.get("summary") or next((s["sentences"] for s in body.get("sections", []) if s["sentences"]), [])
-    return first[0]["text"] if first else ""
+    return notes.mend(first[0]["text"]) if first else ""
 
 
 # 로고를 못 쓸 때의 표시 — 그룹 대표색 동그라미 + 짧은 이름. 로고 모양은 따라 그리지 않는다(색·글자만).
@@ -568,7 +568,7 @@ def bottom_nav(tab: str) -> str:
 
 
 def safe_url(u: str) -> str:
-    return u if u.startswith(("https://", "http://")) else "#"
+    return u if u.startswith(("https://", "http://", "/learn/")) else "#"
 
 
 # --- 우리가 쓴 고정 풀이 (공시 내용을 지어내지 않는다 — 낱말·공시 종류의 뜻만) ---
@@ -643,7 +643,7 @@ def sentence(s: dict, seen: set | None = None) -> str:
 
 # 문단 나누기 — 근거 사실이 다루는 질문이 바뀌면 새 문단 (한 문단에 질문 하나, 사용자 10/9 검토)
 TOPIC = {"F1": "실적", "F2": "실적", "F5": "실적", "F6": "흐름", "F7": "사업", "F10": "업종", "F3": "살림", "F4": "살림",
-         "F8": "올해", "F9": "올해", "F11": "사업", "F12": "살림", "F13": "올해", "F14": "살림", "F15": "사업", "F16": "전망"}  # fmt: skip
+         "F8": "올해", "F9": "올해", "F11": "사업", "F12": "살림", "F13": "올해", "F14": "살림", "F15": "사업", "F16": "전망", "F17": "살림"}  # fmt: skip
 
 
 def paras(sents: list[dict], seen: set) -> str:
@@ -675,7 +675,7 @@ def cite_data(facts: list[dict]) -> dict:
         rno = re.search(r"rcpNo=(\d+)", f["url"])
         out[f["id"]] = {
             "badge": f"[{f['id']}]",
-            "title": {"F": "금융감독원 전자공시시스템 (DART) · 사업보고서",
+            "title": "한장 읽기 팁 · 업종별로 읽기" if f["url"].startswith("/learn/") else {"F": "금융감독원 전자공시시스템 (DART) · 사업보고서",
                       "D": "금융감독원 전자공시시스템 (DART) · 공시",
                       "I": "금융감독원 전자공시시스템 (DART) · 지분 보고"}.get(k, f"{f.get('slots', {}).get('매체', '')} 기사"),
             "body": notes.reword(f["text"]),
@@ -948,6 +948,7 @@ class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
+        self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
@@ -1071,7 +1072,8 @@ class App:
                     self.con.execute("insert into follows values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
                 self.con.commit()
             back = form.get("back", "")
-            return self.see(back if back.startswith("/") and not back.startswith("//") else f"/u/{other}" if other else "/feed")
+            ok = re.fullmatch(r"/[A-Za-z0-9_/?=&%.\-]*", back) and not back.startswith("//")  # 「/\evil.com」 → 「//evil.com」 막기
+            return self.see(back if ok else f"/u/{other}" if other else "/feed")
         if path == "/regram" and method == "POST":
             return self.regram(uid, form)
         if path == "/me/profile" and method == "POST":
@@ -1230,15 +1232,20 @@ class App:
     def start_first(self, ticker: str) -> None:
         """노트가 없는 종목을 담으면 그 종목만 바로 받아 첫 노트를 쓴다 — 따로 띄운 실에서 (화면은 기다리지 않는다).
         같은 종목을 여러 사람이 동시에 담아도 한 번만."""
-        if ticker in self.making:
+        row = self.con.execute("select market from stocks where ticker = ?", (ticker,)).fetchone()
+        if ticker.startswith("ETF") or (row and row[0] != "KR"):  # ETF·미국은 DART 에서 받을 것이 없다 — 각자의 받기가 맡는다
             return
-        self.making.add(ticker)
+        with self.making_lock:
+            if ticker in self.making:
+                return
+            self.making.add(ticker)
 
         def run():
             try:
                 FIRST(ticker)
             finally:
-                self.making.discard(ticker)
+                with self.making_lock:
+                    self.making.discard(ticker)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1297,7 +1304,7 @@ class App:
         both = len({r[6] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
         for t, name, week, body, facts, home, mkt in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
+            head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
@@ -1959,9 +1966,9 @@ class App:
                 photos.used.add(got[0])
             return got[0]
         img = (photos or Photos()).pick(kind, ind, name)
-        self.con.execute("update articles set photo = ? where id = ?", (img, aid))
+        self.con.execute("update articles set photo = ? where id = ? and photo is null", (img, aid))
         self.con.commit()
-        return img
+        return self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()[0] or img
 
     def latest(self, uid: int, photos: "Photos") -> str:
         """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
@@ -2011,7 +2018,7 @@ class App:
             "select s.ticker, s.name, n.body, s.induty_code, n.made_at,"
             " (select count(*) from views v where v.page = 'note' and v.ticker = s.ticker and v.at >= n.week) c"
             " from notes n join stocks s using(ticker) where n.week = (select max(week) from notes) order by c desc, s.name limit 20").fetchall()  # fmt: skip
-        cards = "".join(story(f"/n/{t}", photos.pick(None, ind, name), json.loads(b)["headline"], gist(json.loads(b)), name, made[:10].replace("-", "."))
+        cards = "".join(story(f"/n/{t}", photos.pick(None, ind, name), notes.mend(json.loads(b)["headline"]), gist(json.loads(b)), name, made[:10].replace("-", "."))
                         for t, name, b, ind, made, c in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
                 f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{cards}</div></section>')  # fmt: skip

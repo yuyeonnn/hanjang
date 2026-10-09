@@ -691,3 +691,12 @@ def test_follow_notice_and_lists():
 def test_industry_chip_icon():
     assert "settings" in web.industry_chip("29") and ">기계<" in web.industry_chip("29")
     assert web.industry_chip(None) == ""
+
+
+def test_follow_back_must_be_our_path():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
+    con.commit()
+    b = f"s={web.sign('2', SECRET)}"
+    assert call(app, "/follow", "POST", "u=1&back=" + quote("/\\evil.example"), b)[1]["Location"] == "/u/1"
+    assert call(app, "/follow", "POST", "u=1&back=" + quote("/f/1?tab=followers"), b)[1]["Location"] == "/f/1?tab=followers"

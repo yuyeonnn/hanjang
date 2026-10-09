@@ -133,7 +133,7 @@ def test_us_facts_use_dollars_with_won_in_brackets_and_company_months(monkeypatc
     assert fs["F3"]["tone"] == 0 and "빚이유" not in fs["F3"]["slots"]  # 미국 부채비율은 판단하지 않는다 · 낮으면 이유도 없다
     assert notes.mend("중간값은 26달러이라서 높아요. 배당 10억 달러이에요.") == "중간값은 26달러라서 높아요. 배당 10억 달러예요."
     a = {f["id"]: f for f in notes.facts(con, "AAPL", date(2026, 10, 9))}
-    assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F3"]["slots"]["빚이유"]
+    assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F17"]["slots"]["빚이유"]  # 빚이 많은 까닭은 따로 사실(F17) — 근거 링크가 그 설명을 뒷받침하게
     assert notes.won(123_456_789_000) == "1,235억원" and notes._MARKET["per"] == "원"  # 끝나면 국내로 되돌아간다
 
 
