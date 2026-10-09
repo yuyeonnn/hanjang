@@ -84,7 +84,7 @@ TITLE_PLAIN = (
     (r"(?<!무)유상증자결정", "새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
     (r"발행가액|발행가격", "새로 찍는 주식을 한 주에 얼마에 팔지 값이 정해졌어요"),
     (r"증권신고서", "주식·채권을 팔기 전에 금융감독원에 내는 신고서예요 — 얼마를 왜 모으는지 적혀 있어요"),
-    (r"결산실적공시예고", "1년치 결산 실적을 발표할 날짜를 미리 알렸어요 — 아직 숫자는 없어요"),
+    (r"결산실적공시예고", "실적을 발표할 날짜를 미리 알렸어요"),
     (r"기업설명회", "투자자에게 회사를 설명하는 자리(IR)를 연다고 알렸어요"),
     (r"발행결과", "앞서 정한 증자·채권 발행을 실제로 마쳤다는 결과 보고예요"),
     (r"무상증자결정", "주주에게 새 주식을 공짜로 나눠 주기로 했어요"),
@@ -811,10 +811,16 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
         d = date.fromisoformat(d)
         tone = ""
         day = f"{d.month}월 {d.day}일"
-        what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
+        easy = plain(title)
+        if "결산실적공시예고" in re.sub(r"\s", "", title):  # 공시에서 읽어 둔 실제 발표일이 있으면 함께 — 「7월 30일에 실적을 발표하겠다고 미리 알렸어요」
+            on = con.execute("select date from events where rcept_no = ? order by date limit 1", (rno,)).fetchone()
+            if on:
+                o = date.fromisoformat(on[0])
+                easy = f"실적을 {o.month}월 {o.day}일에 발표하겠다고 미리 알렸어요"
+        what = f" — 무슨 일: {easy}" if easy else ""
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": link(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」", "시기": when(d, today)}
-                    | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
+                    | ({"무슨일": easy} if easy else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
                        " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터
@@ -951,6 +957,14 @@ def undash(text: str) -> str:
     return re.sub(r"\s*—\s*", ", ", text)
 
 
+def reword(text: str) -> str:
+    """예전에 틀리게 풀었던 말 — 「결산실적공시 예고」는 1년치가 아니라 실적 발표 날짜 알림이다 (사용자 10/9). 노트 글·출처 창 모두."""
+    text = re.sub(r"1년치 결산 실적을 발표할 날짜를", "실적을 발표할 날짜를", text)
+    text = re.sub(r"1년(?:치)? (?:결산 )?실적을 언제 발표할지", "실적을 언제 발표할지", text)
+    text = re.sub(r"(날짜를 미리 알렸어요|발표할지 미리 알렸어요)(\([^()]*\))?(?:\.|,)?\s*(?:—\s*)?아직 숫자는 없어요", r"\1\2", text)
+    return re.sub(r"(미리 알렸[^.]*\.)\s*아직 숫자는 없어요\.?", r"", text)  # 「…알렸다고도 했어요. 아직 숫자는 없어요.」
+
+
 def mend(text: str) -> str:
     """빈칸 값(낱말 줄기 「4번째로 많았」「줄였」, 「2021년」)에 AI 가 토씨·글자를 또 붙여 깨진 이음을 고친다.
     fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」 (사용자 10/9 검토)."""
@@ -967,6 +981,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(았|었)에(?=\s)", r"\1던 해에", text)  # 「4번째로 많았에 머물렀어요」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
     text = undash(text)
+    text = reword(text)
     return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
 
 

@@ -576,7 +576,7 @@ def cite_data(facts: list[dict]) -> dict:
             "title": {"F": "금융감독원 전자공시시스템 (DART) · 사업보고서",
                       "D": "금융감독원 전자공시시스템 (DART) · 공시",
                       "I": "금융감독원 전자공시시스템 (DART) · 지분 보고"}.get(k, f"{f.get('slots', {}).get('매체', '')} 기사"),
-            "body": f["text"],
+            "body": notes.reword(f["text"]),
             "meta": f"공시접수번호: {rno[1]}" if rno else f"기사 날짜: {f.get('slots', {}).get('날짜', '')}",
             "url": safe_url(f["url"]),
         }  # fmt: skip
