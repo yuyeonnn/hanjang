@@ -772,3 +772,22 @@ def test_learn_figures():
     body = call(app, "/learn/start", cookie=ck)[2]
     assert "주식을 처음 사기까지" in body and "이틀 뒤 내 것으로 확정" in body
     assert "PER" in web.figure(learn.FIGURE["ratios"]) and "−4%" in web.figure(learn.FIGURE["inverse-leverage"])
+
+
+def test_slow_mail_does_not_stop_other_pages(monkeypatch):
+    """부하 시험(10/10) — 요청은 잠금 하나로 차례대로 처리하는데, 로그인 메일을 보내는 몇 초 동안 사이트 전체가 멈췄다."""
+    import threading
+    import time
+
+    app, _ = _app()
+    sending, done = threading.Event(), threading.Event()
+    monkeypatch.setattr(mail, "send", lambda *a, **k: (sending.set(), done.wait(5)))  # 메일 서버가 느리다
+    t = threading.Thread(target=lambda: call(app, "/login", "POST", "email=a%40b.c&agree=1"))
+    t.start()
+    assert sending.wait(5)
+    started = time.perf_counter()
+    assert call(app, "/privacy")[0].startswith("200")  # 메일을 기다리는 동안에도 다른 화면은 열린다
+    assert time.perf_counter() - started < 1
+    done.set()
+    t.join(5)
+    assert not t.is_alive()

@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -1120,10 +1121,27 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
+        # 요청은 한 번에 하나씩 — DB 연결 하나를 돌려 쓴다. 화면 하나가 수 ms 라 이 규모에선 이게 가장 빠르고 공평하다
+        # (부하 시험 10/10: 실마다 연결을 열면 초당 250건 → 60건, 느린 요청 16초). 대신 메일·AI 처럼 느린 바깥 일 동안엔 잠금을 놓는다(outside)
+        self.turn = threading.Lock()
+        self.local = threading.local()
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
+
+    @contextmanager
+    def outside(self):
+        """느린 바깥 일(로그인 메일·AI 사진 읽기, 수 초) 동안 잠금을 놓아 다른 사람의 화면이 돌게 한다.
+        이 안에서는 DB 를 쓰지 않는다 — 연결을 다른 요청이 쓰고 있다."""
+        held = getattr(self.local, "held", False)
+        if held:
+            self.turn.release()
+        try:
+            yield
+        finally:
+            if held:
+                self.turn.acquire()
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
@@ -1141,7 +1159,12 @@ class App:
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
         uid = unsign(cookie.get("s", ""), self.secret)
-        status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+        with self.turn:
+            self.local.held = True
+            try:
+                status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+            finally:
+                self.local.held = False
         kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8")]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
@@ -1390,7 +1413,8 @@ class App:
             return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
         self.sent[email] = times + [now]
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
-        mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+        with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
+            mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def src(self, rno: str | None) -> str:
@@ -1492,7 +1516,8 @@ class App:
         schema = {"type": "object", "additionalProperties": False, "required": ["names"],
                   "properties": {"names": {"type": "array", "items": {"type": "string"}}}}  # fmt: skip
         try:
-            got = llm.ask("scan", "holdings", {}, lambda j: [str(x) for x in j["names"]][:40], schema, image=img)
+            with self.outside():  # AI 가 사진을 읽는 수십 초 동안 다른 화면은 돈다
+                got = llm.ask("scan", "holdings", {}, lambda j: [str(x) for x in j["names"]][:40], schema, image=img)
         except RuntimeError:
             got = None
         if not got:
@@ -2546,9 +2571,10 @@ if __name__ == "__main__":
 
     class Server(ThreadingMixIn, WSGIServer):
         """연결마다 스레드 — 브라우저가 미리 열어 둔 빈 연결 하나에 서버 전체가 멈추지 않게.
-        ponytail: DB 는 연결 하나를 잠금으로 돌려 쓴다. 사용자가 늘면 요청마다 연결로"""
+        요청 처리는 App 안의 잠금 하나로 차례대로(App.turn) — 메일·AI 를 기다리는 동안만 놓는다."""
 
         daemon_threads = True
+        request_queue_size = 128  # 한꺼번에 몰린 연결을 받아 둘 줄 (기본 5 — 넘치면 연결을 끊는다)
 
     sys.stderr.reconfigure(encoding="utf-8")  # 윈도우 콘솔(cp949)에서 한글 로그가 깨지지 않게
     cfg = env()
@@ -2556,12 +2582,6 @@ if __name__ == "__main__":
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
     app = App(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False), cfg["SECRET"])
-    lock = threading.Lock()
-
-    def serial(environ, start_response):
-        with lock:
-            return app(environ, start_response)
-
     host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
-    make_server(host, port, serial, server_class=Server).serve_forever()
+    make_server(host, port, app, server_class=Server).serve_forever()
