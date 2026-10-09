@@ -196,7 +196,7 @@ def test_news_sentence_may_copy_numbers_from_its_rss_summary():
 
 def test_dates_of_facts_may_be_written_directly():
     by = {f["id"]: f for f in notes.facts(_con(), "005930", date(2026, 10, 7))}
-    assert notes.fill({"text": "8월 21일에 자사주 매입 공시가 있었어요.", "refs": ["D1"]}, by)["text"].startswith("8월 21일")
+    assert notes.fill({"text": "8월 21일에 자사주 매입 공시가 있었어요.", "refs": ["D1"]}, by)["text"] == "자사주 매입 공시가 있었어요(8월 21일)."  # 날짜는 문장 끝 괄호로
     assert notes.fill({"text": "8월에는 자사주를 사들였어요.", "refs": ["D1"]}, by)
     with pytest.raises(ValueError, match="빈칸으로만"):
         notes.fill({"text": "9월 3일에 공시가 있었어요.", "refs": ["D1"]}, by)  # 사실에 없는 날짜
@@ -487,3 +487,9 @@ def test_relation_only_from_slot_and_same_day_must_match():
                                                           {"text": "그 전에 배당을 정했어요.", "refs": ["D2"]}]}]}
     with pytest.raises(ValueError):  # 셋 중 하나 탈락 = 30% 넘음 → 다시 쓰게
         notes.fill_note(j, fs)
+
+
+def test_mend_moves_leading_dates_to_the_end():
+    assert notes.mend("10월 1일에는 큰 계약을 맺었어요.") == "큰 계약을 맺었어요(10월 1일)."
+    assert notes.mend("요점이에요. 8월 13일과 8월 12일에는 주식을 없애기로 했어요.") == "요점이에요. 주식을 없애기로 했어요(8월 13일과 8월 12일)."
+    assert notes.mend("실적이 좋았어요. 그 뒤 9월 9일에 샀어요.") == "실적이 좋았어요. 그 뒤 9월 9일에 샀어요."  # 문장 가운데 날짜는 둔다
