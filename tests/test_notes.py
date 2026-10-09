@@ -227,7 +227,7 @@ def test_dedupe_paren_list():
 
 
 def _insiders(con):
-    con.executemany("insert into insiders values (?, ?, ?, ?, ?, ?, ?, ?)", [
+    con.executemany("insert into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg) values (?, ?, ?, ?, ?, ?, ?, ?)", [
         ("r1", "005930", "2026-09-01", "임원", "상무", 500, None, None),
         ("r2", "005930", "2026-09-10", "임원", "부사장", -300, None, None),
         ("r3", "005930", "2026-09-20", "임원", "전무", 1000, None, None),
@@ -428,7 +428,7 @@ def test_cost_report_sums_by_day_and_job():
 
 def test_quarter_industry_segment_facts():
     con = _con()
-    con.execute("insert into quarters values ('005930', 2026, 2, 200, 50, 100, 10, 380, 90, 190, 20, 'r1', 'CFS')")
+    con.execute("insert into quarters (ticker, year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev, rcept_no, basis) values ('005930', 2026, 2, 200, 50, 100, 10, 380, 90, 190, 20, 'r1', 'CFS')")
     f8, f9 = notes.quarter_facts(con, "005930")
     assert f8["slots"]["분기"] == "2026년 2분기" and f8["slots"]["매출방향"] == "늘었" and f8["slots"]["매출폭"] == "100.0%"
     assert "+100.0%" in f8["text"] and "1년 전 같은 분기보다" in f8["text"]

@@ -106,7 +106,7 @@ def main(today: date) -> None:
     print(f"재무 {len(fin)}행 ({today.year - 5}~{today.year - 1})")
 
     qs = [x for y in (today.year, today.year - 1) for x in dart.quarters(tickers, y)]  # 분기 실적 — 올해 흐름
-    con.executemany("insert or replace into quarters values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    con.executemany("insert or replace into quarters (ticker, year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev, rcept_no, basis) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [(x.ticker, x.year, x.q, x.revenue, x.operating_income, x.revenue_prev, x.op_prev, x.revenue_ytd, x.op_ytd,
                       x.revenue_ytd_prev, x.op_ytd_prev, x.rcept_no, x.basis) for x in qs])  # fmt: skip
     print(f"분기 실적 {len(qs)}줄 ({today.year - 1}~{today.year})")
@@ -136,7 +136,7 @@ def main(today: date) -> None:
     con.executemany("insert or replace into dividends values (?, ?, ?, ?, ?)", divs)
     print(f"  배당 {len(divs)}행")
     ins = [x for t in tickers for x in dart.insiders(t, lo)]  # 종목마다 2콜 — 임원·주요주주 · 5% 대량보유
-    con.executemany("insert or replace into insiders values (?, ?, ?, ?, ?, ?, ?, ?)",
+    con.executemany("insert or replace into insiders (rcept_no, ticker, date, kind, who, change, rate, rate_chg) values (?, ?, ?, ?, ?, ?, ?, ?)",
                     [(x.rcept_no, x.ticker, x.day.isoformat(), x.kind, x.who, x.change, x.rate, x.rate_chg)
                      for x in ins])  # fmt: skip
     print(f"  지분 보고 {len(ins)}건 (임원·주요주주 · 5% 대량보유)")
