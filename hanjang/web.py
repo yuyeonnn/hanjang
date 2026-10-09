@@ -1256,7 +1256,8 @@ class App:
         row = self.con.execute("select email, photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
         me = Me((photo_url(uid, row[1]) or row[0][:1]) if row else "?")
         if row:
-            me.unread = self.con.execute("select count(*) from follows where followee_id = ? and at > ?", (uid, row[2])).fetchone()[0]
+            regs, arts = self.fresh(uid, row[2])
+            me.unread = self.con.execute("select count(*) from follows where followee_id = ? and at > ?", (uid, row[2])).fetchone()[0] + len(regs) + len(arts)
         return me
 
     def simple(self, title: str, msg: str) -> str:
@@ -2138,20 +2139,53 @@ class App:
                  f'<nav class="flex">{tabs}</nav><div class="flex flex-col">{rows or none}</div></div></main>' + bottom_nav("me"))  # fmt: skip
         return "200 OK", [], page("팔로워" if tab == "followers" else "팔로잉", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
+    def fresh(self, uid: int, since: str) -> tuple[list, list]:
+        """알림거리 (since 뒤, 최근 7일 안) — 팔로우한 사람의 새 리그램, 내가 담은 종목의 새 소식 (사용자 10/10).
+        담은 종목은 남에게 알리지 않는다 — 본인 알림에만 쓴다."""
+        since = max(since, (datetime.now() - timedelta(days=7)).isoformat())
+        regs = self.con.execute("select r.at, u.id, u.nickname, u.photo_at, r.kind, r.ref, r.week from regrams r join users u on u.id = r.user_id"
+                                " where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) and r.at > ?"
+                                " order by r.at desc limit 30", (uid, since)).fetchall()  # fmt: skip
+        arts = self.con.execute("select a.made_at, a.id, a.body, s.name, s.homepage from articles a join stocks s using(ticker)"
+                                " where a.ticker in (select ticker from holdings where user_id = ?) and a.made_at > ?"
+                                " order by a.made_at desc limit 30", (uid, since)).fetchall()  # fmt: skip
+        return regs, arts
+
+    def regram_target(self, kind: str, ref: str) -> tuple[str, str] | None:
+        """리그램한 것의 (주소, 이름) — 알림 한 줄에 쓴다. 없어진 것이면 None."""
+        if kind == "note":
+            hit = self.con.execute("select name from stocks where ticker = ?", (ref,)).fetchone()
+            return (f"/n/{ref}", f"{hit[0]} 노트") if hit else None
+        if kind == "article":
+            hit = self.con.execute("select body from articles where id = ?", (int(ref) if ref.isdigit() else -1,)).fetchone()
+            return (f"/a/{ref}", json.loads(hit[0])["title"]) if hit else None
+        a = learn.BY_SLUG.get(ref)
+        return (f"/learn/{ref}", a["title"]) if a else None
+
     def notices(self, uid: int):
-        """알림 — 누가 나를 팔로우했는지, 최신 먼저. 이 화면을 열면 빨간 점이 사라진다."""
+        """알림 — 팔로우 · 팔로우한 사람의 새 리그램 · 내 종목 새 소식, 최신 먼저. 이 화면을 열면 빨간 점이 사라진다."""
         seen = self.con.execute("select coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()[0]
         rows = self.con.execute("select u.id, u.nickname, u.bio, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
                                 " where f.followee_id = ? and f.ok = 1 and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
         asks = self.con.execute("select u.id, u.nickname, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
                                 " where f.followee_id = ? and f.ok = 0 order by f.at desc", (uid,)).fetchall()  # fmt: skip
+        regs, arts = self.fresh(uid, "")
         self.con.execute("update users set notices_seen = ? where id = ?", (datetime.now().isoformat(), uid))
         self.con.commit()
-        items = "".join(
-            f'<div class="{"bg-primary-fixed/30 -mx-margin px-margin" if at > seen else ""}">'
-            + self.person_row(uid, i, n, b, p, "/me/notices", f"회원님을 팔로우하기 시작했어요 · {ago(at)}") + "</div>"
-            for i, n, b, p, at in rows)  # fmt: skip
-        none = '<p class="py-10 text-center text-[14px] text-outline">아직 알림이 없어요. 누가 팔로우하면 여기에 알려 드려요.</p>'
+        new = lambda at: "bg-primary-fixed/30 -mx-margin px-margin" if at > seen else ""  # noqa: E731
+        events = [(at, f'<div class="{new(at)}">' + self.person_row(uid, i, n, b, p, "/me/notices", f"회원님을 팔로우하기 시작했어요 · {ago(at)}") + "</div>")
+                  for i, n, b, p, at in rows]  # fmt: skip
+        for at, i, n, p, kind, ref, _ in regs:
+            if (hit := self.regram_target(kind, ref)):
+                events.append((at, f'<a href="{e(hit[0])}" class="py-3 flex items-center gap-3 {new(at)}">{self.face(n, "w-12 h-12", photo_url(i, p))}'
+                                   f'<span class="flex flex-col min-w-0"><span class="text-[14px] text-on-surface"><b>{e(n)}</b>님이 리그램했어요</span>'
+                                   f'<span class="text-[13px] text-on-surface-variant truncate">{e(hit[1])} · {ago(at)}</span></span></a>'))  # fmt: skip
+        for at, aid, body, name, home in arts:
+            events.append((at, f'<a href="/a/{aid}" class="py-3 flex items-center gap-3 {new(at)}">{logo(name, home, "w-12 h-12")}'
+                               f'<span class="flex flex-col min-w-0"><span class="text-[14px] text-on-surface">내 종목 <b>{e(name)}</b> 새 소식</span>'
+                               f'<span class="text-[13px] text-on-surface-variant truncate">{e(json.loads(body)["title"])} · {ago(at)}</span></span></a>'))  # fmt: skip
+        items = "".join(h for _, h in sorted(events, key=lambda x: x[0], reverse=True))
+        none = '<p class="py-10 text-center text-[14px] text-outline">아직 알림이 없어요. 누가 팔로우하거나, 팔로우한 사람이 리그램하거나, 내 종목에 새 소식이 나오면 여기에 알려 드려요.</p>'
 
         def answer(i, label, yes, cls):
             return (f'<form method="post" action="/follow/answer"><input type="hidden" name="u" value="{i}"><input type="hidden" name="yes" value="{yes}">'
@@ -2375,12 +2409,72 @@ class App:
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 읽은 노트</h2>'
                 f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{cards}</div></section>')  # fmt: skip
 
+    def suggest(self, uid: int) -> str:
+        """추천 프로필 — 최근 2주에 활발한 사람(리그램 ×2 + 좋아요 + 팔로워) 순, 이미 팔로우했거나 요청한 사람은 빼고 (사용자 10/10).
+        담은 종목으로는 고르지 않는다 — 공개하지 않은 보유 종목이 드러나므로."""
+        since = (datetime.now() - timedelta(days=14)).isoformat()
+        rows = self.con.execute(
+            "select u.id, u.nickname, u.photo_at,"
+            " (select count(*) from regrams r where r.user_id = u.id and r.at >= ?) rg,"
+            " (select count(*) from likes l where l.user_id = u.id and l.at >= ?) lk,"
+            " (select count(*) from follows f where f.followee_id = u.id and f.ok = 1) fer"
+            " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)",
+            (since, since, uid, uid)).fetchall()  # fmt: skip
+        rows = sorted((r for r in rows if r[3] + r[4] + r[5]), key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
+        if not rows:
+            return ""
+
+        cards = "".join(
+            f'<div class="shrink-0 w-[132px] flex flex-col items-center gap-1.5 text-center"><a href="/u/{i}" class="flex flex-col items-center gap-1.5 min-w-0 w-full">'
+            f'{self.face(n, "w-16 h-16", photo_url(i, p))}<b class="text-[14px] text-on-surface truncate w-full">{e(n)}</b>'
+            f'</a>{self.follow_button(uid, i, "/feed")}</div>'
+            for i, n, p, rg, lk, fer in rows)  # fmt: skip
+        return (f'<section id="suggest" class="mt-space-lg"><div class="flex items-center justify-between"><h2 class="font-headline-sm text-headline-sm text-on-surface">추천 프로필</h2>'
+                '<button type="button" aria-label="추천 프로필 닫기" class="p-1 text-outline hover:text-on-surface" onclick="try{sessionStorage.setItem(\'hideSuggest\',\'1\')}catch(e){}this.closest(\'section\').remove()">'
+                '<span class="material-symbols-outlined text-[22px]">close</span></button></div>'
+                f'<div class="mt-space-sm -mx-margin px-margin flex gap-4 overflow-x-auto pb-2">{cards}</div></section>'
+                "<script>try{if(sessionStorage.getItem('hideSuggest'))document.getElementById('suggest').remove()}catch(e){}</script>")  # fmt: skip
+
+    def ranks(self, end: datetime) -> tuple[list, list]:
+        """end 앞 7일 동안 많이 담은 종목·많이 읽은 노트, 각 5개 [(ticker, name)]. 3명 이상일 때만 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
+        a, b = (end - timedelta(days=7)).isoformat(), end.isoformat()
+        held = self.con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.added_at >= ? and h.added_at < ?"
+                                " group by s.ticker having count(*) >= 3 order by count(*) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
+        read = self.con.execute("select s.ticker, s.name from views v join stocks s using(ticker) where v.page = 'note' and v.at >= ? and v.at < ?"
+                                " group by s.ticker having count(distinct v.user_id) >= 3 order by count(distinct v.user_id) desc, s.name limit 5", (a, b)).fetchall()  # fmt: skip
+        return held, read
+
+    def this_week(self) -> str:
+        """이번 주 한장 — 몇 명인지는 적지 않고, 한 시간 전 순위와 견준 오르내림·NEW 만 (배민 순위처럼, 사용자 10/10). 정각마다 새로 센다."""
+        now = datetime.now().replace(minute=0, second=0, microsecond=0)
+        cur, prev = self.ranks(now), self.ranks(now - timedelta(hours=1))
+        up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
+        down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'
+        same = '<span class="text-outline-variant text-[12px]" aria-label="그대로">–</span>'
+        new = '<span class="px-1.5 py-px rounded-md bg-[#D6457F] text-white text-[10px] font-bold">NEW</span>'
+
+        def col(title, rows, before):
+            if not rows:
+                return ""
+            was = {t: k for k, (t, _) in enumerate(before)}
+            mark = lambda t, k: new if t not in was else up if was[t] > k else down if was[t] < k else same  # noqa: E731
+            items = "".join(f'<a href="/n/{e(t)}" class="py-2.5 flex items-center gap-3"><b class="w-5 text-[16px] text-on-surface tabular-nums">{k + 1}</b>'
+                            f'<span class="flex-1 text-[15px] text-on-surface truncate">{e(n)}</span>{mark(t, k)}</a>'
+                            for k, (t, n) in enumerate(rows))  # fmt: skip
+            return f'<div><h3 class="text-[13px] font-semibold text-outline">{title}</h3><div class="flex flex-col">{items}</div></div>'
+
+        body = col("많이 담은 종목", cur[0], prev[0]) + col("많이 읽은 노트", cur[1], prev[1])
+        when = f'{"오전" if now.hour < 12 else "오후"} {now.hour % 12 or 12}시 업데이트'
+        return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">이번 주 한장</h2>'
+                f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
+                f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
+
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
+        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos)) + self.suggest(uid)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'

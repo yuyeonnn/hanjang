@@ -2,7 +2,7 @@ import re
 """3주차 화면 — 로그인 링크 서명, 종목 담기, 노트 열기와 기록, 글자 탈출. 서버를 띄우지 않고 WSGI 를 직접 부른다."""
 
 import io
-from datetime import date
+from datetime import date, datetime, timedelta
 import json
 from urllib.parse import quote, unquote
 
@@ -307,10 +307,12 @@ def test_follow_regram_feed_and_privacy():
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가나") + "&bio=" + quote("지금 사세요"), me)[1]["Location"]  # 자기소개 금지어
     call(app, "/regram", "POST", "k=note&r=005930&w=2026-10-05", you)
     _, _, body = call(app, "/feed", cookie=me)
-    assert "많이 읽은 노트" in body and "반도체공부" not in body  # 팔로우 전 — 조회수 순 노트
+    assert "많이 읽은 노트" in body and "님이 리그램" not in body  # 팔로우 전 — 리그램은 안 보이고 조회수 순 노트
+    assert "추천 프로필" in body and "반도체공부" in body and "리그램 1개" not in body  # 활발한 사람은 추천 프로필로, 이유 글은 없이 (사용자 10/10)
     call(app, "/follow", "POST", "u=2", me)
     _, _, body = call(app, "/feed", cookie=me)
     assert "반도체공부" in body and "삼성전자" in body and "you@b.c" not in body and "많이 읽은 노트" not in body
+    assert "추천 프로필" not in body  # 이미 팔로우한 사람은 추천하지 않는다
     _, _, body = call(app, "/u/2", cookie=me)
     assert "팔로워 <b class=\"text-on-surface\">1</b>" in body and "메모리 회사를 봐요" in body and ">팔로잉</button>" in body
     _, _, body = call(app, "/feed?q=" + quote("반도체"), cookie=me)
@@ -831,3 +833,27 @@ def test_slow_mail_does_not_stop_other_pages(monkeypatch):
     done.set()
     t.join(5)
     assert not t.is_alive()
+
+
+def test_notices_this_week():
+    """알림 — 팔로우한 사람의 새 리그램 · 내 종목 새 소식이 빨간 점 숫자와 알림 화면에. 이번 주 한장은 2명 이상일 때만."""
+    app, con = _app()
+    now = (datetime.now().replace(minute=0, second=0, microsecond=0) - timedelta(minutes=30)).isoformat()  # 순위는 정각까지 센다
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉'), (2, 'you@b.c', '2026-10-01', '너닉')")
+    con.execute("insert into holdings values (1, '005930', ?)", (now,))
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('x', '005930', '2026-10-09', 'contract', ?, ?)",
+                (json.dumps({"title": "큰 계약을 맺었어요", "paragraphs": [{"text": "a", "refs": []}], "links": {}}), now))
+    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    call(app, "/follow", "POST", "u=2", me)
+    call(app, "/regram", "POST", "k=learn&r=start", you)
+    assert app.initial(1).unread == 2  # 리그램 1 + 내 종목 소식 1
+    body = call(app, "/me/notices", cookie=me)[2]
+    assert "너닉</b>님이 리그램했어요" in body and "내 종목 <b>삼성전자</b> 새 소식" in body and "큰 계약을 맺었어요" in body
+    assert app.initial(1).unread == 0  # 열면 사라진다
+    con.execute("insert into users (id, email, created_at) values (3, 'c@b.c', '2026-10-01')")
+    con.execute("insert into holdings values (2, '005930', ?)", (now,))
+    assert "많이 담은 종목" not in app.this_week()  # 두 사람뿐이면 서로의 종목이 짐작돼서 드러내지 않는다
+    con.execute("insert into holdings values (3, '005930', ?)", (now,))
+    week = app.this_week()
+    assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
+    assert "NEW" in week and "시 업데이트" in week  # 한 시간 전엔 없던 종목
