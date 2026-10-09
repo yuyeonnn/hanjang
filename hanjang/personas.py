@@ -53,12 +53,12 @@ def seed(con, now: datetime | None = None) -> int:
         return (now - timedelta(hours=rng.uniform(lo, hi))).isoformat()
 
     for key, _, _, tickers, slugs in PEOPLE:
-        rng, u = random.Random(key), ids[key]
+        rng, u = random.Random(key + now.date().isoformat()), ids[key]  # 날마다 다르게 — 순위가 하루 전과 달라져 오르내림이 생긴다
         held = [t for t in tickers if t in noted]
         for t in held:
-            con.execute("insert or ignore into holdings values (?, ?, ?)", (u, t, ago(rng, 2, 140)))  # 이번 주 한장 — 7일 안
+            con.execute("insert or ignore into holdings values (?, ?, ?)", (u, t, ago(rng, 2, 48)))  # 이번 주 한장 — 절반쯤은 하루 안이라 어제 순위와 달라진다
             for _ in range(rng.randint(1, 3)):
-                con.execute("insert into views (user_id, page, ticker, at) values (?, 'note', ?, ?)", (u, t, ago(rng, 1, 150)))
+                con.execute("insert into views (user_id, page, ticker, at) values (?, 'note', ?, ?)", (u, t, ago(rng, 1, 48)))
             if rng.random() < 0.6:
                 con.execute("insert or ignore into likes values (?, ?, ?, ?)", (u, t, week, ago(rng, 1, 240)))
         for t in rng.sample(held, min(2, len(held))):
