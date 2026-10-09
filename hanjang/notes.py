@@ -156,7 +156,7 @@ TONE_RULE = ("좋게 본 것·걱정되는 것은 코드가 정한 기준으로 
              "공시 종류(자사주 매입·대형 계약 / 증자·전환사채·소송·거래정지).")
 # 예측 말투 — 지난 사실을 「~할 전망」으로 쓰면 틀린 말이고 예측이 된다 (불변식 1). 기사(N)만 근거인 문장은
 # 「기사는 ~라고 써요」로 남의 전망을 옮기는 자리라 예외
-PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것 같아|예상돼|예상됩|할 거예요|될 거예요|일 거예요|가능성이 (높|커|있)")
+PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것 같아|예상돼|예상됩|할 거예요|될 거예요|일 거예요|가능성이 (높|커|있)|지켜볼 만|주목할 만|기대해 볼")
 # AI 가 직접 쓴 방향 낱말 — 빈칸 {F.방향} 을 안 쓰고 스스로 「늘었어요」라 쓴 경우 사실과 맞는지 본다
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
@@ -573,7 +573,9 @@ def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     if not label or not me:
         return []
     # 매출이 없는 금융사는 금융사끼리만 — 「지주회사」로 묶인 KB금융과 SK 는 견줄 수 없다
-    peers = [r for r in rows if r[2] == label and r[3] == me[3] and (r[4] is None) == (me[4] is None)]
+    market = con.execute("select market from stocks where ticker = ?", (ticker,)).fetchone()
+    same_year = not (market and market[0] == "US")  # 미국은 회계연도가 회사마다 달라 같은 해로 거르면 몇 곳만 남는다 — 각자 가장 최근 1년끼리
+    peers = [r for r in rows if r[2] == label and (r[3] == me[3] or not same_year) and (r[4] is None) == (me[4] is None)]
     label = "금융지주" if label == "지주회사" and me[4] is None else label
     margin = all(r[4] for r in peers)  # 매출이 다 있으면 영업이익률, 아니면(금융) ROE
     ok = (lambda r: r[4] and r[5] is not None) if margin else (lambda r: r[6] is not None and r[7] and r[7] > 0)
@@ -584,10 +586,11 @@ def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
         return []
     order = sorted(val, key=lambda t: -val[t])
     k, n, what = order.index(ticker) + 1, len(val), "영업이익률" if margin else "ROE"
-    place = "가장 높았" if k == 1 else "가장 낮았" if k == n else f"{k}번째로 높았" if k <= n / 2 else f"{n - k + 1}번째로 낮았"  # 7곳 중 6번째 → 2번째로 낮았
+    place = ("가장 높았" if k == 1 else "가장 낮았" if k == n else "한가운데였" if n % 2 and k == (n + 1) // 2  # 5곳 중 3번째 = 한가운데
+             else f"{k}번째로 높았" if k <= n / 2 else f"{n - k + 1}번째로 낮았")  # 7곳 중 6번째 → 2번째로 낮았
     mid = statistics.median(val.values())  # 평균은 한두 곳에 끌려간다 — 가운데 회사의 값
     others = "·".join(r[1] for r in peers if r[0] != ticker and r[0] in val)
-    return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {me[3]}년 {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 중간값 {mid:.1f}% (함께 본 회사: {others})",
+    return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {'가장 최근 회계연도' if not same_year else str(me[3]) + '년'} {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 중간값 {mid:.1f}% (함께 본 회사: {others})",
              "url": link(me[8]), "tone": 0,
              "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "중간값": f"{mid:.1f}%"}}]  # fmt: skip
 
@@ -805,6 +808,15 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
                         "tone": 1 if ni / eq * 100 >= ROE_GOOD else -1 if ni < 0 else 0,
                         "slots": {"연도": yy, "비율": r, "순이익": won(ni), "자기돈": won(eq)}})  # fmt: skip
         story = [f for f in story_facts(fin, url, yy) if not (f["id"] == "F5" and mid.get("금융"))]
+        if us:
+            for f in story:
+                if f["id"] == "F5" and "전년연도" in f["slots"] and p[8]:
+                    was = span_label(p[8], p[9])
+                    f["text"] = f["text"].replace(f"({f['slots']['전년연도']} ", f"(1년 전 {was} ")
+                    f["slots"]["전년연도"] = was  # 「1년 전(1년 전(…))」 — 빈칸엔 기간만
+                if f["id"] == "F6":  # 숫자 해는 회사 회계연도 — 그렇게 밝힌다
+                    f["text"] = f["text"].replace(f"({f['slots']['기간']})", f"(회사 회계연도 {f['slots']['기간']})", 1)
+                    f["slots"]["기간"] = f"회사 회계연도 {f['slots']['기간']}"
         for f in story:  # 100원당 남긴 돈 — 같은 업종 중간값도 (유통·상사·정유는 원래 몇 원, 소프트웨어는 수십 원)
             if f["id"] == "F5" and mid.get("백원당") is not None:
                 f["slots"] |= {"업종보통": per(f"{mid['백원당']:.0f}"), "업종": mid["업종"]}
@@ -989,7 +1001,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(\d년)년", r"\1", text)
     text = re.sub(r"(\d주)이에요", lambda m: m[1] + "예요", text)
     text = re.sub(r"([았었였했])어요고(?=[,\s])", lambda m: m[1] + "고", text)  # 「발표했어요고,」 — 끝맺은 말 뒤에 「고」를 또 붙였다  # 「433만 2,118주이에요」
-    text = re.sub(r"달러이(에요|라서|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
+    text = re.sub(r"달러이(에요|라서|라(?=\s)|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "라": "라", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
     text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」

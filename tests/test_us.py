@@ -313,3 +313,15 @@ def test_finest_only_drops_when_rows_overlap():
 def test_shares_that_add_past_revenue_are_not_shown():
     assert us.shares([{"name": "a", "revenue": 300}, {"name": "b", "revenue": 250}], 100) == []  # 소파이 298%
     assert us.member_name("uber:MobilityMember") == "차량 호출" and us.member_name("country:MX") == "멕시코"
+
+
+def test_third_review_fixes(monkeypatch):
+    from hanjang import notes
+    monkeypatch.setattr(us, "universe", lambda: [("NVDA", "엔비디아")])
+    con = db.connect(":memory:")
+    us.main(date(2026, 10, 9), con, FakeSec())
+    fs = {f["id"]: f for f in notes.facts(con, "NVDA", date(2026, 10, 9))}
+    assert "1년 전 2024년 2월~2025년 1월" in fs["F5"]["text"] and fs["F5"]["slots"]["전년연도"] == "2024년 2월~2025년 1월"
+    assert "회사 회계연도" in fs["F6"]["slots"]["기간"]
+    assert notes.mend("중간값은 40달러이라 남기는 힘이 커요.") == "중간값은 40달러라 남기는 힘이 커요."
+    assert notes.PREDICT.search("이 계약이 매출에 어떤 영향을 줄지 지켜볼 만해요.")
