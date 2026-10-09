@@ -132,7 +132,7 @@ FORBIDDEN = re.compile(r"매수|매도|(?<![가-힣])(사라|사세요|팔아라
 DEBT_GOOD, DEBT_BAD = 100, 200  # 부채비율 %
 ROE_GOOD = 10  # %. 0 미만(적자)은 걱정
 TONE_RULE = ("좋게 본 것·걱정되는 것은 코드가 정한 기준으로 나눴어요 — 매출·영업이익이 늘었나 줄었나, 흑자·적자 전환, "
-             f"부채비율 {DEBT_GOOD}% 미만·{DEBT_BAD}% 초과(같은 업종 중간값의 1.5배도 넘을 때만 · 금융회사는 보지 않음), ROE {ROE_GOOD}% 이상·0% 미만, "
+             f"부채비율 {DEBT_GOOD}% 미만·{DEBT_BAD}% 초과(같은 업종 중간값의 1.5배도 넘을 때만 · 금융회사와 원래 빚이 많은 업종 — 조선·방산·항공·전력·건설 — 은 걱정으로 보지 않음), ROE {ROE_GOOD}% 이상·0% 미만, "
              "공시 종류(자사주 매입·대형 계약 / 증자·전환사채·소송·거래정지).")
 # 예측 말투 — 지난 사실을 「~할 전망」으로 쓰면 틀린 말이고 예측이 된다 (불변식 1). 기사(N)만 근거인 문장은
 # 「기사는 ~라고 써요」로 남의 전망을 옮기는 자리라 예외
@@ -533,6 +533,16 @@ AD = re.compile(r"이벤트|캠페인|경품|사은|프로모션|청약 (접수|
 FINANCE_CODES = ("641", "642", "649", "65", "66")  # 은행·신탁·여신·보험·증권 — 고객 돈이 빚으로 잡혀 부채비율이 원래 높다. 지주회사(64992)는 아니다
 
 
+# 원래 빚이 많은 업종 — 「빚이 많다」로 몰지 않고 이유를 함께 보인다 (우리 종목 안엔 같은 업종이 1~2곳뿐이라 중간값만으론 못 거른다, 10/9 점검)
+HIGH_DEBT = {
+    **dict.fromkeys(("조선", "방위산업", "항공우주", "철도차량"),
+                    "배·무기·비행기·열차처럼 몇 년 걸려 만드는 것을 수주하면 대금 일부를 미리 받는데, 이 돈(선수금)이 빚으로 잡혀요"),
+    "항공": "비행기를 빌려 쓰는 값(리스)이 빚으로 잡혀요",
+    "전력·가스": "발전소·송전망 같은 큰 설비를 빚을 내 지어요",
+    "건설": "분양 대금을 미리 받거나 공사 자금을 빌려 빚이 큰 편이에요",
+}  # fmt: skip
+
+
 def is_finance(code: str | None) -> bool:
     return bool(code) and code.startswith(FINANCE_CODES) and not code.startswith("64992")
 
@@ -559,6 +569,8 @@ def industry_mid(con: sqlite3.Connection, ticker: str) -> dict:
         out["부채비율"] = statistics.median(debts)
     if out:
         out |= {"업종": label, "곳수": len(peers)}
+    if label in HIGH_DEBT:
+        out |= {"업종": label, "곳수": len(peers), "빚이유": HIGH_DEBT[label]}
     return out
 
 
@@ -598,12 +610,13 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             d = li / eq * 100
             r = f"{d:.1f}%"
             usual = mid.get("부채비율")  # 같은 업종 중간값 — 조선(선수금)·항공(리스)·전력처럼 원래 높은 업종이 있다
-            bad = d > DEBT_BAD and (usual is None or d > usual * 1.5)
+            bad = d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
             out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
                         + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
                         "tone": 1 if d < DEBT_GOOD else -1 if bad else 0,
                         "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
-                        | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})})  # fmt: skip
+                        | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})
+                        | ({"빚이유": mid["빚이유"]} if "빚이유" in mid else {})})  # fmt: skip
         if ni is not None and eq and eq > 0:
             r = f"{ni / eq * 100:.1f}%"
             out.append({"id": "F4", "text": f"{yy} ROE {r} (순이익 {won(ni)} · 자기 돈 {won(eq)})", "url": url,
