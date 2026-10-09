@@ -582,6 +582,9 @@ MACRO = {  # 쓸 지표 — 출처 표시 「한국은행 ECOS」 (data-rights �
 # 읽기 팁 「오래 갖고 있으면」 글의 재료 — OECD 주가지수(월평균, 2015=100). 작성기관 OECD (CC BY 4.0, data-rights §2-1).
 # ECOS 일별 코스피(802Y001)는 작성기관이 한국거래소라 쓰지 않는다
 INDEX = {"ECOS:902Y002:KOR": "한국", "ECOS:902Y002:USA": "미국"}
+# 읽기 팁 「금리」 그림 — 월평균, 작성기관 한국은행 (data-rights §2 · §6). 순서 = 그림 범례 순서
+RATES = {"ECOS:722Y001:0101000": "기준금리", "ECOS:721Y001:5020000": "국고채 3년", "ECOS:721Y001:5050000": "국고채 10년",
+         "ECOS:721Y001:7020000": "회사채 AA-", "ECOS:721Y001:7030000": "회사채 BBB-"}
 
 
 def ecos(series_id: str, start: date, end: date, cycle: str = "D") -> list[tuple[date, float]]:
