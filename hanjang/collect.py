@@ -154,10 +154,13 @@ def first(ticker: str, today: date | None = None) -> bool:
     con = db.connect()
     try:
         con.isolation_level = None
-        dart = sources.Dart()
-        dart.corps()  # DART 가 쉬면(점검) 여기서 멈춘다 — 빈 목록을 받아 기존 공시를 지우지 않게
+        us = con.execute("select market from stocks where ticker = ?", (ticker,)).fetchone() == ("US",)
+        if not us:  # 미국은 매일 실행(us.main)이 목록 전부를 이미 받아 둔다 — DART 에 물을 것이 없다
+            dart = sources.Dart()
+            dart.corps()  # DART 가 쉬면(점검) 여기서 멈춘다 — 빈 목록을 받아 기존 공시를 지우지 않게
         con.execute("update stocks set active = 1 where ticker = ?", (ticker,))
-        per_stock(con, dart, [ticker], today)
+        if not us:
+            per_stock(con, dart, [ticker], today)
         notes.main([ticker], today)
         return bool(con.execute("select 1 from notes where ticker = ?", (ticker,)).fetchone())
     except Exception as err:  # noqa: BLE001 — 실패해도 화면은 멀쩡해야 한다. 다음 아침 실행이 다시 받는다
