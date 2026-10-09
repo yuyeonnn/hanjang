@@ -775,3 +775,30 @@ def test_learn_figures():
     assert len({f["type"] for f in learn.FIGURE.values()}) >= 8  # 여러 모양 (사용자 10/10: 다 똑같다)
     for f in learn.FIGURE.values():
         assert web.figure(f).startswith("<figure"), f["type"]
+
+
+def test_private_account_needs_approved_follow():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
+    con.commit()
+    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    call(app, "/me/private", "POST", "", a)
+    assert "비공개 계정 끄기" in call(app, "/me/settings", cookie=a)[2]
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "비공개 계정이에요" in p and 'href="/f/1' not in p
+    assert call(app, "/f/1?tab=followers", cookie=b)[1]["Location"] == "/u/1"  # 목록도 못 본다
+    call(app, "/follow", "POST", "u=1", b)
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "요청됨" in p and "비공개 계정이에요" in p and '팔로워 <b class="text-on-surface">0' in p  # 수락 전엔 세지 않는다
+    n = call(app, "/me/notices", cookie=a)[2]
+    assert "팔로우를 요청했어요" in n and "수락" in n
+    call(app, "/follow/answer", "POST", "u=2&yes=1", a)
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "비공개 계정이에요" not in p and "팔로잉" in p
+    call(app, "/follow", "POST", "u=1", b)  # 언팔로우
+    call(app, "/follow", "POST", "u=1", b)  # 다시 요청
+    call(app, "/follow/answer", "POST", "u=2&yes=0", a)  # 삭제
+    assert con.execute("select count(*) from follows").fetchone()[0] == 0
+    call(app, "/follow", "POST", "u=1", b)
+    call(app, "/me/private", "POST", "", a)  # 비공개를 끄면 기다리던 요청은 수락
+    assert con.execute("select ok from follows").fetchone()[0] == 1

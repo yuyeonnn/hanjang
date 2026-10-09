@@ -1308,11 +1308,20 @@ class App:
             other = int(form["u"]) if form.get("u", "").isdigit() else 0
             if other != uid and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
                 if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
-                    self.con.execute("insert into follows values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
+                    shut = self.con.execute("select private from users where id = ?", (other,)).fetchone()[0]
+                    self.con.execute("insert into follows (follower_id, followee_id, at, ok) values (?, ?, ?, ?)", (uid, other, datetime.now().isoformat(), 0 if shut else 1))
                 self.con.commit()
             back = form.get("back", "")
             ok = re.fullmatch(r"/[A-Za-z0-9_/?=&%.\-]*", back) and not back.startswith("//")  # 「/\evil.com」 → 「//evil.com」 막기
             return self.see(back if ok else f"/u/{other}" if other else "/feed")
+        if path == "/follow/answer" and method == "POST":  # 팔로우 요청 수락(1)·삭제(0)
+            other = int(form["u"]) if form.get("u", "").isdigit() else 0
+            if form.get("yes") == "1":
+                self.con.execute("update follows set ok = 1 where follower_id = ? and followee_id = ?", (other, uid))
+            else:
+                self.con.execute("delete from follows where follower_id = ? and followee_id = ? and ok = 0", (other, uid))
+            self.con.commit()
+            return self.see("/me/notices")
         if path == "/regram" and method == "POST":
             return self.regram(uid, form)
         if path == "/me/profile" and method == "POST":
@@ -1326,6 +1335,12 @@ class App:
             return self.see(f"/n/{quote(t)}")
         if path == "/feedback" and method == "POST":
             return self.feedback(uid, form)
+        if path == "/me/private" and method == "POST":  # 비공개 켜기/끄기 — 끄면 기다리던 요청은 모두 수락
+            self.con.execute("update users set private = 1 - private where id = ?", (uid,))
+            if not self.con.execute("select private from users where id = ?", (uid,)).fetchone()[0]:
+                self.con.execute("update follows set ok = 1 where followee_id = ?", (uid,))
+            self.con.commit()
+            return self.see("/me/settings")
         if path == "/me/mail" and method == "POST":
             self.con.execute("update users set mail_on = 1 - mail_on where id = ?", (uid,))
             self.con.commit()
@@ -1923,8 +1938,8 @@ class App:
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def settings(self, uid: int, msg: str | None = None) -> str:
-        email, created, mail_on, nick, bio = self.con.execute(
-            "select email, created_at, mail_on, nickname, bio from users where id = ?", (uid,)).fetchone()  # fmt: skip
+        email, created, mail_on, nick, bio, private = self.con.execute(
+            "select email, created_at, mail_on, nickname, bio, private from users where id = ?", (uid,)).fetchone()  # fmt: skip
         (at,) = self.con.execute("select photo_at from users where id = ?", (uid,)).fetchone()
         (held,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
         joined = date.fromisoformat(created[:10])
@@ -1936,6 +1951,12 @@ class App:
                   f'<button aria-label="주간 안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
+        lock = (f'<form method="post" action="/me/private" class="py-3.5 flex items-center justify-between gap-3"><span class="flex flex-col">'
+                '<span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><span class="material-symbols-outlined text-primary text-[18px]">lock</span>비공개 계정</span>'
+                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 리그램과 팔로워 목록을 봐요</span></span>'
+                f'<button aria-label="비공개 계정 {"끄기" if private else "켜기"}" aria-pressed="{"true" if private else "false"}" type="submit" class="flex items-center gap-2 shrink-0">'
+                f'<span class="font-label-micro text-label-micro {"text-primary" if private else "text-outline"} font-semibold">{"ON" if private else "OFF"}</span>'
+                f'<span class="w-11 h-6 rounded-full p-0.5 {"bg-primary" if private else "bg-surface-container-highest"} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {"translate-x-5" if private else "translate-x-0"}"></span></span></button></form>')  # fmt: skip
 
         def row(icon, label, value):
             return (f'<div class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
@@ -1992,7 +2013,7 @@ class App:
                  '<section class="mt-space-lg flex flex-col divide-y divide-surface-container-high/80 border-y border-surface-container-high">'
                  + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
                  + row("bookmark", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
-                 + switch + "</section>"
+                 + switch + lock + "</section>"
                  '<button class="mt-space-xl w-full py-3 rounded-lg border border-outline-variant/60 text-on-surface-variant font-body-reading-strong text-body-compact hover:bg-surface-container-low transition-colors" '
                  'onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button>'
                  '<form method="post" action="/me/delete" onsubmit="return confirm(\'탈퇴하면 이메일과 담은 종목, 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?\')">'
@@ -2004,7 +2025,7 @@ class App:
     # ---- 팔로우 · 리그램 · 피드 (뉴닉 「뉴니커」처럼 — 좋아한 글을 내 팔로워에게) ----
 
     def counts(self, uid: int) -> tuple[int, int]:
-        q = "select count(*) from follows where {} = ?"
+        q = "select count(*) from follows where {} = ? and ok = 1"
         return (self.con.execute(q.format("followee_id"), (uid,)).fetchone()[0],
                 self.con.execute(q.format("follower_id"), (uid,)).fetchone()[0])  # fmt: skip
 
@@ -2014,19 +2035,33 @@ class App:
         return (f'<span class="{size} shrink-0 overflow-hidden rounded-full bg-primary-fixed text-primary flex items-center justify-center font-label-regular text-label-regular font-semibold">'
                 f'{inside}</span>')  # fmt: skip
 
-    def follow_line(self, uid: int) -> str:
+    def follow_line(self, uid: int, see: bool = True) -> str:
+        """「팔로워 N | 팔로잉 N」 — 비공개 계정을 남이 보면 숫자만(목록으로 가는 링크 없이)."""
         fer, fing = self.counts(uid)
-        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant"><a class="hover:underline" href="/f/{uid}?tab=followers">팔로워 <b class="text-on-surface">{fer:,}</b></a>'
-                f'<span class="mx-2 text-outline-variant">|</span><a class="hover:underline" href="/f/{uid}?tab=following">팔로잉 <b class="text-on-surface">{fing:,}</b></a></p>')  # fmt: skip
+        tag = (lambda tab: f'<a class="hover:underline" href="/f/{uid}?tab={tab}">') if see else (lambda tab: "<span>")
+        end = "</a>" if see else "</span>"
+        return (f'<p class="font-label-regular text-label-regular text-on-surface-variant">{tag("followers")}팔로워 <b class="text-on-surface">{fer:,}</b>{end}'
+                f'<span class="mx-2 text-outline-variant">|</span>{tag("following")}팔로잉 <b class="text-on-surface">{fing:,}</b>{end}</p>')  # fmt: skip
 
     def follow_button(self, uid: int, other: int, back: str) -> str:
         """목록·알림 줄 오른쪽 — 이미 팔로우하면 「팔로잉」(회색, 누르면 취소), 아니면 「팔로우」(초록). 나 자신은 없음."""
         if other == uid:
             return ""
-        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        label, on = self.follow_state(uid, other)
         cls = "bg-surface-container text-on-surface" if on else "bg-primary text-on-primary"
         return (f'<form method="post" action="/follow" class="shrink-0"><input type="hidden" name="u" value="{other}"><input type="hidden" name="back" value="{e(back)}">'
-                f'<button type="submit" class="px-4 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{"팔로잉" if on else "팔로우"}</button></form>')  # fmt: skip
+                f'<button type="submit" class="px-4 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{label}</button></form>')  # fmt: skip
+
+    def follow_state(self, uid: int, other: int) -> tuple[str, bool]:
+        """단추 글자 — 「팔로잉」(수락됨) · 「요청됨」(비공개 계정에 보낸 요청, 누르면 취소) · 「팔로우」."""
+        row = self.con.execute("select ok from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        return ("팔로잉" if row[0] else "요청됨", True) if row else ("팔로우", False)
+
+    def can_see(self, uid: int, other: int) -> bool:
+        """비공개 계정의 리그램·팔로워 목록은 본인과 수락된 팔로워만."""
+        row = self.con.execute("select private from users where id = ?", (other,)).fetchone()
+        return uid == other or not (row and row[0]) or bool(self.con.execute(
+            "select 1 from follows where follower_id = ? and followee_id = ? and ok = 1", (uid, other)).fetchone())
 
     def person_row(self, uid: int, other: int, nick: str, bio: str | None, pat: str | None, back: str, note: str = "") -> str:
         return (f'<div class="py-3 flex items-center gap-3"><a href="/u/{other}" class="flex items-center gap-3 min-w-0 flex-1">{self.face(nick, "w-12 h-12", photo_url(other, pat))}'
@@ -2039,10 +2074,12 @@ class App:
         if not row:
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요.")
         tab = tab if tab in ("followers", "following") else "followers"
+        if not self.can_see(uid, who):
+            return self.see(f"/u/{who}")
         fer, fing = self.counts(who)
         col, by = ("follower_id", "followee_id") if tab == "followers" else ("followee_id", "follower_id")
         people = self.con.execute(f"select u.id, u.nickname, u.bio, u.photo_at from follows f join users u on u.id = f.{col}"
-                                  f" where f.{by} = ? and u.nickname is not null order by f.at desc", (who,)).fetchall()  # fmt: skip
+                                  f" where f.{by} = ? and f.ok = 1 and u.nickname is not null order by f.at desc", (who,)).fetchall()  # fmt: skip
         back = f"/f/{who}?tab={tab}"
         tabs = "".join(f'<a href="/f/{who}?tab={k}" class="flex-1 text-center py-3 text-[15px] {"font-semibold text-on-surface border-b-2 border-on-surface" if k == tab else "text-on-surface-variant border-b border-surface-container-high"}">{label} {n:,}명</a>'
                        for k, label, n in (("followers", "팔로워", fer), ("following", "팔로잉", fing)))  # fmt: skip
@@ -2059,7 +2096,9 @@ class App:
         """알림 — 누가 나를 팔로우했는지, 최신 먼저. 이 화면을 열면 빨간 점이 사라진다."""
         seen = self.con.execute("select coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()[0]
         rows = self.con.execute("select u.id, u.nickname, u.bio, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
-                                " where f.followee_id = ? and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
+                                " where f.followee_id = ? and f.ok = 1 and u.nickname is not null order by f.at desc limit 50", (uid,)).fetchall()  # fmt: skip
+        asks = self.con.execute("select u.id, u.nickname, u.photo_at, f.at from follows f join users u on u.id = f.follower_id"
+                                " where f.followee_id = ? and f.ok = 0 order by f.at desc", (uid,)).fetchall()  # fmt: skip
         self.con.execute("update users set notices_seen = ? where id = ?", (datetime.now().isoformat(), uid))
         self.con.commit()
         items = "".join(
@@ -2067,6 +2106,16 @@ class App:
             + self.person_row(uid, i, n, b, p, "/me/notices", f"회원님을 팔로우하기 시작했어요 · {ago(at)}") + "</div>"
             for i, n, b, p, at in rows)  # fmt: skip
         none = '<p class="py-10 text-center text-[14px] text-outline">아직 알림이 없어요. 누가 팔로우하면 여기에 알려 드려요.</p>'
+
+        def answer(i, label, yes, cls):
+            return (f'<form method="post" action="/follow/answer"><input type="hidden" name="u" value="{i}"><input type="hidden" name="yes" value="{yes}">'
+                    f'<button type="submit" class="px-3 py-1.5 rounded-lg text-[13px] font-semibold {cls}">{label}</button></form>')  # fmt: skip
+        items = "".join(
+            f'<div class="py-3 flex items-center gap-3"><a href="/u/{i}" class="flex items-center gap-3 min-w-0 flex-1">{self.face(n, "w-12 h-12", photo_url(i, p))}'
+            f'<span class="flex flex-col min-w-0"><b class="text-[15px] text-on-surface truncate">{e(n or "")}</b>'
+            f'<span class="text-[13px] text-on-surface-variant truncate">팔로우를 요청했어요 · {ago(at)}</span></span></a>'
+            + answer(i, "수락", 1, "bg-primary text-on-primary") + answer(i, "삭제", 0, "bg-surface-container text-on-surface") + "</div>"
+            for i, n, p, at in asks) + items  # fmt: skip
         inner = (top_bar(self.initial(uid)) + '<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 min-h-screen"><div class="px-margin">'
                  '<h1 class="py-3 text-[20px] font-semibold text-on-surface">알림</h1>'
                  f'<div class="flex flex-col">{items or none}</div></div></main>' + bottom_nav("me"))  # fmt: skip
@@ -2281,7 +2330,7 @@ class App:
                 f'<div class="flex flex-col lg:grid lg:grid-cols-2 lg:gap-x-14">{cards}</div></section>')  # fmt: skip
 
     def feed(self, uid: int, q: str) -> str:
-        mine = "where r.user_id in (select followee_id from follows where follower_id = ?) or r.user_id = ?"
+        mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
@@ -2299,14 +2348,19 @@ class App:
         if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
         nick, bio, pat = row
-        on = self.con.execute("select 1 from follows where follower_id = ? and followee_id = ?", (uid, other)).fetchone()
+        label, on = self.follow_state(uid, other)
         btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
+        shut = ('<div class="mt-space-xl py-10 flex flex-col items-center gap-2 border-t border-surface-container-high text-center">'
+                '<span class="material-symbols-outlined text-outline text-[30px]">lock</span>'
+                '<b class="font-body-reading-strong text-body-compact text-on-surface">비공개 계정이에요</b>'
+                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 리그램과 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
+        see = self.can_see(uid, other)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
-                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other)}</div>'
-                 f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{"팔로잉" if on else "팔로우"}</button></form></header>'
+                 f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1>{self.follow_line(other, see)}</div>'
+                 f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True)
+                 + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
