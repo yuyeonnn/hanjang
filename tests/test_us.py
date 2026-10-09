@@ -98,3 +98,22 @@ def test_main_saves_us_rows_hidden_from_search(monkeypatch):
     assert con.execute("select who, change, planned from insiders where ticker = 'NVDA' limit 1").fetchone() == ("CEO", 10.0, 0)
     from hanjang import web
     assert "NVDA" not in web.App(con, "s").stocks_js()  # 화면은 5주차 — 아직 숨긴다
+
+
+def test_us_facts_use_dollars_with_won_in_brackets_and_company_months(monkeypatch):
+    from hanjang import notes
+    monkeypatch.setattr(us, "universe", lambda: [("NVDA", "엔비디아"), ("AAPL", "애플")])
+    con = db.connect(":memory:")
+    us.main(date(2026, 10, 9), con, FakeSec())
+    con.execute("insert into macro values ('ECOS:731Y003:0000003', '2026-10-08', 1338.5)")
+    fs = {f["id"]: f for f in notes.facts(con, "NVDA", date(2026, 10, 9))}
+    assert fs["F1"]["text"].startswith("2025년 2월~2026년 1월 매출 2,159억 달러(전년보다 +65.5%) (약 289.0조원 · 10월 8일 환율 1,338.5원 기준)")
+    assert fs["F1"]["slots"]["원화"] == "약 289.0조원" and fs["F1"]["url"].endswith("-index.htm") and "sec.gov" in fs["F1"]["url"]
+    assert fs["F5"]["slots"]["백원당"] == "60달러" and "100달러어치" in fs["F5"]["text"]
+    assert (fs["F8"]["slots"]["분기"], fs["F8"]["slots"]["달"], fs["F8"]["slots"]["백원당"]) == ("2026년 5~7월", "회사 기준 2분기", "66달러")
+    assert fs["F9"]["slots"]["기간"] == "2026년 2~7월" and fs["F13"]["slots"]["값"] == "2.46달러" and fs["F14"]["slots"]["자사주매입"] == "401억 달러"
+    assert fs["F3"]["tone"] == 0 and "빚이유" not in fs["F3"]["slots"]  # 미국 부채비율은 판단하지 않는다 · 낮으면 이유도 없다
+    assert notes.mend("중간값은 26달러이라서 높아요. 배당 10억 달러이에요.") == "중간값은 26달러라서 높아요. 배당 10억 달러예요."
+    a = {f["id"]: f for f in notes.facts(con, "AAPL", date(2026, 10, 9))}
+    assert a["F1"]["slots"]["연도"] == "2024년 10월~2025년 9월" and "주식을 많이 사들여" in a["F3"]["slots"]["빚이유"]
+    assert notes.won(123_456_789_000) == "1,235억원" and notes._MARKET["per"] == "원"  # 끝나면 국내로 되돌아간다

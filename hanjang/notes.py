@@ -312,13 +312,42 @@ def _check_titles(n: int):
 # --- ④ 사실 묶음 (코드) — 문장(text)과 빈칸(slots)을 같이 만든다 ---
 
 
-def won(x: int) -> str:
-    """원 → 「333.6조원」 「5,583억원」. 노트의 모든 금액은 이 한 함수로."""
+def krw(x: int) -> str:
+    """원 → 「333.6조원」 「5,583억원」."""
     if abs(x) >= 10**12:
         return f"{x / 10**12:,.1f}조원"
     if abs(x) >= 10**8:
         return f"{x / 10**8:,.0f}억원"
-    return f"{x:,}원"
+    return f"{x:,.0f}원"
+
+
+def usd(x: float) -> str:
+    """달러 → 「2,159억 달러」 「1.2조 달러」 「35만 달러」."""
+    if abs(x) >= 10**12:
+        return f"{x / 10**12:,.1f}조 달러"
+    if abs(x) >= 10**8:
+        return f"{x / 10**8:,.0f}억 달러"
+    if abs(x) >= 10**4:
+        return f"{x / 10**4:,.0f}만 달러"
+    return f"{x:,.0f}달러"
+
+
+# 사실을 만드는 동안의 시장 — facts() 가 종목에 맞춰 바꾼다. 금액 함수 하나(won)와 링크 함수 하나(link)를 모두가 쓰니 여기만 바뀌면 된다
+_MARKET = {"money": krw, "link": lambda rno: DART.format(rno), "per": "원"}  # per = 「100원어치 팔아 몇 원」의 단위
+
+
+def won(x: float) -> str:
+    """노트의 모든 금액은 이 한 함수로 — 국내는 원, 미국 종목을 만드는 동안은 달러."""
+    return _MARKET["money"](x)
+
+
+def link(rno: str) -> str:
+    return _MARKET["link"](rno)
+
+
+def per(x: float) -> str:
+    """100원(달러)어치 팔아 남긴 돈 — 「60원」「32.5달러」."""
+    return f"{x}{_MARKET['per']}"
 
 
 def pct(x: float) -> str:
@@ -347,12 +376,12 @@ def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
     y, rev, oi = fin[0][0], fin[0][1], fin[0][2]
     if rev and oi is not None and rev > 0:
         m = oi / rev * 100
-        slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": f"{round(m)}원"}
+        slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": per(round(m))}
         prev = fin[1] if len(fin) > 1 else None
         if prev and prev[1] and prev[2] is not None and prev[1] > 0:
             was = prev[2] / prev[1] * 100
             slots |= {"전년비율": f"{was:.1f}%", "전년연도": f"{prev[0]}년", "힘": power(m, was)}
-        out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100원어치 팔아 본업으로 {slots['백원당']}을 남김"
+        out.append({"id": "F5", "text": f"{yy} 영업이익률 {slots['비율']} — 100{_MARKET['per']}어치 팔아 본업으로 {slots['백원당']}{josa(slots['백원당'], '을')} 남김"
                     + (f" ({slots['전년연도']} {slots['전년비율']})" if "전년비율" in slots else ""), "url": url, "tone": 0, "slots": slots})  # fmt: skip
     rows = [r for r in fin if r[1] is not None or r[2] is not None]
     if len(rows) >= 3:
@@ -399,13 +428,13 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
     out = {}
     if rev and rev > 0 and op is not None:
         m = op / rev * 100
-        out["백원당"] = f"{round(m)}원"
+        out["백원당"] = per(round(m))
         if rp and rp > 0 and opp is not None:
             pm = opp / rp * 100
             out["힘"] = power(m, pm)
             if round(m) == round(pm) and out["힘"] != "비슷했":  # 「4원(1년 전엔 4원) … 세졌어요」로 읽히지 않게 소수 한 자리
-                out["백원당"] = f"{m:.1f}원"
-            out["전년백원당"] = f"{pm:.1f}원" if "." in out["백원당"] else f"{round(pm)}원"
+                out["백원당"] = per(f"{m:.1f}")
+            out["전년백원당"] = per(f"{pm:.1f}") if "." in out["백원당"] else per(round(pm))
     if rev and rp and rp > 0 and op is not None and opp and opp > 0:
         r, o = rev / rp - 1, op / opp - 1
         out["관계"] = (RELATIONS[0] if r > 0 and o > r else RELATIONS[1] if r > 0 and 0 <= o <= r else
@@ -426,42 +455,77 @@ RELATIONS = ("판 돈보다 남긴 돈이 더 빨리 늘었", "판 돈이 늘어
 REL_WORDS = re.compile(r"판 돈보다 남긴 돈이 더|늘어난 만큼은? 남긴 돈|팔았지만 남긴 돈|판 돈도 남긴 돈도")
 
 
-def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
-    """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가."""
+def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None) -> list[dict]:
+    """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가.
+    미국은 4분기도 있고(연간−9개월) 분기 이름은 회사 회계연도라 실제 달로 부른다 — 「2026년 5~7월(회사 기준 2분기)」."""
     row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
-                      " rcept_no from quarters where ticker = ? order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
+                      " rcept_no, period_start, period_end from quarters where ticker = ? order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
     if not row:
         return []
-    y, q, rev, op, rp, opp, ry, oy, ryp, oyp, rno = row
-    (name, months), url, out = QLABEL[q], DART.format(rno), []
+    y, q, rev, op, rp, opp, ry, oy, ryp, oyp, rno, ps, pe = row
+    if us and ps:
+        qname, months = span_label(ps, pe), f"회사 기준 {q}분기"
+        ytd = span_label(con.execute("select min(period_start) from quarters where ticker = ? and year = ?", (ticker, y)).fetchone()[0], pe)
+    else:
+        (name, months), qname, ytd = QLABEL[q], f"{y}년 {QLABEL[q][0]}", f"{y}년 1~{q * 3}월"
+    url, out = link(rno), []
     if parts := [x for x in (_change("매출", rev, rp, "1년 전 같은 분기"), _change("영업이익", op, opp, "1년 전 같은 분기")) if x]:
-        out.append({"id": "F8", "text": f"{y}년 {name}({months}) " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)})  # fmt: skip
+        slots = {"분기": qname, "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)
+        if us and us.get("rate") and rev:
+            slots["매출원화"] = f"약 {krw(rev * us['rate'])}"
+        out.append({"id": "F8", "text": f"{qname}({months}) " + " · ".join(parts), "url": url, "tone": 0, "slots": slots})
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
-        out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
+        out.append({"id": "F9", "text": f"{ytd} 누적 " + " · ".join(parts), "url": url, "tone": 0,
+                    "slots": {"기간": ytd} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
+    unit = "100달러어치" if us else "100원어치"
     if industry_mid(con, ticker).get("금융"):  # 금융회사는 「100원당」이 다른 업종과 같은 잣대가 아니다
         for f in out:
             for k in ("백원당", "전년백원당", "힘"):
                 f["slots"].pop(k, None)
     for f in out:  # 100원당 남긴 돈도 사실 문장에 — 출처 창에 보이고, 숫자 대조(빈칸 값)도 통과하게
         if "전년백원당" in f["slots"]:
-            f["text"] += f" · 100원어치 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})"
+            f["text"] += f" · {unit} 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})"
+    return out
+
+
+def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
+    """미국만 — F13 주당순이익(EPS, 미국 투자자가 가장 먼저 보는 숫자) · F14 지난 1년 주주에게 돌려준 돈과 주식 보상 (현금흐름표)."""
+    out = []
+    row = con.execute("select year, q, eps, rcept_no, period_start, period_end from quarters where ticker = ? and eps is not null"
+                      " order by year desc, q desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    if row:
+        y, q, eps, rno, ps, pe = row
+        prev = con.execute("select eps from quarters where ticker = ? and year = ? and q = ?", (ticker, y - 1, q)).fetchone()
+        prev = prev and prev[0]
+        qname = span_label(ps, pe)
+        tone, way, chg = trend(eps, prev) if prev is not None else (0, "", "")
+        slots = {"분기": qname, "값": f"{eps:,.2f}달러"} | ({"전년값": f"{prev:,.2f}달러"} if prev is not None else {}) | ({"방향": way} if way else {}) | (
+            {"폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {})
+        out.append({"id": "F13", "text": f"{qname} 주당순이익(EPS) {slots['값']}" + (f"(1년 전 {slots['전년값']})" if prev is not None else ""),
+                    "url": link(rno), "tone": 0, "slots": slots})  # fmt: skip
+    row = con.execute("select period_start, period_end, buyback, dividends, sbc, accn from flows where ticker = ? and months = 12"
+                      " order by period_end desc limit 1", (ticker,)).fetchone()  # fmt: skip
+    if row and any(v for v in row[2:5]):
+        ps, pe, bb, dv, sbc, accn = row
+        span = span_label(ps, pe)
+        parts = [(k, usd(v)) for k, v in (("자사주 매입", bb), ("배당", dv), ("주식 보상", sbc)) if v]
+        slots = {"기간": span} | {k.replace(" ", ""): v for k, v in parts}
+        out.append({"id": "F14", "text": f"{span} 주주에게 돌려준 돈 — " + " · ".join(f"{k} {v}" for k, v in parts if k != "주식 보상")
+                    + (f" · 임직원에게 주식으로 준 보상 {slots['주식보상']}" if "주식보상" in slots else ""), "url": link(accn), "tone": 0, "slots": slots})  # fmt: skip
+    for f in out:
+        f["slots"] = {k: v for k, v in f["slots"].items() if v}
     return out
 
 
 def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     """F10 = 같은 업종 회사들 가운데 자리 — 영업이익률(금융사는 ROE). 셋 이상 모일 때만. 순위·평균은 코드가 센다."""
-    rows = con.execute(
-        "select s.ticker, s.name, s.induty_code, f.fiscal_year, f.revenue, f.operating_income, f.net_income, f.equity, f.rcept_no"
-        " from stocks s join financials f on f.ticker = s.ticker and f.fiscal_year = (select max(fiscal_year) from financials g where g.ticker = s.ticker)"
-        " where s.active = 1").fetchall()  # fmt: skip
+    label, rows = peers_of(con, ticker)
+    rows = [r[:8] + (r[9],) for r in rows]  # (ticker, name, 업종, year, revenue, op, net_income, equity, rcept_no)
     me = next((r for r in rows if r[0] == ticker), None)
-    label = me and sources.industry_label(me[2])
-    if not label:
+    if not label or not me:
         return []
     # 매출이 없는 금융사는 금융사끼리만 — 「지주회사」로 묶인 KB금융과 SK 는 견줄 수 없다
-    peers = [r for r in rows if sources.industry_label(r[2]) == label and r[3] == me[3] and (r[4] is None) == (me[4] is None)]
+    peers = [r for r in rows if r[2] == label and r[3] == me[3] and (r[4] is None) == (me[4] is None)]
     label = "금융지주" if label == "지주회사" and me[4] is None else label
     margin = all(r[4] for r in peers)  # 매출이 다 있으면 영업이익률, 아니면(금융) ROE
     ok = (lambda r: r[4] and r[5] is not None) if margin else (lambda r: r[6] is not None and r[7] and r[7] > 0)
@@ -476,7 +540,7 @@ def industry_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     mid = statistics.median(val.values())  # 평균은 한두 곳에 끌려간다 — 가운데 회사의 값
     others = "·".join(r[1] for r in peers if r[0] != ticker and r[0] in val)
     return [{"id": "F10", "text": f"같은 업종({label}) {n}곳 가운데 {me[3]}년 {what}{josa(what, '이')} {place}음 — {me[1]} {val[ticker]:.1f}% · {n}곳 중간값 {mid:.1f}% (함께 본 회사: {others})",
-             "url": DART.format(me[8]), "tone": 0,
+             "url": link(me[8]), "tone": 0,
              "slots": {"업종": label, "곳수": f"{n}곳", "지표": what, "자리": place, "비율": f"{val[ticker]:.1f}%", "중간값": f"{mid:.1f}%"}}]  # fmt: skip
 
 
@@ -514,7 +578,7 @@ def bond_fact(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     day = f"{pay.month}월 {pay.day}일"
     text = (f"{day} 회사채 {won(total)} {when}" + (f" — 만기 {spans}" if spans else "") + (f" · 이자 연 {rates}%" if rates else "")
             + (f" · 쓰임: {use_txt}" if use_txt else ""))  # fmt: skip
-    return [{"id": "F12", "text": text, "url": DART.format(rno), "tone": 0,
+    return [{"id": "F12", "text": text, "url": link(rno), "tone": 0,
              "slots": {"날짜": day, "금액": won(total)} | ({"만기": spans} if spans else {})
              | ({"쓰임": use_txt if len(uses) > 1 else f"{USE_PLAIN.get(k.replace(' ', ''), k)}({k})"} if (k := next(iter(uses), "")) else {})}]  # 쓰임이 하나면 금액을 되풀이하지 않게
 
@@ -529,7 +593,7 @@ def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     rows = sorted(rows, key=lambda r: -abs(r["op"]))[:3]
     parts = [f"{r['name']} {won(r['op'])}" + (f"(전년보다 {c})" if (c := trend(r["op"], r.get("op_prev"))[2]).startswith(("+", "-")) else f"({c})" if c else "")
              for r in rows]  # fmt: skip
-    return [{"id": "F11", "text": f"{seg['year']}년 사업부별 영업이익 — " + " · ".join(parts), "url": DART.format(biz[1]), "tone": 0,
+    return [{"id": "F11", "text": f"{seg['year']}년 사업부별 영업이익 — " + " · ".join(parts), "url": link(biz[1]), "tone": 0,
              "slots": {"연도": f"{seg['year']}년", "첫부문": rows[0]["name"]}}]  # fmt: skip
 
 
@@ -551,19 +615,46 @@ def is_finance(code: str | None) -> bool:
     return bool(code) and code.startswith(FINANCE_CODES) and not code.startswith("64992")
 
 
+def us_finance(sic: str | None) -> bool:
+    """미국 금융회사 — SIC 60~63(은행·여신·증권·보험)과 6199(금융 서비스: 코인베이스·소파이). 고객 돈이 빚으로 잡혀 부채비율이 뜻이 없다."""
+    return bool(sic) and (sic[:2] in ("60", "61", "62", "63") or sic == "6199")
+
+
+SIC_LABEL = {"7372": "소프트웨어", "3674": "반도체", "6199": "금융 서비스", "7389": "사업 서비스", "7370": "인터넷 서비스", "3711": "자동차",
+             "2834": "제약", "5331": "종합 소매", "4911": "전력", "3572": "저장장치", "3571": "컴퓨터", "2080": "음료", "3760": "우주항공",
+             "6021": "은행", "7841": "영상 서비스", "6331": "보험", "5961": "온라인 소매", "3663": "통신장비", "6211": "증권", "2911": "정유",
+             "7990": "엔터테인먼트", "3721": "항공기", "5812": "외식", "6324": "건강보험", "5211": "건자재 소매", "3531": "건설기계",
+             "3600": "전기장비", "3576": "네트워크 장비", "3679": "전자부품", "3021": "신발", "5810": "외식", "7373": "컴퓨터 시스템"}  # fmt: skip
+
+
+def peers_of(con: sqlite3.Connection, ticker: str) -> tuple[str | None, list[tuple]]:
+    """(업종 이름, 같은 시장의 종목 재무) — 국내는 DART 업종 코드·노트 쓰는 종목(active), 미국은 SIC·미국 종목 전부.
+    줄: (ticker, name, 업종 이름, fiscal_year, revenue, operating_income, net_income, equity, liabilities, rcept_no)."""
+    me = con.execute("select market, induty_code, sic from stocks where ticker = ?", (ticker,)).fetchone()
+    if not me:
+        return None, []
+    us = me[0] == "US"
+    rows = con.execute(
+        f"select s.ticker, s.name, {'s.sic' if us else 's.induty_code'}, f.fiscal_year, f.revenue, f.operating_income, f.net_income, f.equity, f.liabilities, f.rcept_no"
+        " from stocks s join financials f on f.ticker = s.ticker and f.fiscal_year = (select max(fiscal_year) from financials g where g.ticker = s.ticker)"
+        f" where {'s.market = ' + chr(39) + 'US' + chr(39) if us else 's.active = 1'}").fetchall()  # fmt: skip
+    name = (lambda c: SIC_LABEL.get(c)) if us else sources.industry_label
+    return name(me[2] if us else me[1]), [(r[0], r[1], name(r[2]), *r[3:]) for r in rows]
+
+
 def industry_mid(con: sqlite3.Connection, ticker: str) -> dict:
     """같은 업종(우리 종목 안) 중간값 — 100원당 남긴 돈 · 부채비율. 셋 이상일 때만. 금융회사면 {"금융": True}.
     업종마다 원래 빚이 많거나(조선 선수금·항공 리스) 조금 남기는(유통·상사) 구조가 있어, 절대 기준만으로 판단하지 않게 (사용자 10/9)."""
-    me = con.execute("select induty_code from stocks where ticker = ?", (ticker,)).fetchone()
-    code = me and me[0]
-    rows = con.execute(
-        "select s.ticker, s.induty_code, f.revenue, f.operating_income, f.equity, f.liabilities from stocks s join financials f"
-        " on f.ticker = s.ticker and f.fiscal_year = (select max(fiscal_year) from financials g where g.ticker = s.ticker) where s.active = 1").fetchall()  # fmt: skip
+    me = con.execute("select market, induty_code, sic from stocks where ticker = ?", (ticker,)).fetchone()
+    code = me and (me[2] if me[0] == "US" else me[1])
+    label, all_rows = peers_of(con, ticker)
+    rows = [(r[0], r[2], r[4], r[5], r[7], r[8]) for r in all_rows]  # (ticker, 업종 이름, revenue, op, equity, liabilities)
     mine = next((r for r in rows if r[0] == ticker), None)
-    if is_finance(code) or (mine and mine[2] is None):
+    fin = us_finance if me and me[0] == "US" else is_finance
+    if fin(code) or (mine and mine[2] is None):
         return {"금융": True}
-    label = sources.industry_label(code)
-    peers = [r for r in rows if label and sources.industry_label(r[1]) == label and not is_finance(r[1]) and r[2]]
+    codes = dict(con.execute(f"select ticker, {'sic' if me and me[0] == 'US' else 'induty_code'} from stocks"))
+    peers = [r for r in rows if label and r[1] == label and not fin(codes.get(r[0])) and r[2]]
     out = {}
     margins = [r[3] / r[2] * 100 for r in peers if r[2] > 0 and r[3] is not None and abs(r[3] / r[2]) <= 1]
     debts = [r[5] / r[4] * 100 for r in peers if r[4] and r[4] > 0 and r[5] is not None]
@@ -584,16 +675,44 @@ def when(d: date, today: date) -> str:
     return "이번 주" if days <= 7 else "지난주" if days <= 14 else f"{d.month}월"
 
 
+def span_label(start: str, end: str) -> str:
+    """기간 → 「2025년 2월~2026년 1월」 · 한 해 안이면 「2026년 5~7월」 · 달력 연도 그대로면 「2025년」. 52·53주 결산은 일주일을 빼고 본다."""
+    a, b = date.fromisoformat(start) + timedelta(days=7), date.fromisoformat(end) - timedelta(days=7)
+    if a.month == 1 and b.month == 12 and a.year == b.year:
+        return f"{a.year}년"
+    return f"{a.year}년 {a.month}~{b.month}월" if a.year == b.year else f"{a.year}년 {a.month}월~{b.year}년 {b.month}월"
+
+
+def us_market(con: sqlite3.Connection, ticker: str) -> dict | None:
+    """미국 종목이면 {cik, rate, rate_day} — 사실을 만드는 동안 금액은 달러, 링크는 SEC. 환율은 한국은행(731Y003) 가장 최근 날."""
+    row = con.execute("select cik from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone()
+    if not row:
+        return None
+    fx = con.execute("select date, value from macro where series_id = 'ECOS:731Y003:0000003' order by date desc limit 1").fetchone()
+    return {"cik": row[0], "rate": fx[1] if fx else None, "rate_day": fx[0] if fx else None}
+
+
 def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
     """종목 하나의 사실 목록 — [{id, text, url, tone, slots}]. 문장도 숫자도, 좋은지 걱정인지(tone)도,
     AI 가 쓸 빈칸 값(slots)도 코드가 만든다. text 는 코드 대체 글·AI 이해용, slots 는 AI 글에 끼울 값."""
+    us = us_market(con, ticker)
+    if not us:
+        return _facts(con, ticker, today, None)
+    _MARKET.update(money=usd, per="달러", link=lambda accn: f"https://www.sec.gov/Archives/edgar/data/{us['cik']}/{accn.replace('-', '')}/{accn}-index.htm")
+    try:
+        return _facts(con, ticker, today, us)
+    finally:
+        _MARKET.update(money=krw, per="원", link=lambda rno: DART.format(rno))
+
+
+def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -> list[dict]:
     out = []
     fin = con.execute("select fiscal_year, revenue, operating_income, net_income, equity, liabilities, rcept_no,"
-                      " basis from financials where ticker = ? order by fiscal_year desc limit 5", (ticker,)).fetchall()  # fmt: skip
+                      " basis, period_start, period_end from financials where ticker = ? order by fiscal_year desc limit 5", (ticker,)).fetchall()  # fmt: skip
     if fin:
-        y, rev, oi, ni, eq, li, rno, basis = fin[0]
-        p = fin[1] if len(fin) > 1 else (None,) * 8
-        url, yy = DART.format(rno), f"{y}년"
+        y, rev, oi, ni, eq, li, rno, basis, ps, pe = fin[0]
+        p = fin[1] if len(fin) > 1 else (None,) * 10
+        url, yy = link(rno), (span_label(ps, pe) if us and ps else f"{y}년")  # 미국은 회계연도 이름 대신 실제 달 (엔비디아 「2026 회계연도」= 2025년 2월~2026년 1월)
         base = {"OFS": " · 별도 재무 기준"}.get(basis, "")  # 연결이 기본. 연결이 없는 회사만 밝힌다
         for fid, what, cur, prev in (("F1", "매출", rev, p[1]), ("F2", "영업이익", oi, p[2])):
             if cur is None:
@@ -605,6 +724,10 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             # 폭 = 부호 없는 변화율 — 「매출이 {F1.폭} {F1.방향}어요」→「매출이 10.9% 늘었어요」(방향 낱말과 +가 겹치지 않게)
             slots = ({"연도": yy, "값": won(cur)} | ({"변화": chg} if chg else {}) | ({"방향": way} if way else {})
                      | ({"폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
+            if us and us.get("rate"):  # 달러 먼저, 원화는 괄호 — 코드가 곱하고 언제 환율인지 같이 적는다
+                d = date.fromisoformat(us["rate_day"])
+                slots["원화"] = f"약 {krw(cur * us['rate'])}"
+                tail += f" (약 {krw(cur * us['rate'])} · {d.month}월 {d.day}일 환율 {us['rate']:,.1f}원 기준)"
             out.append({"id": fid, "text": f"{yy} {what} {won(cur)}{tail}{base}", "url": url, "tone": tone,
                         "slots": slots})  # fmt: skip
         # 은행·보험은 예금·보험금이 빚으로 잡혀 부채비율이 수백~천 % — 초보자에게 오해만 준다.
@@ -614,10 +737,14 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
             d = li / eq * 100
             r = f"{d:.1f}%"
             usual = mid.get("부채비율")  # 같은 업종 중간값 — 조선(선수금)·항공(리스)·전력처럼 원래 높은 업종이 있다
-            bad = d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
+            if us:  # 미국 회사는 자사주 매입으로 자기 돈이 작게 잡히는 일이 흔하다 — 비율로 좋다·나쁘다를 가르지 않는다
+                bb = con.execute("select buyback from flows where ticker = ? and months = 12 order by period_end desc limit 1", (ticker,)).fetchone()
+                if bb and bb[0] and bb[0] >= eq * 0.1 and d > DEBT_BAD:  # 빚이 많아 보일 때만 이유를 붙인다(엔비디아 31% 에 붙으면 이상하다)
+                    mid = mid | {"빚이유": f"자기 회사 주식을 많이 사들여(지난 1년 {usd(bb[0])}) 자기 돈이 작게 잡혀요 — 미국 큰 회사에 흔한 모양이에요"}
+            bad = not us and d > DEBT_BAD and (usual is None or d > usual * 1.5) and "빚이유" not in mid
             out.append({"id": "F3", "text": f"{yy} 말 부채비율 {r} (빚 {won(li)} · 자기 돈 {won(eq)})"
                         + (f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {usual:.0f}%" if usual is not None else ""), "url": url,
-                        "tone": 1 if d < DEBT_GOOD else -1 if bad else 0,
+                        "tone": 0 if us else 1 if d < DEBT_GOOD else -1 if bad else 0,
                         "slots": {"연도": yy, "비율": r, "빚": won(li), "자기돈": won(eq)}
                         | ({"업종보통": f"{usual:.0f}%", "업종": mid["업종"]} if usual is not None else {})
                         | ({"빚이유": mid["빚이유"]} if "빚이유" in mid else {})})  # fmt: skip
@@ -629,16 +756,18 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         story = [f for f in story_facts(fin, url, yy) if not (f["id"] == "F5" and mid.get("금융"))]
         for f in story:  # 100원당 남긴 돈 — 같은 업종 중간값도 (유통·상사·정유는 원래 몇 원, 소프트웨어는 수십 원)
             if f["id"] == "F5" and mid.get("백원당") is not None:
-                f["slots"] |= {"업종보통": f"{mid['백원당']:.0f}원", "업종": mid["업종"]}
-                f["text"] += f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {mid['백원당']:.0f}원"
+                f["slots"] |= {"업종보통": per(f"{mid['백원당']:.0f}"), "업종": mid["업종"]}
+                f["text"] += f" · 같은 업종({mid['업종']}) {mid['곳수']}곳 중간값 {per(f'{mid["백원당"]:.0f}')}"
         out += story
     biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
     if biz and (segs := json.loads(biz[0]).get("segments")):  # 무엇으로 버나 — 사업보고서의 부문별 매출 비중 (큰 것 둘)
         top = sorted(segs, key=lambda x: -float(x["share"].rstrip("%") or 0))[:2]
         slots = {f"{o}부문": x["name"].split(" · ")[-1] for o, x in zip(("첫", "둘째"), top)} | {f"{o}비중": x["share"] for o, x in zip(("첫", "둘째"), top)}
-        out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": DART.format(biz[1]),
+        out.append({"id": "F7", "text": "매출 비중 — " + ", ".join(f"{x['name']} {x['share']}" for x in top), "url": link(biz[1]),
                     "tone": 0, "slots": slots})  # fmt: skip
-    out += quarter_facts(con, ticker) + industry_fact(con, ticker) + segment_fact(con, ticker) + bond_fact(con, ticker, today)
+    out += quarter_facts(con, ticker, us) + industry_fact(con, ticker) + segment_fact(con, ticker) + bond_fact(con, ticker, today)
+    if us:
+        out += us_facts(con, ticker)
     evs = con.execute("select rcept_no, date, title, code, direction from disclosures"
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
@@ -648,7 +777,7 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
         tone = ""
         day = f"{d.month}월 {d.day}일"
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
-        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": DART.format(rno),
+        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": link(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」", "시기": when(d, today)}
                     | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
@@ -683,7 +812,7 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
                 slots |= {f"{key}보고": n, f"{key}주식": total}
                 parts.append(f"{word} 보고 {n}(합계 {total})")
         out.append({"id": "I1", "text": f"{span} 임원·주요주주 지분 보고 {len(ex)}건 — 보유 주식을 " + " · ".join(parts),
-                    "url": DART.format(ex[0][0]), "tone": 0, "slots": slots})  # fmt: skip
+                    "url": link(ex[0][0]), "tone": 0, "slots": slots})  # fmt: skip
     for k, (rno, d, _, who, chg, rate) in enumerate([r for r in rows if r[2] == "5%"][:2], len(out) + 1):
         d = date.fromisoformat(d)
         day = f"{d.month}월 {d.day}일"
@@ -692,7 +821,7 @@ def insider_facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dic
         if chg:
             slots |= {"주식": f"{korean_num(abs(chg))}주", "방향": "늘렸" if chg > 0 else "줄였"}
         out.append({"id": f"I{k}", "text": f"{day} {who}의 5% 이상 대량보유 보고 — 보유 비율 {rate:.2f}%{way}" if rate is not None
-                    else f"{day} {who}의 5% 이상 대량보유 보고{way}", "url": DART.format(rno), "tone": 0, "slots": slots})  # fmt: skip
+                    else f"{day} {who}의 5% 이상 대량보유 보고{way}", "url": link(rno), "tone": 0, "slots": slots})  # fmt: skip
     return out
 
 
@@ -764,6 +893,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(았|었)(?:으로|로)(?=[,\s])", r"\1고", text)
     text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
     text = re.sub(r"(\d년)년", r"\1", text)
+    text = re.sub(r"달러이(에요|라서|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
     text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
