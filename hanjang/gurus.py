@@ -69,13 +69,63 @@ def table(sec: us.Edgar, cik: int, accn: str) -> str:
     return sec._get(f"{folder}/{xml}").text
 
 
+# 업종 — SEC 산업분류(SIC) 네 자리를 국내 도넛과 같은 큰 업종으로. 위에서부터 먼저 맞는 것
+SIC_SECTOR = [((2830, 2836), "제약·바이오"), ((3840, 3851), "제약·바이오"), ((8000, 8099), "제약·바이오"),
+              ((3570, 3579), "전자·반도체"), ((3600, 3699), "전자·반도체"), ((3800, 3899), "전자·반도체"),
+              ((7370, 7379), "IT·통신"), ((4800, 4899), "IT·통신"), ((7300, 7369), "IT·통신"), ((7380, 7399), "IT·통신"),
+              ((6000, 6799), "금융"), ((5000, 5999), "유통"), ((1300, 1399), "에너지"), ((2900, 2999), "에너지"), ((4900, 4999), "에너지"),
+              ((3700, 3799), "자동차·운송장비"), ((4000, 4799), "운송·물류"), ((3300, 3399), "철강·금속"), ((1000, 1099), "철강·금속"),
+              ((3400, 3569), "기계·전기"), ((3580, 3599), "기계·전기"), ((2800, 2899), "화학·소재"), ((2400, 2799), "화학·소재"),
+              ((3000, 3299), "화학·소재"), ((1400, 1499), "화학·소재"), ((1500, 1799), "건설"), ((7800, 7999), "미디어·여가"),
+              ((7000, 7299), "식품·생활"), ((2000, 2399), "식품·생활"), ((100, 999), "식품·생활"), ((3900, 3999), "식품·생활")]  # fmt: skip
+SUFFIX = {"INC", "CORP", "CORPORATION", "CO", "COMPANY", "LTD", "LIMITED", "PLC", "LP", "LLC", "NV", "SA", "AG", "SE", "DEL", "NEW",
+          "THE", "CL", "A", "B", "C", "COM", "HOLDINGS", "HLDGS", "HLDG", "HLDNGS", "PL", "GROUP", "GRP", "DE", "MD", "NY", "NJ"}  # fmt: skip
+ABBR = {"FINL": "FINANCIAL", "AMER": "AMERICA", "WHSL": "WHOLESALE", "INTL": "INTERNATIONAL", "TECHNOLOGIE": "TECHNOLOGIES",
+        "TECH": "TECHNOLOGIES", "MTRS": "MOTORS", "MFG": "MANUFACTURING", "SVCS": "SERVICES", "SYS": "SYSTEMS", "COMMUNICATIONS": "COMMUNICATION",
+        "PHARMACEUTICALS": "PHARMACEUTICAL", "MKTS": "MARKETS", "BANCORPORATION": "BANCORP", "ENTMT": "ENTERTAINMENT",
+        "PETE": "PETROLEUM", "MATLS": "MATERIALS", "PAC": "PACIFIC", "MANUFAC": "MANUFACTURING", "ELEC": "ELECTRIC", "PWR": "POWER",
+        "MNG": "MINING", "AIRLS": "AIRLINES", "RLTY": "REALTY", "TR": "TRUST", "RES": "RESOURCES", "INDS": "INDUSTRIES", "HLDNGS": "HOLDINGS"}  # fmt: skip
+
+
+def sector(sic: str | None, issuer: str = "") -> str | None:
+    """SIC → 큰 업종. ETF(지수 펀드)는 이름으로 — 13F 에는 ETF 도 주식처럼 들어 있다."""
+    if re.search(r"\bETF\b|ISHARES|SPDR|INVESCO QQQ|VANGUARD .*(INDEX|ETF)|SELECT SECTOR", issuer.upper()):
+        return "ETF(지수 펀드)"
+    d = int(sic) if sic and sic.isdigit() else None
+    return next((name for (lo, hi), name in SIC_SECTOR if d is not None and lo <= d <= hi), None)
+
+
+def norm(name: str) -> tuple:
+    """회사 이름 → 비교용 낱말 묶음. 13F 는 줄임말(「BANK AMER CORP」)이라 SEC 회사 표 이름과 맞추려고."""
+    name = re.sub(r"\s*/.*$", "", name)  # SEC 회사 표의 주 표시 「/CA」 「/DE/」
+    words = re.sub(r"[^A-Z0-9 ]", " ", name.upper().replace("&", " ").replace(".COM", " COM")).split()
+    return tuple(ABBR.get(w, w) for w in words if w not in SUFFIX)
+
+
+def sic_of(con, sec, index: dict, issuer: str) -> str:
+    """우리 종목이 아닌 회사의 SIC — 이름으로 SEC 회사 표(CIK)를 찾고 공시 목록에서 SIC. 한 번 찾은 CIK 는 sics 표에. 못 찾으면 빈 값."""
+    cik = index.get(norm(issuer))
+    if not cik:
+        return ""
+    if hit := con.execute("select sic from sics where cik = ?", (cik,)).fetchone():
+        return hit[0]
+    sic = str(sec.submissions(cik).get("sic") or "")
+    con.execute("insert or replace into sics values (?, ?)", (cik, sic))
+    return sic
+
+
 def main(today: date | None = None, con=None, sec=None) -> None:
     con, sec, n = con or db.connect(), sec or us.Edgar(), 0
-    tickers = cusip_map()
+    tickers, index = cusip_map(), None
+    ours = dict(con.execute("select ticker, sic from stocks where market = 'US'").fetchall())
     for key, (_, cik, _, _) in GURUS.items():
         got = latest(sec, cik)
-        if not got or con.execute("select 1 from guru_holdings where guru = ? and accn = ?", (key, got[0])).fetchone():
-            continue  # 새 신고가 없으면 그대로
+        if not got or con.execute("select 1 from guru_holdings where guru = ? and accn = ? and sic is not null", (key, got[0])).fetchone():
+            continue  # 새 신고가 없으면 그대로 (업종을 아직 안 붙인 옛 줄이면 다시)
+        if index is None:  # 정규화한 이름 → CIK. 같은 이름이 여럿이면 처음 것(티커 표는 시가총액 큰 순)
+            index = {}
+            for c, title in sec.tickers().values():
+                index.setdefault(norm(title), c)
         merged: dict[str, list] = {}  # 우리 종목은 티커로 합친다 — 알파벳 A·C 가 두 줄로 나오지 않게
         for c, name, v, s in parse(table(sec, cik, got[0])):
             row = merged.setdefault(tickers.get(c, c), [c, name, 0, 0])
@@ -83,8 +133,10 @@ def main(today: date | None = None, con=None, sec=None) -> None:
             row[3] += s
         total = sum(v for _, _, v, _ in merged.values()) or 1
         con.execute("delete from guru_holdings where guru = ?", (key,))
-        con.executemany("insert into guru_holdings values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        [(key, c, name, tickers.get(c), v, s, v / total * 100, *got) for c, name, v, s in merged.values()])  # fmt: skip
+        con.executemany("insert into guru_holdings (guru, cusip, issuer, ticker, value, shares, weight, accn, period, filed, sic)"
+                        " values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [(key, c, name, tickers.get(c), v, s, v / total * 100, *got,
+                          ours.get(tickers.get(c)) or sic_of(con, sec, index, name)) for c, name, v, s in merged.values()])  # fmt: skip
         con.commit()
         n += 1
     print(f"유명 투자자 13F — 새 신고 {n}곳 · SEC {sec.calls}콜")

@@ -24,7 +24,12 @@ def test_parse_sums_same_cusip_skips_options_and_fixes_thousands():
 class FakeSec:
     calls = 0
 
+    def tickers(self):
+        return {"AXP": (4962, "AMERICAN EXPRESS CO")}
+
     def submissions(self, cik):
+        if cik == 4962:
+            return {"sic": "6199"}
         return {"filings": {"recent": {"form": ["4", "13F-HR"], "accessionNumber": ["x", "0001-26-1"], "reportDate": ["", "2026-06-30"], "filingDate": ["", "2026-08-14"]}}}
 
     def _get(self, url):
@@ -41,8 +46,9 @@ def test_main_merges_share_classes_into_our_ticker_and_skips_same_filing(monkeyp
     monkeypatch.setattr(gurus, "GURUS", {"buffett": gurus.GURUS["buffett"]})
     con = db.connect(":memory:")
     gurus.main(date(2026, 10, 10), con, FakeSec())
-    got = con.execute("select ticker, issuer, value, weight, period from guru_holdings order by value desc").fetchall()
-    assert got == [("GOOGL", "ALPHABET INC", 1000, 50.0, "2026-06-30"), (None, "AMERICAN EXPRESS CO", 1000, 50.0, "2026-06-30")]
+    got = con.execute("select ticker, issuer, value, weight, period, sic from guru_holdings order by value desc").fetchall()
+    assert got == [("GOOGL", "ALPHABET INC", 1000, 50.0, "2026-06-30", ""), (None, "AMERICAN EXPRESS CO", 1000, 50.0, "2026-06-30", "6199")]  # 우리 종목 밖은 이름 → CIK → SIC
+    assert gurus.sector("6199") == "금융" and gurus.sector("3674") == "전자·반도체" and gurus.sector("", "SPDR S&P 500 ETF TR") == "ETF(지수 펀드)"
     con.execute("update guru_holdings set value = 1")
     gurus.main(date(2026, 10, 11), con, FakeSec())  # 같은 신고면 다시 받지 않는다
     assert con.execute("select sum(value) from guru_holdings").fetchone() == (2,)
@@ -58,14 +64,19 @@ def test_guru_page_and_note_owners_link_each_other():
 
     con = db.connect(":memory:")
     con.execute("insert into stocks (ticker, name, corp_code, active, market, homepage) values ('AAPL', '애플', '320193', 1, 'US', 'ticker/AAPL')")
-    con.executemany("insert into guru_holdings values ('buffett', ?, ?, ?, ?, 1, ?, '0001193125-26-352200', '2026-06-30', '2026-08-14')",
-                    [("037833100", "APPLE INC", "AAPL", 66e9, 22.0), ("025816109", "AMERICAN EXPRESS CO", None, 51e9, 17.1)])
+    con.executemany("insert into guru_holdings values ('buffett', ?, ?, ?, ?, 1, ?, '0001193125-26-352200', '2026-06-30', '2026-08-14', ?)",
+                    [("037833100", "APPLE INC", "AAPL", 66e9, 22.0, "3571"), ("025816109", "AMERICAN EXPRESS CO", None, 51e9, 17.1, "6199")])
     app = web.App(con, "s" * 32)
     title, _, rows = app.owners("AAPL")
-    assert title == "이 종목을 가진 유명 투자자" and rows == [("워런 버핏 · 버크셔 해서웨이", "/learn/guru/buffett", "berkshirehathaway.com", "포트폴리오의 22.0% · 2026년 6월 30일 기준")]
+    assert title == "이 종목을 가진 유명 투자자" and [(n, h, d) for n, h, _, d in rows] == [("워런 버핏 · 버크셔 해서웨이", "/learn/guru/buffett", "포트폴리오의 22.0% · 2026년 6월 30일 기준")]
+    assert 'src="/static/people/buffett.jpg"' in rows[0][2] and "Public domain" in rows[0][2]  # 위키미디어 공용 사진 · 출처는 마우스를 올리면
     assert 'href="/learn/guru/buffett"' in web.owners_block(app.owners("AAPL")) and web.owners_block(app.owners("005930")) == ""
     _, _, html_ = app.guru(1, "buffett", "", "")
+    assert "어떤 업종에 많이 가졌나" in html_ and ">금융</span>" in html_ and ">44%</span>" in html_  # 금액 비중 — 아멕스 510억/1,170억
     assert "미국 주식 2종목" in html_ and "비중 22.0% · 660억 달러" in html_ and "AMERICAN EXPRESS CO" in html_
     assert 'href="/n/AAPL"' not in html_  # 노트가 아직 없으면 누르지 않는 줄
     assert "2026년 6월 30일 기준, 2026년 8월 14일에 낸 신고" in html_ and "따라 사고팔라는 뜻이 아니에요" in html_
+    assert "사진: <a" in html_ and "위키미디어 공용" in html_  # 페이지 맨 아래 사진 출처
+    assert app.route("GET", "/static/people/buffett.jpg", {}, {}, None)[2][:2] == bytes([0xFF, 0xD8])  # JPEG
+    assert "/static/people/burry.jpg" not in web.guru_face("burry")  # 자유 이용 사진이 없으면 글자 동그라미
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")

@@ -479,35 +479,40 @@ def sector(code: str | None) -> str | None:
 DONUT = ("#154539", "#2a5649", "#40695c", "#5b8172", "#7b9a8d", "#9db5aa", "#c0d1c9", "#e1e9e5")  # 진한 초록부터 — 한장 색
 
 
-def donut(labels: list[str | None]) -> str:
-    """큰손 한눈에 — 5% 넘게 가진 회사들이 어떤 업종에 몰려 있나(곳 수 기준). 많은 7개 큰 업종 + 기타.
-    지분율로 그리지 않는다 — 「그 회사 주식 중 몇 %」라서 도넛 조각으로 더하면 뜻이 없다."""
+def donut(labels: list[str | None], weights: list[float] | None = None, unit: str = "곳",
+          note: str = "5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.") -> str:
+    """큰손 한눈에 — 가진 회사들이 어떤 업종에 몰려 있나. 많은 7개 큰 업종 + 기타.
+    국내 기관은 곳 수로 센다 — 지분율은 「그 회사 주식 중 몇 %」라서 더하면 뜻이 없다.
+    미국 유명 투자자는 금액(weights)으로 — 13F 금액은 한 사람의 돈이라 더하면 포트폴리오 비중이다."""
     if not labels:
         return ""
-    from collections import Counter
-
-    cnt = Counter(x or "기타" for x in labels)
-    top = [(k, v) for k, v in cnt.most_common() if k != "기타"][:7]
-    rest = len(labels) - sum(v for _, v in top)
-    parts = top + ([("기타", rest)] if rest else [])
-    total, r, c = len(labels), 15.915, 2 * 3.14159 * 15.915  # 둘레 100 짜리 원 — dasharray 가 곧 %
+    w = weights or [1] * len(labels)
+    cnt: dict[str, list] = {}
+    for x, v in zip(labels, w):
+        k = cnt.setdefault(x or "기타", [0, 0])
+        k[0] += v
+        k[1] += 1
+    top = sorted(((k, v) for k, v in cnt.items() if k != "기타"), key=lambda kv: -kv[1][0])[:7]
+    rest = [sum(v) for v in zip(*(cnt[k] for k in cnt if k not in dict(top)))] or [0, 0]
+    parts = top + ([("기타", rest)] if rest[1] else [])
+    total, r, c = sum(w), 15.915, 2 * 3.14159 * 15.915  # 둘레 100 짜리 원 — dasharray 가 곧 %
     acc, rings, keys = 0.0, [], []
-    for (k, v), col in zip(parts, DONUT):
+    for (k, (v, n)), col in zip(parts, DONUT):
         pct = v / total * 100
         rings.append(f'<circle cx="21" cy="21" r="{r}" fill="none" stroke="{col}" stroke-width="7" '
                      f'stroke-dasharray="{pct:.2f} {100 - pct:.2f}" stroke-dashoffset="{25 - acc:.2f}"/>')  # fmt: skip
         keys.append(f'<li class="flex items-center gap-2 py-1"><span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:{col}"></span>'
                     f'<span class="flex-1 text-[13px] text-on-surface truncate">{e(k)}</span>'
                     f'<span class="text-[13px] font-semibold text-on-surface tabular-nums">{pct:.0f}%</span>'
-                    f'<span class="w-10 text-right text-[11px] text-outline tabular-nums">{v}곳</span></li>')  # fmt: skip
+                    f'<span class="w-12 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>')  # fmt: skip
         acc += pct
     return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
             '<div class="mt-2 flex items-center gap-4"><div class="relative w-36 h-36 shrink-0">'
             f'<svg viewBox="0 0 42 42" class="w-full h-full -rotate-0">{"".join(rings)}</svg>'
-            f'<div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[20px] font-bold text-on-surface leading-none">{total}</span>'
-            '<span class="text-[11px] text-outline mt-0.5">곳</span></div></div>'
+            f'<div class="absolute inset-0 flex flex-col items-center justify-center"><span class="text-[20px] font-bold text-on-surface leading-none">{len(labels)}</span>'
+            f'<span class="text-[11px] text-outline mt-0.5">{unit}</span></div></div>'
             f'<ul class="flex-1 min-w-0">{"".join(keys)}</ul></div>'
-            '<p class="mt-1 text-[11px] text-outline">5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요.</p></section>')  # fmt: skip
+            f'<p class="mt-1 text-[11px] text-outline">{e(note)}</p></section>')  # fmt: skip
 
 
 def price_chart(points: list[tuple[str, int]]) -> str:
@@ -643,7 +648,7 @@ def sentence(s: dict, seen: set | None = None) -> str:
 
 # 문단 나누기 — 근거 사실이 다루는 질문이 바뀌면 새 문단 (한 문단에 질문 하나, 사용자 10/9 검토)
 TOPIC = {"F1": "실적", "F2": "실적", "F5": "실적", "F6": "흐름", "F7": "사업", "F10": "업종", "F3": "살림", "F4": "살림",
-         "F8": "올해", "F9": "올해", "F11": "사업", "F12": "살림", "F13": "올해", "F14": "살림", "F15": "사업", "F16": "전망", "F17": "살림"}  # fmt: skip
+         "F8": "올해", "F9": "올해", "F11": "사업", "F12": "살림", "F13": "올해", "F14": "살림", "F15": "사업", "F16": "전망", "F17": "살림", "F18": "살림"}  # fmt: skip
 
 
 def paras(sents: list[dict], seen: set) -> str:
@@ -822,6 +827,26 @@ RULE = '<div class="border-t-2 border-primary"></div><div class="mt-[3px] border
 RULE_FLIP = '<div class="border-t-2 border-dotted border-primary"></div><div class="mt-[3px] border-t-2 border-primary"></div>'
 
 
+def guru_face(key: str, size: str = "w-10 h-10") -> str:
+    """유명 투자자 얼굴 — 위키미디어 공용의 자유 이용 사진(static/people, 출처는 SOURCES.txt). 없으면 회사 로고·글자 동그라미."""
+    name, _, _, home = gurus.GURUS[key]
+    if key not in PEOPLE:
+        return logo(name, home, size)
+    who, lic, _ = PEOPLE[key]
+    return (f'<span class="{size} shrink-0 rounded-full overflow-hidden bg-surface-container border border-outline-variant/40">'
+            f'<img alt="{e(name)}" title="사진: {e(who)} · {e(lic)} · 위키미디어 공용" class="w-full h-full object-cover object-[50%_20%]" '
+            f'loading="lazy" src="/static/people/{key}.jpg"></span>')  # fmt: skip
+
+
+def people_credits() -> dict[str, tuple[str, str, str]]:
+    f = STATIC / "people" / "SOURCES.txt"
+    rows = [ln.split("|") for ln in f.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")] if f.exists() else []
+    return {k: (who, lic, url) for k, who, lic, url in rows}
+
+
+PEOPLE = people_credits()  # 키 → (찍은 사람, 이용 허락, 원본 주소)
+
+
 def kdate(iso: str) -> str:
     d = date.fromisoformat(iso)
     return f"{d.year}년 {d.month}월 {d.day}일"
@@ -833,10 +858,10 @@ def owners_block(owners: tuple | None) -> str:
         return ""
     title, note, rows = owners
     items = "".join(
-        f'<a href="{e(href)}" class="py-3 flex items-center gap-3">{logo(name, home, "w-9 h-9")}'
+        f'<a href="{e(href)}" class="py-3 flex items-center gap-3">{face}'
         f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(name)}</span>'
         f'<span class="text-[12px] text-on-surface-variant">{e(detail)}</span></span>'
-        '<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>' for name, href, home, detail in rows)  # fmt: skip
+        '<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>' for name, href, face, detail in rows)  # fmt: skip
     return ('<section class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
             f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
@@ -1025,6 +1050,8 @@ class App:
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "photos" / path[15:]).read_bytes()
         if path == "/stocks.js":  # 검색 자동완성 — 상장사 이름·코드는 공개 정보라 로그인 없이
             return "200 OK", [("Content-Type", "text/javascript; charset=utf-8"), ("Cache-Control", "public, max-age=86400")], self.stocks_js()
+        if path.startswith("/static/people/") and path[15:-4] in gurus.GURUS and path.endswith(".jpg") and (STATIC / "people" / path[15:]).exists():
+            return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "people" / path[15:]).read_bytes()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
         if path in ("/privacy", "/method"):  # 로그인 없이 열린다
@@ -2101,12 +2128,13 @@ class App:
         """(제목, 설명, [(이름, 링크, 홈페이지, 한 줄)]) — 미국은 13F 유명 투자자(비중 큰 순), 국내는 5% 넘게 가진 기관(지분 큰 순)."""
         got = self.con.execute("select guru, weight, period from guru_holdings where ticker = ? order by weight desc", (ticker,)).fetchall()
         if got:
-            rows = [(gurus.GURUS[k][0], f"/learn/guru/{k}", gurus.GURUS[k][3], f"포트폴리오의 {w:.1f}% · {kdate(p)} 기준")
+            rows = [(gurus.GURUS[k][0], f"/learn/guru/{k}", guru_face(k, "w-9 h-9"), f"포트폴리오의 {w:.1f}% · {kdate(p)} 기준")
                     for k, w, p in got if k in gurus.GURUS]  # fmt: skip
             return ("이 종목을 가진 유명 투자자",
                     "미국 투자자가 분기마다 내는 보유 신고(SEC 13F)예요. 분기가 끝나고 45일 안에 나와서 지금과 다를 수 있어요. 따라 사고팔라는 뜻이 아니에요.", rows)
         kr = self.con.execute("select inst, rate, date from big_holdings where stock_code = ? order by rate desc", (ticker,)).fetchall()
-        rows = [(holders.BIG[k][0], f"/learn/big/{k}", self.BIG_HOME.get(k), f"지분 {r:.2f}% · {kdate(d)} 보고") for k, r, d in kr if k in holders.BIG]
+        rows = [(holders.BIG[k][0], f"/learn/big/{k}", logo(holders.BIG[k][0], self.BIG_HOME.get(k), "w-9 h-9"), f"지분 {r:.2f}% · {kdate(d)} 보고")
+                for k, r, d in kr if k in holders.BIG]  # fmt: skip
         return ("이 종목을 5% 넘게 가진 기관", "5% 넘게 가지면 내는 대량보유 보고(DART)로 알려진 것만이에요. 따라 사고팔라는 뜻이 아니에요.", rows)
 
     def guru_list(self) -> str:
@@ -2115,7 +2143,7 @@ class App:
         if not keys:
             return ""
         items = "".join(
-            f'<a href="/learn/guru/{k}" class="py-3.5 flex items-center gap-space-md">{logo(gurus.GURUS[k][0], gurus.GURUS[k][3], "w-10 h-10")}'
+            f'<a href="/learn/guru/{k}" class="py-3.5 flex items-center gap-space-md">{guru_face(k)}'
             f'<span class="flex flex-col min-w-0 flex-1"><span class="font-body-reading-strong text-body-compact text-on-surface">{e(gurus.GURUS[k][0])}</span>'
             f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(gurus.GURUS[k][2])}</span></span>'
             f'<span class="text-[12px] text-outline shrink-0">{got[k]:,}종목</span></a>' for k in keys)  # fmt: skip
@@ -2129,16 +2157,18 @@ class App:
         name, cik, intro, home = gurus.GURUS[key]
         rows = self.con.execute(
             "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
-            " exists(select 1 from notes n where n.ticker = g.ticker) from guru_holdings g left join stocks s on s.ticker = g.ticker"
+            " exists(select 1 from notes n where n.ticker = g.ticker), g.sic from guru_holdings g left join stocks s on s.ticker = g.ticker"
             " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
         if not rows:
             return "404 Not Found", [], self.simple("없음", "아직 받은 신고가 없어요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
         total = sum(r[2] for r in rows)
         sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
+        pie = donut([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
+                    "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
 
         def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note = r
+            issuer, t, value, weight, _, _, _, kname, khome, has_note, _ = r
             label = kname or issuer
             inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
                      f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
@@ -2149,15 +2179,17 @@ class App:
 
         top = rows[:30]
         body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{logo(name, home, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
                 f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
-                '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + pie
+                + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
                 + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
                 + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
                 + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
                 + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
-                + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a></p>')  # fmt: skip
+                + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a>'
+                + (f' · 사진: <a class="underline" href="{e(PEOPLE[key][2])}" target="_blank" rel="noopener">{e(PEOPLE[key][0])}</a>, {e(PEOPLE[key][1])}, 위키미디어 공용'
+                   if key in PEOPLE else "") + '</p>')  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     def big(self, uid: int, key: str, wrap: str, end: str):

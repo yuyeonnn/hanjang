@@ -49,6 +49,7 @@ create table if not exists big_holdings (
   inst text not null, stock_code text not null, corp_name text not null, corp_cls text, rate real not null,
   rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
+create table if not exists sics (cik integer primary key, sic text not null);
 create table if not exists guru_holdings (
   guru text not null, cusip text not null, issuer text not null, ticker text, value real not null, shares real not null,
   weight real not null, accn text not null, period text not null, filed text not null, primary key (guru, cusip));
@@ -113,7 +114,7 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("users", "mail_on", "integer not null default 1"),  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
-                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"),
+                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"), ("guru_holdings", "sic", "text"),
                             ("news", "summary", "text"),
                             # 미국 주식 (docs/stage3-us.md 1주차) — 시장·SEC 번호·업종·회계연도 끝 · 기간·통화·주당순이익 · 임원 거래의 계획 표시·단가
                             ("stocks", "market", "text not null default 'KR'"), ("stocks", "cik", "integer"), ("stocks", "sic", "text"), ("stocks", "fye", "text"),

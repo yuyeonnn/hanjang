@@ -1,0 +1,9 @@
+# 유명 투자자 사진 — 위키미디어 공용(Wikimedia Commons)의 자유 이용 사진만. 256px 로 줄였을 뿐 고치지 않았다 (2026-10-10)
+# 화면에는 사진 위에 마우스를 올리면, 투자자 페이지 맨 아래에는 글로 출처를 적는다. CC BY-SA 사진은 같은 조건으로 쓴다.
+
+buffett|USA International Trade Administration|Public domain|https://commons.wikimedia.org/wiki/File:Warren_Buffett_at_the_2015_SelectUSA_Investment_Summit_(cropped).jpg
+cathie|Caroline Wood|CC BY-SA 4.0|https://commons.wikimedia.org/wiki/File:Cathie_Wood_ARK_Invest_Photo.jpg
+ackman|Senate Democrats|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Valeant_Pharmaceuticals%27_Business_Model_(headshot).jpg
+dalio|Web Summit|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Web_Summit_2018_-_Forum_-_Day_2,_November_7_HM1_7481_(44858045925).jpg
+tepper|Appaloosa Management|CC BY-SA 3.0|https://commons.wikimedia.org/wiki/File:David_Tepper_01.jpg
+soros|Aris Oikonomou / European Commission|CC BY 4.0|https://commons.wikimedia.org/wiki/File:George_Soros,_Founder_and_Chairman_of_the_Open_Society_Foundations,_visits_the_EC_(3x4_cropped).jpg
