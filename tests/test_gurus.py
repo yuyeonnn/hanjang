@@ -89,17 +89,17 @@ def test_guru_page_and_note_owners_link_each_other():
     con.execute("insert into guru_holdings values ('nps', '037833100', 'APPLE INC', 'AAPL', 9e9, 1, 5.9, 'x', '2026-06-30', '2026-08-13', '')")
     assert [r[0] for r in app.owners("AAPL")[2]] == ["워런 버핏 · 버크셔 해서웨이", "국민연금"] and "미국 주식의 5.9%" in app.owners("AAPL")[2][1][3]
     assert "미국 주식 포트폴리오" in app.us_portfolio("nps") and app.us_portfolio("blackrock") == ""
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no, induty_code) values ('nps', '005930', '삼성전자', 'Y', 7.1, 0, '2026-10-01', 'r1', '264')")
     big = app.big(1, "nps", "", "")[2]  # 기관 페이지 — 미국 주식은 국내 목록 위에, 머리에 종목 수
-    assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("지분이 큰 순서")
+    assert "미국 주식 1종목" in big and big.index("미국 주식 포트폴리오") < big.index("어떤 업종에 많이 가졌나") < big.index("지분이 큰 순서")  # 포트폴리오가 업종보다 위
     two = web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)  # 기타는 그리지 않는다 — 상위 2종목만, 글자는 전체 중 비중
-    assert two.count("<path") == 2 and ">기타<" not in two and ">50.0%</span>" in two and "상위 2종목만 그렸어요 · 전체의 80%" in two
+    assert two.count("<path") == 2 and ">기타<" not in two and ">50.0%</span>" in two and "기타는 빼고 상위 2종목만 그렸어요 (전체의 80%)" in two
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
 
 
-def test_spread_out_portfolio_gets_a_treemap_not_a_pie():
+def test_spread_out_portfolio_is_still_a_pie_without_other():
     from hanjang import web
 
-    many = [(f"종목{i}", 3) for i in range(30)]  # 큰 다섯이 17% — 파이면 「기타」 덩어리뿐
+    many = [(f"종목{i}", 3) for i in range(30)]  # 넓게 나눈 곳도 파이 — 기타 없이 상위 5, 뺐다는 말은 눈에 띄게
     h = web.pie(many)
-    assert "data-pie" not in h and "상위 10종목만 그렸어요 · 전체의 33%" in h and h.count("title=") == 10 and "나머지" not in h  # 트리맵, 기타 없이
-    assert "data-pie" in web.pie([("가", 50), ("나", 30), ("다", 20)])  # 몰려 있으면 그대로 파이
+    assert "data-pie" in h and h.count("<path") == 5 and "기타는 빼고 상위 5종목만 그렸어요 (전체의 17%)" in h and ">기타<" not in h
