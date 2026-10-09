@@ -325,3 +325,19 @@ def test_third_review_fixes(monkeypatch):
     assert "회사 회계연도" in fs["F6"]["slots"]["기간"]
     assert notes.mend("중간값은 40달러이라 남기는 힘이 커요.") == "중간값은 40달러라 남기는 힘이 커요."
     assert notes.PREDICT.search("이 계약이 매출에 어떤 영향을 줄지 지켜볼 만해요.")
+
+
+def test_fourth_review_outlook_words_units_and_span():
+    src = ("Uber expects Gross Bookings of $58.2 billion to $60.2 billion. Oracle expects total revenue to grow 30% to 34% in constant currency. "
+           "Revenue is expected to be $108.0 billion, plus or minus 2%. For fiscal 2027 we expect revenue of $90.0 billion.")
+    j = {"period": "", "items": [
+        {"metric": "revenue", "span": "quarter", "low": 58.2, "high": 60.2, "plus_minus": 0, "plus_minus_unit": "none", "unit": "billion",
+         "quote": "Uber expects Gross Bookings of $58.2 billion to $60.2 billion."},
+        {"metric": "revenue", "span": "quarter", "low": 30, "high": 34, "plus_minus": 0, "plus_minus_unit": "none", "unit": "percent",
+         "quote": "Oracle expects total revenue to grow 30% to 34% in constant currency."},
+        {"metric": "revenue", "span": "quarter", "low": 108.0, "high": 108.0, "plus_minus": 2, "plus_minus_unit": "percent", "unit": "billion",
+         "quote": "Revenue is expected to be $108.0 billion, plus or minus 2%."},
+        {"metric": "revenue", "span": "year", "low": 90.0, "high": 90.0, "plus_minus": 0, "plus_minus_unit": "none", "unit": "billion",
+         "quote": "For fiscal 2027 we expect revenue of $90.0 billion."}]}
+    got = us.check_outlook(j, src)
+    assert [(x["low"], x["span"]) for x in got["items"]] == [(108.0, "quarter"), (90.0, "year")]  # 거래액·성장률은 매출이 아니다

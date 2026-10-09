@@ -398,7 +398,7 @@ def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
     y, rev, oi = fin[0][0], fin[0][1], fin[0][2]
     if rev and oi is not None and rev > 0:
         m = oi / rev * 100
-        slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": per(round(m))}
+        slots = {"연도": yy, "비율": f"{m:.1f}%", "백원당": per(round(m))} | ({"손해": per(round(-m))} if m < 0 else {})
         prev = fin[1] if len(fin) > 1 else None
         if prev and prev[1] and prev[2] is not None and prev[1] > 0:
             was = prev[2] / prev[1] * 100
@@ -455,6 +455,8 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
     if rev and rev > 0 and op is not None:
         m = op / rev * 100
         out["백원당"] = per(round(m))
+        if m < 0:
+            out["손해"] = per(round(-m))
         if rp and rp > 0 and opp is not None:
             pm = opp / rp * 100
             out["힘"] = power(m, pm)
@@ -556,7 +558,12 @@ def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
         from hanjang.us import METRIC_KO, say_outlook
         d = date.fromisoformat(ol[1])
         period = json.loads(ol[2]).get("period", "")
-        span = "다음 분기" if re.search(r"quarter|\bQ[1-4]\b", period, re.I) else "올해 1년(회계연도 전체)" if re.search(r"year|annual|full", period, re.I) else "다음 기간"
+        if any("span" in x for x in items):  # 항목마다 기간 — 한 문장에 분기와 1년을 섞지 않는다(오라클). 매출이 있는 쪽, 같으면 다음 분기
+            pick = "year" if not any(x["span"] == "quarter" and x["metric"] == "revenue" for x in items) and any(x["span"] == "year" and x["metric"] == "revenue" for x in items) else "quarter"
+            items = [x for x in items if x["span"] == pick] or [x for x in items]
+            span = "다음 분기" if items[0]["span"] == "quarter" else "올해 1년(회계연도 전체)"
+        else:
+            span = "다음 분기" if re.search(r"quarter|\bQ[1-4]\b", period, re.I) else "올해 1년(회계연도 전체)" if re.search(r"year|annual|full", period, re.I) else "다음 기간"
         slots = {"날짜": f"{d.month}월 {d.day}일", "기간": span} | {METRIC_KO[x["metric"]]: say_outlook(x) for x in items}
         out.append({"id": "F16", "text": f"{d.month}월 {d.day}일 실적 발표에서 회사가 밝힌 {span} 전망 — "
                     + " · ".join(f"{METRIC_KO[x['metric']]} {say_outlook(x)}" for x in items), "url": link(ol[0]), "tone": 0, "slots": slots})  # fmt: skip
