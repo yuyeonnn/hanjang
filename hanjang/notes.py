@@ -396,10 +396,14 @@ def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -
     """판 돈(매출)과 남긴 돈(영업이익)이 1년 전보다 어떻게 움직였나 — 말 줄기와 100원당 남긴 돈. 계산은 코드가, 말은 AI 가 옮긴다."""
     out = {}
     if rev and rev > 0 and op is not None:
-        out["백원당"] = f"{round(op / rev * 100)}원"
+        m = op / rev * 100
+        out["백원당"] = f"{round(m)}원"
         if rp and rp > 0 and opp is not None:
-            out["전년백원당"] = f"{round(opp / rp * 100)}원"
-            out["힘"] = power(op / rev * 100, opp / rp * 100)
+            pm = opp / rp * 100
+            out["힘"] = power(m, pm)
+            if round(m) == round(pm) and out["힘"] != "비슷했":  # 「4원(1년 전엔 4원) … 세졌어요」로 읽히지 않게 소수 한 자리
+                out["백원당"] = f"{m:.1f}원"
+            out["전년백원당"] = f"{pm:.1f}원" if "." in out["백원당"] else f"{round(pm)}원"
     if rev and rp and rp > 0 and op is not None and opp and opp > 0:
         r, o = rev / rp - 1, op / opp - 1
         out["관계"] = (RELATIONS[0] if r > 0 and o > r else RELATIONS[1] if r > 0 and 0 <= o <= r else
@@ -434,6 +438,9 @@ def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
         out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
                     "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
+    for f in out:  # 100원당 남긴 돈도 사실 문장에 — 출처 창에 보이고, 숫자 대조(빈칸 값)도 통과하게
+        if "전년백원당" in f["slots"]:
+            f["text"] += f" · 100원어치 팔아 본업으로 {f['slots']['백원당']} 남김(1년 전 {f['slots']['전년백원당']})"
     return out
 
 
