@@ -60,7 +60,8 @@ TITLE_PLAIN = (
     (r"경영권변동", "회사를 지배하는 주체가 바뀌었어요"),
     (r"새주식발행\(8-K", "새 주식을 발행했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
     (r"인수합병완료", "다른 회사를 사들이거나 합치는 일을 마쳤어요"),
-    (r"실적발표\(8-K", "지난 분기 실적을 발표했어요(보도자료가 함께 붙어 있어요)"),
+    (r"실적발표\(8-K", "지난 분기 실적을 발표했어요"),
+    (r"판매·?인도대수알림", "지난 분기에 판 물량(인도 대수)을 먼저 알렸어요 — 이익 숫자는 실적 발표 때 나와요"),
     (r"큰계약체결", "회사에 중요한 계약을 맺었어요"),
     (r"큰계약해지", "회사에 중요한 계약이 끝났어요"),
     (r"큰빚\(차입", "돈을 크게 빌리거나 채권을 냈어요"),
@@ -345,7 +346,8 @@ def usd(x: float) -> str:
     if abs(x) >= 10**12:
         return f"{x / 10**12:,.1f}조 달러"
     if abs(x) >= 10**8:
-        return f"{x / 10**8:,.0f}억 달러"
+        v = x / 10**8  # 1,000억 달러 밑에서 소수가 있으면 한 자리 — 23.1억 달러가 「23억」으로 바뀌지 않게
+        return f"{v:,.1f}억 달러" if abs(x) < 10**10 and abs(v - round(v)) >= 0.05 else f"{v:,.0f}억 달러"
     if abs(x) >= 10**4:
         return f"{x / 10**4:,.0f}만 달러"
     return f"{x:,.0f}달러"
@@ -531,6 +533,19 @@ def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
         slots = {"기간": span} | {k.replace(" ", ""): v for k, v in parts}
         out.append({"id": "F14", "text": f"{span} 주주에게 돌려준 돈 — " + " · ".join(f"{k} {v}" for k, v in parts if k != "주식 보상")
                     + (f" · 임직원에게 주식으로 준 보상 {slots['주식보상']}" if "주식보상" in slots else ""), "url": link(accn), "tone": 0, "slots": slots})  # fmt: skip
+    biz = con.execute("select body, rcept_no from business where ticker = ?", (ticker,)).fetchone()
+    geo = biz and json.loads(biz[0]).get("geo")
+    if geo and len(geo) >= 2:  # 어디서 파나 — 코드가 나눈 비중
+        out.append({"id": "F15", "text": "지역별 매출 비중 — " + " · ".join(f"{g['name']} {g['share']}" for g in geo), "url": link(biz[1]), "tone": 0,
+                    "slots": {"첫지역": geo[0]["name"], "첫지역몫": geo[0]["share"], "둘째지역": geo[1]["name"], "둘째지역몫": geo[1]["share"]}})  # fmt: skip
+    ol = con.execute("select accession, date, body from outlooks where ticker = ?", (ticker,)).fetchone()
+    items = ol and json.loads(ol[2])["items"]
+    if items:  # 회사가 실적 발표에서 밝힌 다음 기간 전망 — 회사의 말 그대로, 숫자는 원문 대조를 통과한 것만 (사용자 10/9: 싣는다)
+        from hanjang.us import METRIC_KO, say_outlook
+        d = date.fromisoformat(ol[1])
+        slots = {"날짜": f"{d.month}월 {d.day}일"} | {METRIC_KO[x["metric"]]: say_outlook(x) for x in items}
+        out.append({"id": "F16", "text": f"{d.month}월 {d.day}일 실적 발표에서 회사가 밝힌 다음 분기 전망 — "
+                    + " · ".join(f"{METRIC_KO[x['metric']]} {say_outlook(x)}" for x in items), "url": link(ol[0]), "tone": 0, "slots": slots})  # fmt: skip
     for f in out:
         f["slots"] = {k: v for k, v in f["slots"].items() if v}
     return out
@@ -612,8 +627,9 @@ def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     rows = sorted(rows, key=lambda r: -abs(r["op"]))[:3]
     parts = [f"{r['name']} {won(r['op'])}" + (f"(전년보다 {c})" if (c := trend(r["op"], r.get("op_prev"))[2]).startswith(("+", "-")) else f"({c})" if c else "")
              for r in rows]  # fmt: skip
-    return [{"id": "F11", "text": f"{seg['year']}년 사업부별 영업이익 — " + " · ".join(parts), "url": link(biz[1]), "tone": 0,
-             "slots": {"연도": f"{seg['year']}년", "첫부문": rows[0]["name"]}}]  # fmt: skip
+    yy = seg["year"] if isinstance(seg["year"], str) else f"{seg['year']}년"
+    return [{"id": "F11", "text": f"{yy} 사업부별 영업이익 — " + " · ".join(parts), "url": link(biz[1]), "tone": 0,
+             "slots": {"연도": yy, "첫부문": rows[0]["name"]}}]  # fmt: skip
 
 
 AD = re.compile(r"이벤트|캠페인|경품|사은|프로모션|청약 (접수|개시|진행|실시)|청약을 (받|연)|출시 기념|가입 고객|고객 대상|특판")
@@ -1234,7 +1250,7 @@ def code_note(fs: list[dict]) -> dict:
         t = say(f)
         return not (t in seen or seen.add(t))
 
-    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10", "F12"), ("F8", "F9", "F11"), ("D", "N"), "I"))
+    groups = zip(TITLES, (("F1", "F2", "F3", "F4", "F5", "F7", "F10", "F12", "F14", "F15"), ("F8", "F9", "F11", "F13", "F16"), ("D", "N"), "I"))
     secs = [{"title": t, "sentences": [{"text": say(f), "refs": [f["id"]]}
                                        for f in fs if f["id"].startswith(p) and keep(f)]} for t, p in groups]  # fmt: skip
     side = {k: [{"text": say(f), "refs": [f["id"]]} for f in fs if f["tone"] == sign]
