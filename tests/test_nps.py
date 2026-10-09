@@ -19,5 +19,5 @@ def test_nps_page_ranks_korea_and_us_together(monkeypatch):
     ranked = html_.split('<div class="mt-space-sm')[1]  # 파이 밑 순위 목록
     order = [ranked.index(x) for x in ('>삼성전자<', '>엔비디아<', '>현대차<', '>Invesco ETF<')]
     assert order == sorted(order)  # 한국·미국 섞어 금액 큰 순
-    assert "한국 78% · 미국 22%" in html_ and "1달러 1,439.0원" in html_ and "2025년 12월 31일 기준" in html_
+    assert "1달러 1,439.0원" in html_ and "기준 · 한국" not in html_  # 요약 줄(종목 수·합계)은 뺐다 (사용자 10/10)
     assert gurus.sector("", "ISHARES TR") == "ETF(지수 펀드)"
