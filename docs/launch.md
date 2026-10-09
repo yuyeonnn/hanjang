@@ -22,6 +22,7 @@
 3. 옛 주소로 들어오는 사람을 넘겨주려면 `/etc/caddy/sites/old.caddy` 에 한 줄 넣고 `sudo systemctl reload caddy`:
    `34-44-40-196.sslip.io { redir https://<새 도메인>{uri} permanent }`
 4. 쿠키는 주소마다 따로라 **모두 한 번씩 다시 로그인**한다(메일 링크).
+5. 바깥 감시의 주소도 새 도메인으로 — [deploy.md](deploy.md) 「감시와 백업」 맨 끝.
 
 ## 플레이스토어 (TWA — 웹을 그대로 감싼 안드로이드 앱)
 
