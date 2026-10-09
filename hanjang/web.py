@@ -89,9 +89,20 @@ def share_tags() -> str:
             f'<meta name="twitter:card" content="summary_large_image">')  # fmt: skip
 
 
+# 좋아요·리그램은 화면을 다시 불러오지 않는다 — 누르면 맨 위로 튀어 올라가던 것 (사용자 10/9).
+# 보내고 나서 같은 화면을 받아 이 두 단추 묶음만 바꿔 끼운다(숫자·눌림 상태가 서버 기준 그대로). 자바스크립트가 없으면 예전처럼 새로 불러온다
+STAY = ("<script>document.addEventListener('submit',async ev=>{const f=ev.target;const a=f.getAttribute('action');"
+        "if(a!=='/like'&&a!=='/regram')return;ev.preventDefault();const sel='form[action=\"/like\"],form[action=\"/regram\"]';"
+        "try{await fetch(a,{method:'POST',body:new URLSearchParams(new FormData(f,ev.submitter))});"
+        "const doc=new DOMParser().parseFromString(await (await fetch(location.href)).text(),'text/html');"
+        "const old=[...document.querySelectorAll(sel)],neu=[...doc.querySelectorAll(sel)];"
+        "if(old.length===neu.length)old.forEach((x,i)=>x.replaceWith(document.importNode(neu[i],true)));else location.reload();}"
+        "catch(err){f.submit();}});</script>")
+
+
 def page(title: str, body_attr: str, inner: str) -> str:
     return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{share_tags()}<title>{e(title)} · 한장</title></head>'
-            f'<body class="{body_attr}">{inner}</body></html>')  # fmt: skip
+            f'<body class="{body_attr}">{inner}{STAY}</body></html>')  # fmt: skip
 
 
 def avatar(initial: str) -> str:
@@ -1684,7 +1695,7 @@ class App:
             self.con.commit()
         except sqlite3.IntegrityError:
             return self.see("/me/settings?msg=" + quote(f"「{nick}」은(는) 이미 누가 쓰고 있어요."))
-        return self.see("/me/settings")
+        return self.see("/me")  # 저장하면 바뀐 내 프로필로 (사용자 10/9)
 
     def regram_form(self, uid: int, kind: str, ref: str, week: str) -> str:
         """노트·읽기 팁 글 아래 — 리그램(한 줄 코멘트는 선택). 이미 했으면 취소 버튼."""
@@ -1755,6 +1766,19 @@ class App:
         none = '<p class="py-2 font-body-compact text-body-compact text-outline">그런 닉네임이 없어요.</p>'
         return f'<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/80">{items or none}</div>'
 
+    def article_photo(self, aid: int, kind: str, ind: str | None, name: str, photos: "Photos | None" = None) -> str:
+        """기사 사진 — 처음 고를 때 사건 종류에 맞는 주제(증자는 돈, 계약은 계약서…)로 고르고 저장한다.
+        그 뒤로 피드와 기사 화면이 같은 사진을 쓴다 (사용자 10/9: 눌렀더니 사진이 바뀌었다)."""
+        got = self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()
+        if got and got[0]:
+            if photos:
+                photos.used.add(got[0])
+            return got[0]
+        img = (photos or Photos()).pick(kind, ind, name)
+        self.con.execute("update articles set photo = ? where id = ?", (img, aid))
+        self.con.commit()
+        return img
+
     def latest(self, uid: int, photos: "Photos") -> str:
         """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
         rows = self.con.execute(
@@ -1763,7 +1787,7 @@ class App:
         if not rows:
             return ""
         items = "".join(
-            story(f"/a/{i}", photos.pick(k, ind, name),
+            story(f"/a/{i}", self.article_photo(i, k, ind, name, photos),
                   (b := json.loads(body))["title"], b["paragraphs"][0]["text"], name + (" · 내 종목" if mine else ""), d.replace("-", "."))
             for i, k, d, body, name, ind, mine in rows)  # fmt: skip
         return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">최근 소식</h2>'
@@ -1776,7 +1800,8 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 기사예요. <a class='text-primary underline' href='/feed'>피드</a>")
         t, kind, d, body, name, ind = row
         b = json.loads(body)
-        img = f"/static/photos/{KIND_PHOTO[kind]}.jpg" if kind in KIND_PHOTO else photo_for(ind, name)
+        img = self.article_photo(aid, kind, ind, name)
+
         def cite(p):  # 출처 번호 → 원문 바로 열기 (작은 회색 위첨자)
             return e(p["text"]) + "".join(f'<a class="{CITE}" href="{e(safe_url(b["links"].get(r, "#")))}" target="_blank" rel="noopener">[{e(r)}]</a>' for r in p["refs"])
 
@@ -1934,7 +1959,7 @@ class App:
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
                      f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     f'<aside class="my-space-xl lg:my-10 px-space-md text-center"><p class="font-body-reading-strong text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p></aside>'
+                     f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
                      + "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-loose mb-space-md">{self.marked(x)}</p>' for x in a["body"][:1])
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")

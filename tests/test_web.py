@@ -1,3 +1,4 @@
+import re
 """3주차 화면 — 로그인 링크 서명, 종목 담기, 노트 열기와 기록, 글자 탈출. 서버를 띄우지 않고 WSGI 를 직접 부른다."""
 
 import io
@@ -293,7 +294,7 @@ def test_follow_regram_feed_and_privacy():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉'), (2, 'you@b.c', '2026-10-01', '너닉')")
     me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
-    call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부") + "&bio=" + quote("메모리 회사를 봐요"), you)
+    assert call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부") + "&bio=" + quote("메모리 회사를 봐요"), you)[1]["Location"] == "/me"  # 저장하면 내 프로필로
     assert call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부"), me)[1]["Location"].startswith("/me/settings?msg=")  # 같은 이름은 안 된다
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가나") + "&bio=" + quote("지금 사세요"), me)[1]["Location"]  # 자기소개 금지어
     call(app, "/regram", "POST", "k=note&r=005930&w=2026-10-05", you)
@@ -641,3 +642,16 @@ def test_money_blocks_finance_and_industry_usual():
 def test_high_debt_sector_shows_reason():
     h = web.money_blocks((2025, 1000, 70, 50, 100, 446), {"업종": "방위산업", "곳수": 1, "빚이유": "수주 대금을 미리 받아요"})
     assert "부채비율 446%" in h and "방위산업 업종은 수주 대금을 미리 받아요." in h
+
+
+def test_feed_and_article_show_the_same_photo():
+    app, con = _app()
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r1', '005930', '2026-10-01', 'RIGHTS_ISSUE', ?, 'x')",
+                (json.dumps({"title": "새 주식", "paragraphs": [{"text": "돈을 모아요.", "refs": []}], "links": {}}, ensure_ascii=False),))
+    con.commit()
+    (aid,) = con.execute("select id from articles").fetchone()
+    ck = _login(app)
+    call(app, "/feed", cookie=ck)
+    (photo,) = con.execute("select photo from articles where id = ?", (aid,)).fetchone()
+    assert photo and re.search(r"/(money|chart)\d*\.jpg$", photo)  # 증자 → 돈·차트 주제
+    assert photo in call(app, f"/a/{aid}", cookie=ck)[2]
