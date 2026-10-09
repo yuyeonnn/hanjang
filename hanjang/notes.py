@@ -61,6 +61,10 @@ TITLE_PLAIN = (
     (r"자기주식처분", "회사가 갖고 있던 자기 회사 주식을 팔거나 나눠 주기로 했어요"),
     (r"주식소각|자기주식소각", "회사가 갖고 있던 자기 주식을 아예 없애기로(소각) 했어요 — 전체 주식 수가 줄어요"),
     (r"(?<!무)유상증자결정", "새 주식을 찍어 팔아 돈을 모으기로 했어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
+    (r"발행가액|발행가격", "새로 찍는 주식을 한 주에 얼마에 팔지 값이 정해졌어요"),
+    (r"증권신고서", "주식·채권을 팔기 전에 금융감독원에 내는 신고서예요 — 얼마를 왜 모으는지 적혀 있어요"),
+    (r"결산실적공시예고", "1년 실적을 언제 발표할지 미리 알렸어요"),
+    (r"기업설명회", "투자자에게 회사를 설명하는 자리(IR)를 연다고 알렸어요"),
     (r"발행결과", "앞서 정한 증자·채권 발행을 실제로 마쳤다는 결과 보고예요"),
     (r"무상증자결정", "주주에게 새 주식을 공짜로 나눠 주기로 했어요"),
     (r"전환사채권발행결정", "나중에 주식으로 바꿀 수 있는 채권(전환사채)을 팔아 돈을 빌리기로 했어요"),
@@ -135,6 +139,10 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
+# 읽기 검사 (사용자 10/9: 깨진 이음·되풀이·어려운 말이 하나라도 있으면 안 된다) — 걸리면 다시 쓰게 한다
+HARD = re.compile(r"유상증자|신주|발행가액|공정공시|기재정정|단일판매|전환사채|자기주식|잠정실적|결산실적")  # 괄호 밖에서 — 쉬운 말로 바꿔 쓴다
+STEM = re.compile(r"(늘었|줄었|많았|적었|높았|낮았|돌아섰|이어졌|늘렸|줄였)(?![어고는지으다던기을거네죠습음])")  # 줄기 뒤에 끝이 없음
+REPEAT = re.compile(r"([가-힣][가-힣 ]{6,}[가-힣])[^.]*?\1")  # 한 문장 안에서 같은 말(8자 넘게)이 두 번
 TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "이번 주 소식", "임원·큰손은 어떻게 움직였나요?")  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
@@ -382,6 +390,25 @@ def _slots(key: str, cur: int | None, prev: int | None) -> dict:
             | ({f"{key}폭": chg.lstrip("+-")} if chg.startswith(("+", "-")) else {}))  # fmt: skip
 
 
+def relation(rev: int | None, rp: int | None, op: int | None, opp: int | None) -> dict:
+    """판 돈(매출)과 남긴 돈(영업이익)이 1년 전보다 어떻게 움직였나 — 말 줄기와 100원당 남긴 돈. 계산은 코드가, 말은 AI 가 옮긴다."""
+    out = {}
+    if rev and rev > 0 and op is not None:
+        out["백원당"] = f"{round(op / rev * 100)}원"
+        if rp and rp > 0 and opp is not None:
+            out["전년백원당"] = f"{round(opp / rp * 100)}원"
+    if rev and rp and rp > 0 and op is not None and opp and opp > 0:
+        r, o = rev / rp - 1, op / opp - 1
+        out["관계"] = (RELATIONS[0] if r > 0 and o > r else RELATIONS[1] if r > 0 and 0 <= o <= r else
+                      RELATIONS[2] if r > 0 and o < 0 else RELATIONS[3] if r <= 0 and o > 0 else RELATIONS[4])  # fmt: skip
+    return out
+
+
+RELATIONS = ("판 돈보다 남긴 돈이 더 빨리 늘었", "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았",
+             "더 많이 팔았지만 남긴 돈은 줄었", "덜 팔았지만 남긴 돈은 늘었", "판 돈도 남긴 돈도 줄었")  # fmt: skip
+REL_WORDS = re.compile(r"판 돈보다 남긴 돈이 더|늘어난 만큼은? 남긴 돈|팔았지만 남긴 돈|판 돈도 남긴 돈도")
+
+
 def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     """F8 = 가장 최근 분기 3개월 · F9 = 올해 누적 — 둘 다 1년 전 같은 때와 견준다(분기 보고서가 같이 준다). 계산은 코드가."""
     row = con.execute("select year, q, revenue, operating_income, revenue_prev, op_prev, revenue_ytd, op_ytd, revenue_ytd_prev, op_ytd_prev,"
@@ -392,10 +419,10 @@ def quarter_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
     (name, months), url, out = QLABEL[q], DART.format(rno), []
     if parts := [x for x in (_change("매출", rev, rp, "1년 전 같은 분기"), _change("영업이익", op, opp, "1년 전 같은 분기")) if x]:
         out.append({"id": "F8", "text": f"{y}년 {name}({months}) " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp)})  # fmt: skip
+                    "slots": {"분기": f"{y}년 {name}", "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)})  # fmt: skip
     if q >= 2 and (parts := [x for x in (_change("매출", ry, ryp, "작년 같은 기간"), _change("영업이익", oy, oyp, "작년 같은 기간")) if x]):
         out.append({"id": "F9", "text": f"{y}년 1~{q * 3}월 누적 " + " · ".join(parts), "url": url, "tone": 0,
-                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp)})  # fmt: skip
+                    "slots": {"기간": f"{y}년 1~{q * 3}월"} | _slots("매출", ry, ryp) | _slots("이익", oy, oyp) | relation(ry, ryp, oy, oyp)})  # fmt: skip
     return out
 
 
@@ -488,13 +515,13 @@ def facts(con: sqlite3.Connection, ticker: str, today: date) -> list[dict]:
                       " where ticker = ? and date >= ? and importance >= 2 and code != 'OTHER'"
                       " order by importance desc, date desc limit 5",
                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
-    for k, (rno, d, title, code, dr) in enumerate(sorted(evs, key=lambda r: r[1], reverse=True), 1):
+    for k, (rno, d, title, code, dr) in enumerate(evs, 1):  # 중요한 것부터(D1 이 가장 중요), 같으면 최근 것부터
         d = date.fromisoformat(d)
         tone = {1: " — 주주에게 반가운 쪽으로 분류", -1: " — 주주에게 걸리는 쪽으로 분류"}.get(dr, "")
         day = f"{d.month}월 {d.day}일"
         what = f" — 무슨 일: {plain(title)}" if plain(title) else ""
         out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": DART.format(rno),
-                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"}})  # fmt: skip
+                    "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」"} | ({"무슨일": plain(title)} if plain(title) else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
     news = con.execute("select url, date, press, title, summary from news where ticker = ? and date >= ?"
                        " order by (summary is not null and summary != '') desc, date desc limit 10",  # 요약문 있는 것부터
@@ -610,6 +637,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(\d년)년", r"\1", text)
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
+    text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
     text = re.sub(r"(늘었|줄었)(?=\s*[·)])", lambda m: "증가" if m[1] == "늘었" else "감소", text)  # 괄호 속 「10.9% 늘었 ·」
     return re.sub(r"(\d[\d.,]*%) ([+-])\1", r"\2\1", text)
 
@@ -660,6 +688,10 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         v = by[m[1]]["slots"][m[2]]
         return v + (josa(v, m[3]) if m[3] else "")
 
+    # 「관계」 빈칸은 그 자체가 판 돈·남긴 돈 이야기 — 앞에 AI 가 같은 말을 또 쓰면(「판 돈보다 남긴 돈이 더 빨리 {F8.관계}」) 그 말을 뺀다
+    raw = re.sub(r"(?:판 돈|남긴 돈|매출|영업이익)[^.{}]*?(\{F\d+\.관계\})", r"\1", raw)
+    if REL_WORDS.search(SLOT.sub("", raw)):
+        raise ValueError(f"관계는 빈칸으로만: {raw!r}")
     text = mend(dedupe(SLOT_JOSA.sub(put, raw).replace("었었", "었")))
     text = re.sub(r"(\d)(건|주|명|개|원|%|곳)\2", r"\1\2", text)
     text = re.sub(r"(\d{4}년) \1", r"\1", text)  # 「2026년 {F8.분기}」 → 「2026년 2026년 2분기」
@@ -720,6 +752,13 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"금지어: {text!r}")
     if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
         raise ValueError(f"예측 말투: {text!r}")
+    outside = re.sub(r"\([^()]*\)|「[^」]*」", "", text)
+    if not all(r.startswith("N") for r in refs) and HARD.search(outside):
+        raise ValueError(f"어려운 말: {text!r}")
+    if STEM.search(outside):
+        raise ValueError(f"끝이 잘린 말: {text!r}")
+    if any(REPEAT.search(x) for x in re.split(r"(?<=[.?!])\s", outside)):
+        raise ValueError(f"같은 말 되풀이: {text!r}")
 
 
 def short_title(t: str, what: str) -> str:
@@ -735,6 +774,9 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
     by = {f["id"]: f for f in fs}
     total, dropped = 0, []
 
+    def days(refs):
+        return {by[r]["slots"]["날짜"] for r in refs if r in by and "날짜" in by[r].get("slots", {})}
+
     def keep(xs):
         """틀린 문장만 빼고 나머지는 살린다 — 한 문장 때문에 글 전체가 사실 목록으로 바뀌지 않게 (사용자 10/8)."""
         nonlocal total
@@ -744,6 +786,8 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
             try:
                 y = fill(x, by)
                 check_sentence(y, fs)
+                if "같은 날" in y["text"] and (not out or not days(y["refs"]) or not days(y["refs"]) <= days(out[-1]["refs"])):
+                    raise ValueError(f"「같은 날」인데 날짜가 다름: {y['text']!r}")
                 out.append(y)
             except ValueError as err:
                 dropped.append(str(err))
@@ -884,11 +928,13 @@ def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
     return sig(fs) != sig(old)
 
 
-def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
-    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로."""
+def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True) -> None:
+    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로.
+    read=False: 사업보고서 읽기(DART)를 건너뛴다 — DART 점검 중에 노트만 다시 쓸 때 (python -m hanjang.notes --rewrite)."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
-    print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건 · 사업부별 실적 {read_segments(con, today)}곳")
+    if read:
+        print(f"사업보고서 읽기 {read_business(con, today, tickers or None)}건 · 사업부별 실적 {read_segments(con, today)}곳")
     print(f"공시 읽기 — 규칙 {ruled}건 · AI {ai}건")
     rows = con.execute("select ticker, name from stocks where active = 1").fetchall()
     rows = [r for r in rows if not tickers or r[0] in tickers]
@@ -915,4 +961,4 @@ def main(tickers: list[str], today: date, only_changed: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:], date.today())
+    main([a for a in sys.argv[1:] if a != "--rewrite"], date.today(), read="--rewrite" not in sys.argv)

@@ -587,3 +587,8 @@ def test_rates_article_measures_from_bank_of_korea_series():
     assert a["month"] == "2013-06-01" and "가장 크게 벌어졌던 때는 2001년 6월로 **9.5%p**" in a["body"][1] and "**0달**" in a["body"][2]
     html_ = call(app, "/learn/rates", cookie=ck)[2]
     assert "금리 흐름" in html_ and "자료: 한국은행 ECOS" in html_ and html_.count("<polyline") == 5
+
+def test_metrics_compares_last_year_and_this_year():
+    h = web.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
+    assert "2024년 → 2025년" in h and "+56.8%" in h and h.count("bg-outline-variant") == 2 and h.count("bg-primary") == 2
+    assert web.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다

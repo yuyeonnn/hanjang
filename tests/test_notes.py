@@ -446,3 +446,44 @@ def test_tidy_broken_joins():
     assert notes.mend("매출이 줄었어요(9.4% -9.4%).") == "매출이 줄었어요(-9.4%)."
     assert notes.mend("매출이 늘었고 2025년에는") == "매출이 늘었고 2025년에는"
     assert notes.mend("(매출 10.9% 늘었 · 영업이익 33.2% 줄었)") == "(매출 10.9% 증가 · 영업이익 33.2% 감소)"
+
+
+def test_relation_says_what_numbers_mean():
+    r = notes.relation(130, 100, 123, 100)
+    assert r == {"백원당": "95원", "전년백원당": "100원", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}
+    assert notes.relation(110, 100, 150, 100)["관계"] == "판 돈보다 남긴 돈이 더 빨리 늘었"
+    assert notes.relation(90, 100, 80, 100)["관계"] == "판 돈도 남긴 돈도 줄었"
+    assert "관계" not in notes.relation(100, None, 10, None)
+
+
+def test_relation_slot_is_not_wrapped_twice():
+    by = {"F8": {"id": "F8", "text": "2026년 2분기(4~6월) 매출 1.3조원(1년 전 같은 분기보다 +30.2%)", "tone": 0,
+                 "slots": {"분기": "2026년 2분기", "관계": "판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았"}}}
+    got = notes.fill({"text": "{F8.분기}엔 판 돈보다 남긴 돈이 더 빨리 {F8.관계}어요.", "refs": ["F8"]}, by)
+    assert got["text"] == "2026년 2분기엔 판 돈이 늘어난 만큼은 남긴 돈이 늘지 않았어요."
+    assert notes.mend("줄인 보고가 1건 있었어요(1건).") == "줄인 보고가 1건 있었어요."
+
+
+def test_reading_checks_hard_words_cut_stems_and_repeats():
+    fs = [{"id": "F1", "text": "2025년 매출 9.0조원", "tone": 0, "slots": {}}, {"id": "N1", "text": "유상증자 기사", "tone": 0, "slots": {}}]
+    ok = {"text": "새 주식을 찍어 팔아 돈을 모으기로 했어요(유상증자).", "refs": ["F1"]}
+    notes.check_sentence(ok, fs)
+    notes.check_sentence({"text": "기사는 유상증자 이야기를 해요.", "refs": ["N1"]}, fs)  # 소식만 근거면 그 말을 옮겨도 된다
+    for bad in ("유상증자 신주 발행가액 공시도 있었어요.", "매출은 4번째로 많았 바닥보다는 올라왔어요.",
+                "DS 부문 영업이익이 많았는데 DS 부문 영업이익이 가장 컸어요."):
+        with pytest.raises(ValueError):
+            notes.check_sentence({"text": bad, "refs": ["F1"]}, fs)
+
+
+def test_relation_only_from_slot_and_same_day_must_match():
+    by = {"F8": {"id": "F8", "text": "2026년 2분기 매출 1.3조원", "tone": 0, "slots": {"관계": notes.RELATIONS[1]}}}
+    with pytest.raises(ValueError):
+        notes.fill({"text": "판 돈보다 남긴 돈이 더 빨리 늘었어요.", "refs": ["F8"]}, by)
+    fs = [{"id": "D1", "text": "10월 8일 실적 공시", "tone": 0, "url": "u", "slots": {"날짜": "10월 8일"}},
+          {"id": "D2", "text": "7월 30일 배당 공시", "tone": 0, "url": "u", "slots": {"날짜": "7월 30일"}}]
+    j = {"headline": "소식", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
+         "sections": [{"title": "이번 주 소식", "sentences": [{"text": "실적을 미리 알렸어요.", "refs": ["D1"]},
+                                                          {"text": "같은 날 배당도 정했어요.", "refs": ["D2"]},
+                                                          {"text": "그 전에 배당을 정했어요.", "refs": ["D2"]}]}]}
+    with pytest.raises(ValueError):  # 셋 중 하나 탈락 = 30% 넘음 → 다시 쓰게
+        notes.fill_note(j, fs)
