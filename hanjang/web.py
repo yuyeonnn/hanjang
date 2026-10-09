@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, holders, learn, llm, mail, notes, policy, sources
+from hanjang import db, gurus, holders, learn, llm, mail, notes, policy, sources
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -822,6 +822,27 @@ RULE = '<div class="border-t-2 border-primary"></div><div class="mt-[3px] border
 RULE_FLIP = '<div class="border-t-2 border-dotted border-primary"></div><div class="mt-[3px] border-t-2 border-primary"></div>'
 
 
+def kdate(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{d.year}년 {d.month}월 {d.day}일"
+
+
+def owners_block(owners: tuple | None) -> str:
+    """노트 맨 밑 — 이 종목을 가진 유명 투자자(미국 13F)·기관(국내 5% 보고). 누르면 그 투자자의 포트폴리오로."""
+    if not owners or not owners[2]:
+        return ""
+    title, note, rows = owners
+    items = "".join(
+        f'<a href="{e(href)}" class="py-3 flex items-center gap-3">{logo(name, home, "w-9 h-9")}'
+        f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(name)}</span>'
+        f'<span class="text-[12px] text-on-surface-variant">{e(detail)}</span></span>'
+        '<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>' for name, href, home, detail in rows)  # fmt: skip
+    return ('<section class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+            f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
+            f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
+            f'<p class="font-label-micro text-label-micro text-outline leading-normal">{e(note)}</p></section>')  # fmt: skip
+
+
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
                 industry: str | None = None, initial: str = "", survey: str = "", made: str = "", homepage: str | None = None,
                 stats: tuple[int, int, bool] = (0, 0, False), regram: str = "",
@@ -899,6 +920,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                  f'<button type="submit" aria-pressed="{"true" if liked else "false"}" aria-label="좋아요{" 취소" if liked else ""}" class="w-10 h-10 rounded-full flex items-center justify-center border {"border-tertiary/40 bg-tertiary-fixed/50" if liked else "border-outline-variant/60"} transition-colors">'
                  f'<span class="material-symbols-outlined text-[20px] {"text-tertiary" if liked else "text-outline"}" style="font-variation-settings: \'FILL\' {1 if liked else 0};">favorite</span></button>'
                  f'<span class="flex items-center">{faces}</span><span class="font-label-regular text-label-regular text-on-surface-variant font-semibold">좋아요 {likes:,}개</span></form>{regram}</div>')  # fmt: skip
+    parts.append(owners_block(report.get("owners")))
     parts.append(survey)
     parts.append('<footer class="pt-space-lg pb-space-lg mt-space-sm border-t border-outline-variant/40 flex flex-col gap-space-sm"><div class="flex items-center gap-1.5 text-on-surface font-headline-sm text-headline-sm font-semibold"><span class="material-symbols-outlined text-primary text-[20px]">verified</span><span class="">작성 기준 및 검증 안내</span></div>'
                  f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{how} 번호 색은 누가 말한 것인지 알려줘요. <span class="text-primary">[F]</span> 재무제표로 한장이 계산 · <span class="text-secondary">[D]·[I]</span> 회사·주주가 낸 공시 · <span class="text-outline">[N]</span> 언론 기사. 작은 번호를 누르면 금융감독원 전자공시(DART){"나 기사" if src.startswith("기사") else ""} 원문이 열려요. <a class="text-primary underline" href="/method">계산 방법</a></p>'
@@ -1415,7 +1437,7 @@ class App:
                                          self.initial(uid), self.survey(uid, ticker, week, thanks), made, home, (views, likes, liked),
                                          self.regram_form(uid, "note", ticker, week),
                                          prices=self.con.execute("select date, close from prices where ticker = ? order by date", (ticker,)).fetchall()
-                                         if sources.price_dev() else None, report=self.report(ticker))  # fmt: skip
+                                         if sources.price_dev() else None, report=self.report(ticker) | {"owners": self.owners(ticker)})  # fmt: skip
 
     def report(self, ticker: str) -> dict:
         if self.con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
@@ -2068,6 +2090,69 @@ class App:
                 '<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">국민연금·운용사 같은 기관이 5% 넘게 가진 회사들이에요. 공시로 알려진 것만 보여요.</p>'
                 f'<div class="flex flex-col divide-y divide-surface-container-high/80">{items}</div></section>')  # fmt: skip
 
+    def owners(self, ticker: str) -> tuple:
+        """(제목, 설명, [(이름, 링크, 홈페이지, 한 줄)]) — 미국은 13F 유명 투자자(비중 큰 순), 국내는 5% 넘게 가진 기관(지분 큰 순)."""
+        got = self.con.execute("select guru, weight, period from guru_holdings where ticker = ? order by weight desc", (ticker,)).fetchall()
+        if got:
+            rows = [(gurus.GURUS[k][0], f"/learn/guru/{k}", gurus.GURUS[k][3], f"포트폴리오의 {w:.1f}% · {kdate(p)} 기준")
+                    for k, w, p in got if k in gurus.GURUS]  # fmt: skip
+            return ("이 종목을 가진 유명 투자자",
+                    "미국 투자자가 분기마다 내는 보유 신고(SEC 13F)예요. 분기가 끝나고 45일 안에 나와서 지금과 다를 수 있어요. 따라 사고팔라는 뜻이 아니에요.", rows)
+        kr = self.con.execute("select inst, rate, date from big_holdings where stock_code = ? order by rate desc", (ticker,)).fetchall()
+        rows = [(holders.BIG[k][0], f"/learn/big/{k}", self.BIG_HOME.get(k), f"지분 {r:.2f}% · {kdate(d)} 보고") for k, r, d in kr if k in holders.BIG]
+        return ("이 종목을 5% 넘게 가진 기관", "5% 넘게 가지면 내는 대량보유 보고(DART)로 알려진 것만이에요. 따라 사고팔라는 뜻이 아니에요.", rows)
+
+    def guru_list(self) -> str:
+        got = {k: n for k, n in self.con.execute("select guru, count(*) from guru_holdings group by guru")}
+        keys = [k for k in gurus.GURUS if k in got]
+        if not keys:
+            return ""
+        items = "".join(
+            f'<a href="/learn/guru/{k}" class="py-3.5 flex items-center gap-space-md">{logo(gurus.GURUS[k][0], gurus.GURUS[k][3], "w-10 h-10")}'
+            f'<span class="flex flex-col min-w-0 flex-1"><span class="font-body-reading-strong text-body-compact text-on-surface">{e(gurus.GURUS[k][0])}</span>'
+            f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(gurus.GURUS[k][2])}</span></span>'
+            f'<span class="text-[12px] text-outline shrink-0">{got[k]:,}종목</span></a>' for k in keys)  # fmt: skip
+        return ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">미국 유명 투자자</h2>'
+                '<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">워런 버핏·캐시 우드 같은 투자자가 분기마다 미국 증권거래위원회(SEC)에 낸 보유 종목이에요.</p>'
+                f'<div class="flex flex-col divide-y divide-surface-container-high/80">{items}</div></section>')  # fmt: skip
+
+    def guru(self, uid: int, key: str, wrap: str, end: str):
+        if key not in gurus.GURUS:
+            return "404 Not Found", [], self.simple("없음", "없는 투자자예요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
+        name, cik, intro, home = gurus.GURUS[key]
+        rows = self.con.execute(
+            "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
+            " exists(select 1 from notes n where n.ticker = g.ticker) from guru_holdings g left join stocks s on s.ticker = g.ticker"
+            " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
+        if not rows:
+            return "404 Not Found", [], self.simple("없음", "아직 받은 신고가 없어요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
+        period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
+        total = sum(r[2] for r in rows)
+        sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
+
+        def row(i, r):
+            issuer, t, value, weight, _, _, _, kname, khome, has_note = r
+            label = kname or issuer
+            inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
+                     f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>'
+                     f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
+            if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
+                return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
+            return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
+
+        top = rows[:30]
+        body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
+                f'<header class="flex items-center gap-space-md">{logo(name, home, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
+                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
+                '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
+                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
+                + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
+                + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
+                + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a></p>')  # fmt: skip
+        return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
+
     def big(self, uid: int, key: str, wrap: str, end: str):
         if key not in holders.BIG:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
@@ -2132,6 +2217,8 @@ class App:
                + bottom_nav("learn"))
         if slug.startswith("big/"):  # 큰손 포트폴리오 한 곳
             return self.big(uid, slug[4:], wrap, end)
+        if slug.startswith("guru/"):  # 미국 유명 투자자 한 명
+            return self.guru(uid, slug[5:], wrap, end)
         a = learn.BY_SLUG.get(slug)
         if slug == "long-short":  # 숫자를 DB 의 지수로 채운 글
             a = learn.long_short(self.con) or a
@@ -2161,7 +2248,7 @@ class App:
                       f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
                       for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + groups + self.big_list() + end)  # fmt: skip
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + groups + self.guru_list() + self.big_list() + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 

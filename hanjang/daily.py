@@ -8,7 +8,7 @@ import sys
 import traceback
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, etf, holders, llm, mail, notes, sources, us
+from hanjang import articles, backup, collect, db, etf, gurus, holders, llm, mail, notes, sources, us
 
 
 def src(con: sqlite3.Connection, rno: str | None) -> str:
@@ -57,6 +57,7 @@ def main(today: date) -> None:
     etf.main(today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
     articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
     holders.main(today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
+    gurus.main(today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
     if monday:
         print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
     if llm.spent.get("no_credit") and (to := sources.env().get("SMTP_USER")):  # 멈추진 않았지만 운영자는 알아야 한다
