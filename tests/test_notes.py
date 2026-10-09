@@ -525,3 +525,15 @@ def test_no_credit_falls_back_to_code_without_more_calls(monkeypatch):
     fs = notes.facts(_con(), "005930", date(2026, 10, 7))
     assert notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code" and notes.write("삼성전자", fs, date(2026, 10, 7))[1] == "code"
     assert len(calls) == 1  # 한 번 막히면 그 뒤로는 묻지 않는다
+
+
+def test_industry_uses_median_and_skips_ratios_beyond_100pct():
+    con = db.connect(":memory:")
+    co = [("A1", 100, 2), ("A2", 100, 9), ("A3", 100, 12), ("A4", 100, 13), ("SQ", 100, 623)]  # SQ: 지분 이익이 영업이익(623%)
+    collect.save_universe(con, [(t, t) for t, *_ in co], {})
+    con.execute("update stocks set induty_code = '64992'")
+    collect.save_financials(con, [sources.Financial(t, 2025, rev, op, 1, 10, 10, "r") for t, rev, op in co])
+    [f] = notes.industry_fact(con, "A1")
+    assert "4곳 가운데" in f["text"] and "중간값 10.5%" in f["text"] and "SQ" not in f["text"] and f["slots"]["중간값"] == "10.5%"
+    assert notes.industry_fact(con, "SQ") == []  # 같은 잣대가 아닌 회사는 견주지 않는다
+    assert "2번째로 높았" in notes.industry_fact(con, "A3")[0]["text"] and "가장 낮았" in f["text"]
