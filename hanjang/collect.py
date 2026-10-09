@@ -1,5 +1,6 @@
 """주간 노트 만들기 ① 받기 (PRD §5.2). `python -m hanjang.collect` — 다시 돌려도 중복 없음."""
 
+import json
 import sqlite3
 import sys
 from datetime import date, timedelta
@@ -149,6 +150,12 @@ def main(today: date) -> None:
     print(f"  일정 {len(evs)}건 (공시 {len(todo)}건에서)")
     print(f"공시 {len(ds)}건 (최근 {DISCLOSURE_DAYS}일) · DART {dart.calls}콜")
     print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
+    by_corp = {c: t for t, c in dart.corps().items()}
+    bs = [b for b in dart.bonds(lo, today, set(tickers)) if b.corp_code in by_corp]
+    con.executemany("insert or replace into bonds values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(b.rcept_no, b.tm, by_corp[b.corp_code], b.pay.isoformat(), b.amount, b.maturity and b.maturity.isoformat(),
+                      b.rate, b.lead, json.dumps(b.uses, ensure_ascii=False)) for b in bs])  # fmt: skip
+    print(f"회사채 {len(bs)}회차 (증권신고서 · 채무증권)")
 
     con.execute("delete from macro where series_id = 'ECOS:731Y001:0000001'")  # 서울외국환중개 작성 — 예전에 받은 것 지움
     for sid, name in sources.MACRO.items():

@@ -8,7 +8,7 @@ import sys
 import traceback
 from datetime import date, timedelta
 
-from hanjang import articles, backup, collect, db, etf, holders, mail, notes, sources
+from hanjang import articles, backup, collect, db, etf, holders, llm, mail, notes, sources
 
 
 def notify(con: sqlite3.Connection, week: str) -> int:
@@ -46,6 +46,8 @@ def main(today: date) -> None:
     holders.main(today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
     if monday:
         print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
+    if llm.spent.get("no_credit") and (to := sources.env().get("SMTP_USER")):  # 멈추진 않았지만 운영자는 알아야 한다
+        mail.send(to, "[한장] OpenAI 크레딧 소진 — 오늘 노트는 코드 문장으로", "platform.openai.com 결제(Billing)에서 크레딧을 채우면 다음 실행부터 AI 글로 돌아와요.")
 
 
 def alert(err: BaseException) -> None:

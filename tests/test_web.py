@@ -592,3 +592,16 @@ def test_metrics_compares_last_year_and_this_year():
     h = web.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
     assert "2024년 → 2025년" in h and "+56.8%" in h and h.count("bg-outline-variant") == 2 and h.count("bg-primary") == 2
     assert web.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다
+
+
+def test_calendar_shows_my_companys_bond_on_pay_day():
+    from datetime import date
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.executemany("insert into bonds values ('r1', ?, '005930', '2026-10-21', ?, ?, null, '신한투자증권', ?)",
+                    [("1", 50_000_000_000, "2028-10-20", '{"채무상환자금": 50000000000}'), ("2", 100_000_000_000, "2029-10-19", '{"운영자금": 100000000000}')])
+    (uid,) = con.execute("select id from users").fetchone()
+    html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
+    assert html_.count("삼성전자 회사채 1,500억원</span>") == 1  # 두 회차가 칩 하나로
+    assert "회사가 채권을 팔아 1,500억원을 빌려요 — 2년·3년 뒤에 갚는 조건이에요. 빌린 돈은 회사 운영 1,000억원 · 빚 갚기 500억원에 쓴다고 적었어요." in html_

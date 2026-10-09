@@ -85,3 +85,16 @@ def test_ipo_from_dart_key_info_and_listing_day():
     assert sources.parse_listing_day("주요일정 ... 상장 예정일 : 2026년 11월 24일 (예정)") == date(2026, 11, 24)
     assert sources.parse_listing_day("매매개시 예정일 | 2026.11.25") == date(2026, 11, 25)
     assert sources.parse_listing_day("상장 일정 미정") is None
+
+
+def test_bonds_from_dart_key_info():
+    gen = {"rcept_no": "r1", "corp_code": "c1", "pymd": "2026년 10월 21일", "fta": "50,000,000,000", "rpd": "2028년 10월 20일", "intr": "-", "bdnmn": "무보증사채"}
+    j = {"group": [
+        {"title": "일반사항", "list": [gen | {"tm": "121-1"}, gen | {"tm": "121-2 ", "fta": "100,000,000,000", "rpd": "2029년 10월 19일", "intr": "3.52"},
+                                     gen | {"tm": "9", "bdnmn": "파생결합사채"}]},
+        {"title": "인수인정보", "list": [{"tm": "121-1", "actsen": "대표", "actnmn": "신한투자증권"}]},
+        {"title": "자금의사용목적", "list": [{"tm": "121-2", "se": "채무상환자금", "amt": "80,000,000,000"}, {"tm": "121-2", "se": "운영자금", "amt": "20,000,000,000"},
+                                         {"tm": "121-2", "se": "발행제비용", "amt": "300,000,000"}]}]}
+    a, b = sources.parse_bonds(j)  # 파생결합사채(증권사 ELS 류)는 뺀다
+    assert (a.tm, a.amount, a.rate, a.lead, a.uses) == ("121-1", 50_000_000_000, None, "신한투자증권", {})
+    assert (b.tm, b.rate, b.maturity, b.uses) == ("121-2", "3.52", date(2029, 10, 19), {"채무상환자금": 80_000_000_000, "운영자금": 20_000_000_000})

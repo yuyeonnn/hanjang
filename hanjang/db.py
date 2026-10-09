@@ -52,6 +52,9 @@ create table if not exists holidays (date text primary key, name text not null);
 create table if not exists etfs (
   ticker text primary key references stocks, name text not null, rcept_no text not null, filed text not null,
   info text, read_rcept text);
+create table if not exists bonds (
+  rcept_no text not null, tm text not null, ticker text not null references stocks, pay_date text not null, amount integer not null,
+  maturity text, rate text, lead text, uses text, primary key (rcept_no, tm));
 create table if not exists ipos (
   corp_code text primary key, rcept_no text not null, name text not null, sub_start text not null, sub_end text not null,
   pay_date text, list_date text, price integer, total integer, lead text, uses text);
