@@ -655,3 +655,17 @@ def test_feed_and_article_show_the_same_photo():
     (photo,) = con.execute("select photo from articles where id = ?", (aid,)).fetchone()
     assert photo and re.search(r"/(money|chart)\d*\.jpg$", photo)  # 증자 → 돈·차트 주제
     assert photo in call(app, f"/a/{aid}", cookie=ck)[2]
+
+
+def test_regram_cards_note_like_my_stock_and_article_like_feed_row():
+    app, con = _app()
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r9', '005930', '2026-10-01', 'BUYBACK', ?, 'x')",
+                (json.dumps({"title": "자사주 산다", "paragraphs": [{"text": "회사가 주식을 사요.", "refs": []}], "links": {}}, ensure_ascii=False),))
+    con.commit()
+    (aid,) = con.execute("select id from articles where ref = 'r9'").fetchone()
+    ck = _login(app)
+    call(app, "/me/profile", "POST", "nickname=" + quote("리그램왕"), ck)
+    assert "/regram" in call(app, f"/a/{aid}", cookie=ck)[2]
+    call(app, "/regram", "POST", f"k=article&r={aid}&w=", ck)
+    me = call(app, "/me", cookie=ck)[2]
+    assert "자사주 산다" in me and "max-w-[180px]" in me and "lg:w-full" not in me.split("내 리그램")[1]
