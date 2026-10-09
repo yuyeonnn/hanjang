@@ -13,12 +13,19 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
 from hanjang import db, holders, learn, llm, mail, notes, policy, sources
+
+
+def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
+    from hanjang import collect
+
+    return collect.first(ticker)
 from hanjang.sources import env, industry_label
 
 MAX_STOCKS = 20  # PRD F2
@@ -800,6 +807,7 @@ TONE_TAG = {1: ("긍정", "bg-secondary-fixed/70 text-on-secondary-fixed-variant
 class App:
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
+        self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
 
     def __call__(self, environ, start_response):
@@ -1057,8 +1065,25 @@ class App:
                 return added, unknown, True
             self.con.execute("insert or ignore into holdings values (?, ?, ?)", (uid, t, datetime.now().isoformat()))
             added.append(self.con.execute("select name from stocks where ticker = ?", (t,)).fetchone()[0])
+            if not self.con.execute("select 1 from notes where ticker = ?", (t,)).fetchone():
+                self.start_first(t)
         self.con.commit()
         return added, unknown, False
+
+    def start_first(self, ticker: str) -> None:
+        """노트가 없는 종목을 담으면 그 종목만 바로 받아 첫 노트를 쓴다 — 따로 띄운 실에서 (화면은 기다리지 않는다).
+        같은 종목을 여러 사람이 동시에 담아도 한 번만."""
+        if ticker in self.making:
+            return
+        self.making.add(ticker)
+
+        def run():
+            try:
+                FIRST(ticker)
+            finally:
+                self.making.discard(ticker)
+
+        threading.Thread(target=run, daemon=True).start()
 
     @staticmethod
     def added_msg(added: list[str], unknown: list[str], full: bool) -> str:
@@ -1114,7 +1139,8 @@ class App:
         out = []
         for t, name, week, body, facts, home in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
-            head = b.get("headline") or "새로 담은 종목이에요 — 내일 아침 7시에 첫 노트가 나와요."
+            head = b.get("headline") or ("첫 노트를 만들고 있어요 — 1~2분 뒤 새로고침해 보세요." if t in self.making else
+                                          "새로 담은 종목이에요 — 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
             status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
