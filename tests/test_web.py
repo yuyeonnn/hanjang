@@ -1275,7 +1275,7 @@ def test_my_tree_grows_with_days_and_shows_this_month():
     from hanjang import tree
 
     assert tree.stage(0) == ("씨앗", 1) and tree.stage(3) == ("새싹", 1) and tree.stage(50) == ("잎이 풍성한 나무", 40) and tree.stage(200)[1] is None
-    assert all(tree.svg(n, k).startswith("<svg") for n in (0, 2, 8, 60, 120) for k in tree.STYLES)
+    assert all(tree.svg(n).startswith("<svg") for n in (0, 2, 8, 60, 120))
     assert tree.svg(40) == tree.svg(40)  # 같은 날수면 같은 나무
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
