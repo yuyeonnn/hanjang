@@ -1284,6 +1284,10 @@ def test_my_tree_grows_with_days_and_shows_this_month():
     con.executemany("insert into views (user_id, page, at) values (1, 'cards', ?)", [(f"2026-09-{d:02d}T08:00:00",) for d in range(1, 21)])
     con.commit()
     body = call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert con.execute("select days from users where id = 1").fetchone()[0] == 21  # 남은 기록 20일 + 오늘
+    con.execute("delete from views")  # 열어본 기록이 지워져도(180일) 나무는 줄지 않는다
+    con.commit()
+    assert "지금까지 21일 들어왔어요" in call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
     assert "내 나무" in body and "지금까지 21일 들어왔어요" in body and "자라는 나무" in body and "잎이 풍성한 나무까지 19일" in body
 
 

@@ -140,6 +140,7 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("articles", "photo", "text"),
                             ("users", "notices_seen", "text"),  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
                             ("users", "mail_on", "integer not null default 1"),
+                            ("users", "days", "integer"), ("users", "last_day", "text"),  # 내 나무 — 들어온 날 수(누적)·마지막으로 센 날. 열어본 기록(views)은 180일 뒤 지워져도 나무는 줄지 않게
                             ("users", "private", "integer not null default 0"), ("follows", "ok", "integer not null default 1"),  # 비공개 계정 — 팔로우는 요청(ok 0) → 수락하면 1 (사용자 10/10)  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
                             ("users", "rules_at", "text"),  # 이용 규칙에 동의한 때 — 남에게 보이는 프로필(닉네임·소개·사진)을 만들기 전에 (앱 마켓의 사용자 콘텐츠 요구, 10/11)

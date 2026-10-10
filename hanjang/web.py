@@ -1339,8 +1339,11 @@ class App:
 
     def log(self, uid: int, page_: str, ticker: str | None = None) -> None:
         try:
-            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
-                             (uid, page_, ticker, datetime.now().isoformat()))  # fmt: skip
+            now = datetime.now().isoformat()
+            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)", (uid, page_, ticker, now))
+            # 들어온 날 수 — 하루에 한 번만 더한다. 처음엔 남아 있는 기록의 날 수에서 시작 (내 나무, 10/11)
+            self.con.execute("update users set days = coalesce(days, (select count(distinct substr(at, 1, 10)) from views where user_id = ? and substr(at, 1, 10) < ?)) + 1,"
+                             " last_day = ? where id = ? and coalesce(last_day, '') != ?", (uid, now[:10], now[:10], uid, now[:10]))  # fmt: skip
             self.con.commit()
         except sqlite3.OperationalError:  # DB 가 잠깐 잠겨도 화면은 보여 준다 — 기록 한 줄을 잃는 쪽이 낫다
             self.con.rollback()
@@ -2175,7 +2178,7 @@ class App:
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
-        n = len(counts)
+        n = self.con.execute("select days from users where id = ?", (uid,)).fetchone()[0] or len(counts)  # 누적 — 기록이 지워져도 줄지 않는다
         name, left = tree.stage(n)
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
