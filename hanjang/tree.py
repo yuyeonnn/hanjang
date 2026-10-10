@@ -11,7 +11,7 @@ import random
 from datetime import date, timedelta
 from html import escape as e
 
-STAGES = ((0, "씨앗"), (1, "새싹"), (4, "어린 나무"), (15, "자라는 나무"), (40, "잎이 풍성한 나무"), (90, "꽃이 핀 나무"))
+STAGES = ((0, "씨앗"), (1, "새싹"), (4, "어린 나무"), (15, "자라는 나무"), (40, "잎이 풍성한 나무"), (90, "꽃이 핀 나무"), (120, "열매가 열리는 나무"), (160, "새가 찾아온 나무"))
 LEVEL = ("#eae7ea", "#bceddc", "#86c5a4", "#3f7d5c", "#154539")  # 잔디 — 안 온 날 → 많이 본 날
 
 
@@ -48,8 +48,36 @@ def _spots() -> tuple[list, list]:
 LEAVES, FLOWERS = _spots()
 
 
+def _fruit_spots() -> list[tuple[float, float]]:
+    """다 자란 수관(120일) 안에서 서로 떨어진 열매 자리 14곳."""
+    rng, out = random.Random(5), []
+    while len(out) < 14:
+        a, d = rng.uniform(0, math.tau), math.sqrt(rng.random()) * 0.82
+        x, y = 160 + math.cos(a) * 118 * d, 78.6 + math.sin(a) * 92 * d + 8
+        if all((x - px) ** 2 + (y - py) ** 2 > 28**2 for px, py in out):
+            out.append((x, y))
+    return out
+
+
+FRUITS = _fruit_spots()
+
+
+def _fruit(x: float, y: float) -> str:
+    return (f'<path d="M{x:.1f} {y - 5:.1f} q1 -4 3 -5" stroke="#6b4a2f" stroke-width="1.2" fill="none" stroke-linecap="round"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.2" fill="#d9534a"/><circle cx="{x - 1.8:.1f}" cy="{y - 1.8:.1f}" r="1.6" fill="#f3a79b"/>')  # fmt: skip
+
+
+def _bird(x: float, y: float, flip: int = 1, body: str = "#5b8fb9", wing: str = "#3f6f96", belly: str = "#f3e3c3") -> str:
+    """작은 새 한 마리 — 왼쪽을 본다(flip=-1 이면 오른쪽). 휴대폰에서도 보이게 1.7배 (사용자 10/11)."""
+    return (f'<g transform="translate({x:.1f} {y:.1f}) scale({1.7 * flip} 1.7)"><path d="M6 -1 l9 -4 l-1 5 z" fill="{body}"/>'
+            f'<ellipse cx="0" cy="0" rx="8" ry="6" fill="{body}"/><ellipse cx="-1.5" cy="2" rx="5.5" ry="3.6" fill="{belly}"/>'
+            f'<circle cx="-6.5" cy="-5" r="4.3" fill="{body}"/><path d="M-10.5 -5.5 l-4.5 1.3 l4.5 1.6 z" fill="#e0a23a"/>'
+            f'<circle cx="-7.6" cy="-5.8" r="0.9" fill="#1b1b1d"/><path d="M1 -1 q4 -3 7 1 q-4 2 -7 -1 z" fill="{wing}"/>'
+            '<path d="M-1 5.5 v4 M2 5.5 v4" stroke="#8a6a48" stroke-width="1"/></g>')  # fmt: skip
+
+
 def svg(n: int) -> str:
-    """들어온 날 n → 나무 그림 한 장(같은 n 이면 늘 같은 그림). 하루에 잎 세 장, 120일이면 360장. 90일부터 꽃."""
+    """들어온 날 n → 나무 그림 한 장(같은 n 이면 늘 같은 그림). 하루에 잎 세 장, 120일이면 360장. 90일부터 꽃, 120일 뒤엔 열매와 새."""
     name, _ = stage(n)
     gx, gy = 160, 270
     out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#b99a6b" opacity="0.35"/>']
@@ -94,6 +122,14 @@ def svg(n: int) -> str:
                 x, y = gx + ux * rx, cy + uy * ry
                 out.append("".join(f'<circle cx="{x + math.cos(p * math.tau / 5) * 3.2:.1f}" cy="{y + math.sin(p * math.tau / 5) * 3.2:.1f}" r="2.6" fill="#f4c6cf"/>' for p in range(5))
                            + f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.8" fill="#e0a23a"/>')  # fmt: skip
+    if n > 120:  # 다 자란 뒤 — 나무는 그대로, 열매가 열흘에 하나씩(14개까지) 열리고 새가 찾아온다(160·260·380일) (사용자 10/11)
+        out.append("".join(_fruit(x, y) for x, y in FRUITS[: min(14, (n - 120) // 10 + 1)]))
+        if n >= 160:
+            out.append(_bird(gx + 30, 78.6 - 92 * 0.8))
+        if n >= 260:
+            out.append(_bird(gx - 74, 78.6 - 92 * 0.56, -1, "#e2a03f", "#c17f24", "#fbe9c8"))
+        if n >= 380:
+            out.append(_bird(62, 266, 1, "#c96a5a", "#a24d40", "#f6dccf"))
     return f'<svg viewBox="0 -18 320 310" width="100%" role="img" aria-label="내 나무 — {e(name)}" xmlns="http://www.w3.org/2000/svg">{"".join(out)}</svg>'
 
 
