@@ -2164,9 +2164,9 @@ class App:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + self.my_tree(uid)
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
-                 + self.suggest(uid)  # 추천 프로필은 내 프로필 맨 밑 (사용자 10/10)
+                 + self.suggest(uid)
+                 + self.my_tree(uid)  # 내 나무는 맨 밑 (사용자 10/11)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
