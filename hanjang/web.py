@@ -2190,13 +2190,21 @@ class App:
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
-    def my_tree(self, uid: int, today: date | None = None) -> str:
-        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 이번 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views)."""
+    def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
+        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무와 날 수만(언제 들어왔는지 보이는 잔디·다음 단계는 본인만). 비공개 계정은 부르는 쪽이 거른다."""
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
-        counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
+        if nick is None:
+            counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
         n = self.con.execute("select days from users where id = ?", (uid,)).fetchone()[0] or len(counts)  # 누적 — 기록이 지워져도 줄지 않는다
         name, left = tree.stage(n)
+        if nick is not None:
+            return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+                    f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
+                    f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
+                    f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
+                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p></section>')  # fmt: skip
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
         return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
@@ -2223,7 +2231,7 @@ class App:
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
         lock = (f'<form method="post" action="/me/private" class="py-3.5 flex items-center justify-between gap-3"><span class="flex flex-col">'
                 '<span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><span class="material-symbols-outlined text-primary text-[18px]">lock</span>비공개 계정</span>'
-                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 리그램과 팔로워 목록을 봐요</span></span>'
+                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 나무와 리그램, 팔로워 목록을 봐요</span></span>'
                 f'<button aria-label="비공개 계정 {"끄기" if private else "켜기"}" aria-pressed="{"true" if private else "false"}" type="submit" class="flex items-center gap-2 shrink-0">'
                 f'<span class="font-label-micro text-label-micro {"text-primary" if private else "text-outline"} font-semibold">{"ON" if private else "OFF"}</span>'
                 f'<span class="w-11 h-6 rounded-full p-0.5 {"bg-primary" if private else "bg-surface-container-highest"} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {"translate-x-5" if private else "translate-x-0"}"></span></span></button></form>')  # fmt: skip
@@ -2874,14 +2882,14 @@ class App:
         shut = ('<div class="mt-space-xl py-10 flex flex-col items-center gap-2 border-t border-surface-container-high text-center">'
                 '<span class="material-symbols-outlined text-outline text-[30px]">lock</span>'
                 '<b class="font-body-reading-strong text-body-compact text-on-surface">비공개 계정이에요</b>'
-                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 리그램과 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
+                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 나무와 리그램, 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
         see = self.can_see(uid, other)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
                  f'<div class="flex items-center gap-2 min-w-0"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1></div>{self.follow_line(other, see)}</div>'
                  f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)
+                 + ((self.my_tree(other, nick=nick) + self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True)) if see else shut)
                  + (more if other != uid else "")
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)

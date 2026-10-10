@@ -1383,3 +1383,17 @@ def test_big_bodies_only_for_logged_in_photo_uploads_and_few_at_once():
     for _ in range(web.BIG_AT_ONCE):
         app.uploads.release()
     assert post("/scan", web.FORM_MAX + 1, me)[0] != "503" and app.uploads._value == web.BIG_AT_ONCE  # 끝나면 자리를 돌려준다
+
+
+def test_others_see_my_tree_unless_private():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname, days) values (1, 'a@b.c', '2026-10-01', '가가', 50), (2, 'b@b.c', '2026-10-01', '나나', 1)")
+    con.commit()
+    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" not in p  # 나무와 날 수만 — 잔디는 본인만
+    call(app, "/me/private", "POST", "", a)
+    assert "가가의 나무" not in call(app, "/u/1", cookie=b)[2]  # 비공개 — 승인 전엔 안 보인다
+    call(app, "/follow", "POST", "u=1", b)
+    call(app, "/follow/answer", "POST", "u=2&yes=1", a)
+    assert "가가의 나무" in call(app, "/u/1", cookie=b)[2]
