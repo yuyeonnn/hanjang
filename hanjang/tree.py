@@ -65,7 +65,8 @@ def svg(n: int) -> str:
             lean, tall = rng.uniform(-3, 3), rng.uniform(5, 10)
             blades.append((y, f'<path d="M{x:.1f} {y:.1f} q{lean / 2:.1f} -{tall / 2:.1f} {lean:.1f} -{tall:.1f}" stroke="{rng.choice(("#3f7d5c", "#5c9a72", "#86b98f", "#4f8f63"))}"/>'))
         out.append('<g fill="none" stroke-width="1.5" stroke-linecap="round">' + "".join(b for _, b in sorted(blades)) + "</g>")
-    out.append(f'<ellipse cx="{gx}" cy="{gy + 2}" rx="{34 - 12 * cover:.0f}" ry="{7 - 2 * cover:.1f}" fill="#8a6a48"/>')
+    if n == 0:  # 흙 둔덕은 씨앗일 때만 — 싹이 난 뒤엔 잔디 위에 바로 선다 (사용자 10/11: 갈색 동그라미가 어색하다)
+        out.append(f'<ellipse cx="{gx}" cy="{gy + 2}" rx="34" ry="7" fill="#8a6a48"/>')
     for i, x in enumerate((92, 232, 60, 262, 120, 204)[: min(6, n // 15)]):
         y, c = 262 + (i % 2) * 2, ("#f4c6cf", "#f6dc8a", "#ffffff")[i % 3]
         out.append(f'<path d="M{x} {y + 12} q-1 -6 0 -11" stroke="{GREENS[2]}" stroke-width="1.4" fill="none" stroke-linecap="round"/>'
