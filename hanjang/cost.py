@@ -15,7 +15,7 @@ def report(lines: list[str], today: date) -> str:
     by_job: dict[str, list] = defaultdict(lambda: [0, 0.0])
     month = today.strftime("%Y-%m")
     for ln in lines:
-        at, label, _, _, _, usd = ln.rstrip().split(",")
+        at, label, *_, usd = ln.rstrip().split(",")  # 옛 줄 6칸 · 새 줄 7칸(캐시된 입력)
         by_day[at[:10]] += float(usd)
         if at.startswith(month):
             by_job[label][0] += 1
