@@ -1073,11 +1073,51 @@ def test_old_articles_are_rewritten_in_place_when_the_filing_text_is_back(monkey
                 (json.dumps(old, ensure_ascii=False),))
     con.commit()
     today = date(2026, 10, 12)  # 사건은 14일보다 오래됐어도 다시 쓴다
-    monkeypatch.setattr(articles, "write", lambda *a, **k: None)  # 점검 중 — 원문 없음
-    assert articles.rewrite(con, today, None) == 0 and json.loads(con.execute("select body from articles").fetchone()[0])["title"] == "옛 글"
+    body = lambda: json.loads(con.execute("select body from articles where id = 7").fetchone()[0])  # noqa: E731
+    monkeypatch.setattr(articles.llm, "ask", lambda *a, **k: None)  # AI 글이 검사를 못 넘는다
+    monkeypatch.setattr(articles, "fetch", lambda *a: "")  # 점검 중 — 원문 없음: 세지 않는다
+    assert articles.rewrite(con, today, None) == 0 and body()["title"] == "옛 글" and "tries" not in body()
+    monkeypatch.setattr(articles, "fetch", lambda *a: "원문 " * 100)
+    assert articles.rewrite(con, today, None) == 0 and body()["tries"] == 1 and "v" not in body()  # 원문은 받았는데 검사 탈락 — 하루
     new = {"title": "새 글", "paragraphs": [{"text": "계약금액은 935억 원이에요.", "refs": ["E1"]}], "links": {}, "v": articles.VERSION}
     seen = []
     monkeypatch.setattr(articles, "write", lambda con, ev, *a, **k: seen.append(ev["fact"]["text"]) or new)
     assert articles.rewrite(con, today, None) == 1 and "단일판매" in seen[0]
     assert con.execute("select id, photo, json_extract(body, '$.title') from articles").fetchall() == [(7, "p.jpg", "새 글")]  # 번호·사진 그대로
     assert articles.rewrite(con, today, None) == 0 and len(seen) == 1  # 한 번 다시 쓰면 끝
+    # 사흘 내리 검사를 못 넘으면 그만둔다 — 옛 글로 확정하고 더 묻지 않는다(돈이 새지 않게)
+    con.execute("update articles set body = ? where id = 7", (json.dumps(old, ensure_ascii=False),))
+    monkeypatch.setattr(articles, "write", lambda *a, **k: seen.append("또") and None)
+    for day in range(articles.MAX_TRIES + 2):
+        articles.rewrite(con, today, None)
+    assert seen.count("또") == articles.MAX_TRIES and body()["kept"] and body()["title"] == "옛 글"
+
+
+def test_judging_sentences_are_cut_and_a_yardstick_makes_it_a_fact():
+    """평가는 기준과 함께만 — 「업종 중간값보다 낮은 편」은 사실, 「탄탄한 편」「낮은 편」은 평가 (22편 읽기 10/11)."""
+    from hanjang import articles
+
+    assert not articles.judging("부채비율은 28.7%로, 같은 업종 회사들 중간값보다 낮은 편이에요.")
+    assert articles.judging("부채비율은 17.8%로 낮은 편이고, 자기 돈은 6,903억 원이에요.") and articles.judging("살림살이도 꽤 탄탄한 편이에요.")
+    assert articles.judging("이런 수치는 회사의 재무 상태가 견실하다는 걸 보여줍니다.") and not articles.judging("영업이익은 2.1조 원으로 56.8% 증가했어요.")
+    _, con = _app()
+    paras = [{"text": "살림살이도 꽤 탄탄한 편이에요. 2025년 매출이 12.0조 원이에요.", "refs": ["F1"], "marks": ["꽤 탄탄한 편", "매출이 12.0조 원"]},
+             {"text": "이런 수치는 좋은 실적을 보여줍니다.", "refs": ["F1"]}, {"text": "계약 상대는 삼성전기예요.", "refs": ["E1"]}]
+    con.execute("insert into articles (id, ref, ticker, date, kind, body, made_at) values (1, 'r', '005930', '2026-10-01', 'MA', ?, 'x')",
+                (json.dumps({"title": "t", "paragraphs": paras, "links": {}}, ensure_ascii=False),))
+    assert articles.scrub(con) == 2 and articles.scrub(con) == 0  # 여러 번 돌려도 같다
+    got = json.loads(con.execute("select body from articles").fetchone()[0])["paragraphs"]
+    assert got == [{"text": "2025년 매출이 12.0조 원이에요.", "refs": ["F1"], "marks": ["매출이 12.0조 원"]}, paras[2]]  # 문장만 빠지고, 빈 문단·걸린 강조도
+
+
+def test_parent_buying_its_subsidiarys_new_shares_is_one_article():
+    """자회사 유상증자결정 + 모회사 타법인 주식 취득결정 — 같은 날 같은 일. 기사는 취득 쪽 한 편 (한화오션 3·4번, 10/11)."""
+    from hanjang import articles
+
+    _, con = _app()
+    con.executemany("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values (?, '005930', ?, ?, ?, 2, 0)",
+                    [("m", "2026-10-07", "타법인주식및출자증권취득결정", "MA"), ("r", "2026-10-07", "유상증자결정(종속회사의주요경영사항)", "RIGHTS_ISSUE"),
+                     ("own", "2026-10-05", "유상증자결정", "RIGHTS_ISSUE")])  # 회사 자신의 증자는 따로 쓴다
+    assert sorted(x["ref"] for x in articles.events(con, date(2026, 10, 10))) == ["m", "own"]
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('m', '005930', '2026-10-07', 'MA', '{}', 'x')")
+    assert [x["ref"] for x in articles.events(con, date(2026, 10, 10))] == ["own"]  # 취득 기사를 이미 썼어도 자회사 증자 쪽을 또 쓰지 않는다
