@@ -130,7 +130,8 @@ btn('공유','color:#fff;padding:2px 6px;font-weight:600',async ev=>{const j=awa
 document.addEventListener('selectionchange',()=>{clearTimeout(timer);timer=setTimeout(pick,250);});
 root.addEventListener('click',ev=>{const m=ev.target.closest('mark[data-hl]');if(!m||!getSelection().isCollapsed)return;ev.preventDefault();const id=m.dataset.hl;
 show(m.getBoundingClientRect(),[btn('형광펜 지우기','color:#fff;padding:2px 6px;font-weight:600',()=>{if(id)post('/hl/del',{id});
-root.querySelectorAll('mark[data-hl]').forEach(x=>{if(x.dataset.hl===id){const par=x.parentNode;x.replaceWith(...x.childNodes);par.normalize();}});hide();})]);bar.dataset.del='1';});
+root.querySelectorAll('mark[data-hl]').forEach(x=>{if(x.dataset.hl===id){const par=x.parentNode;x.replaceWith(...x.childNodes);par.normalize();}});hide();}),
+btn('공유','color:#fff;padding:2px 6px;font-weight:600',async ev=>{const t=[...root.querySelectorAll('mark[data-hl]')].filter(x=>x.dataset.hl===id).map(x=>x.textContent).join('');const j=await post('/hl/share',{p:P,t});ev.target.textContent=j.msg||'공유하지 못했어요';setTimeout(hide,1400);})]);bar.dataset.del='1';});
 document.addEventListener('mousedown',ev=>{if(bar&&bar.dataset.del&&!ev.target.closest('#hlbar,mark[data-hl]'))hide();});
 document.addEventListener('scroll',()=>{if(bar&&getSelection().isCollapsed)hide();},{passive:true});
 fetch('/hl?p='+encodeURIComponent(P)).then(r=>r.json()).then(list=>{for(const h of list){const T=text();let s=h.s,e=h.e;if(T.slice(s,e)!==h.t){const i=T.indexOf(h.t);if(i<0)continue;s=i;e=i+h.t.length;}paint(s,e,h.c,String(h.id));}}).catch(()=>{});
