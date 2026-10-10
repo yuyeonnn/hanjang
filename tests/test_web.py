@@ -1097,7 +1097,7 @@ def test_judging_sentences_are_cut_and_a_yardstick_makes_it_a_fact():
     """평가는 기준과 함께만 — 「업종 중간값보다 낮은 편」은 사실, 「탄탄한 편」「낮은 편」은 평가 (22편 읽기 10/11)."""
     from hanjang import articles
 
-    assert not articles.judging("부채비율은 28.7%로, 같은 업종 회사들 중간값보다 낮은 편이에요.")
+    assert not articles.judging("부채비율은 28.7%로, 같은 업종 회사들 중간값보다 낮은 편이에요.") and not articles.judging("같은 업종 회사들 중에서도 높은 편이라고.")
     assert articles.judging("부채비율은 17.8%로 낮은 편이고, 자기 돈은 6,903억 원이에요.") and articles.judging("살림살이도 꽤 탄탄한 편이에요.")
     assert articles.judging("이런 수치는 회사의 재무 상태가 견실하다는 걸 보여줍니다.") and not articles.judging("영업이익은 2.1조 원으로 56.8% 증가했어요.")
     _, con = _app()

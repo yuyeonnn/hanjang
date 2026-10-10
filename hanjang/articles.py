@@ -16,7 +16,7 @@ BUYSELL = re.compile(r"샀|팔았|사들|팔아|담았|매입|처분")
 GUESS = re.compile(r"려는 (걸|것)|(걸|것)으로 볼 수|걸로 볼 수|걸 수도|셈일 수|의도|긍정적|부정적|호재|악재|영향을 (줄|미칠) 수|바빠지|바빠진|기대돼|기대가"
                    r"|으로 보여요|로 보여요|견실|안정적인 재무|좋은 실적|주목받|관심이 쏠|눈길을 끄"
                    r"|탄탄|양호|건전한|우수한|훌륭")  # 회사의 속뜻을 짐작하는 말 · 좋다 나쁘다 평가 (22편 읽기 10/10)
-# 「높은 편」「낮은 편」은 무엇과 견줬는지(「~보다」)가 같은 문장에 있을 때만 사실이다 — 「업종 중간값보다 낮은 편」은 되고 「부채비율이 낮은 편」은 평가
+# 「높은 편」「낮은 편」은 무엇과 견줬는지(「~보다」「~ 중에서」)가 같은 문장에 있을 때만 사실이다 — 「업종 중간값보다 낮은 편」은 되고 「부채비율이 낮은 편」은 평가
 EDGE = re.compile(r"(높|낮|많|적|크|작)은 편")
 MAX_TRIES = 3  # 옛 기사 다시 쓰기 — 원문을 받은 날 기준 사흘(하루 3번씩 9번)까지. 그래도 검사를 못 넘으면 문장만 솎은 옛 글로 둔다
 # 굵게 해도 줄거리가 안 잡히는 말 — 날짜만 · 값 없는 항목 이름만 · 주가 움직임 (22편 읽기 10/10)
@@ -80,7 +80,7 @@ def sentences(text: str) -> list[str]:
 
 def judging(sentence: str) -> bool:
     """기준 없이 좋다·나쁘다를 말하거나 속뜻을 짐작하는 문장인가."""
-    return bool(GUESS.search(sentence) or (EDGE.search(sentence) and "보다" not in sentence))
+    return bool(GUESS.search(sentence) or (EDGE.search(sentence) and not re.search("보다|중에서|가운데", sentence)))
 
 
 def scrub(con: sqlite3.Connection) -> int:
