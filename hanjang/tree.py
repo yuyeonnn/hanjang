@@ -52,6 +52,15 @@ def svg(n: int) -> str:
     name, _ = stage(n)
     gx, gy = 160, 270
     out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#b99a6b" opacity="0.35"/><ellipse cx="{gx}" cy="{gy + 2}" rx="34" ry="7" fill="#8a6a48"/>']
+    # 발밑 — 풀 포기와 작은 꽃. 나무와 함께 조금씩 늘어난다(풀은 첫날부터, 꽃은 보름쯤부터) (사용자 10/11)
+    for i, x in enumerate((70, 250, 104, 216, 52, 268, 128, 196, 86, 234)[: min(10, 2 + n // 6) if n else 0]):
+        y, c = 275 + (i % 3), GREENS[1 + i % 3]
+        out.append(f'<path d="M{x} {y} q-3 -8 -7 -10 M{x} {y} q0 -10 1 -14 M{x} {y} q3 -7 7 -9" stroke="{c}" stroke-width="1.8" fill="none" stroke-linecap="round"/>')
+    for i, x in enumerate((92, 232, 60, 262, 120, 204)[: min(6, n // 15)]):
+        y, c = 262 + (i % 2) * 2, ("#f4c6cf", "#f6dc8a", "#ffffff")[i % 3]
+        out.append(f'<path d="M{x} {y + 12} q-1 -6 0 -11" stroke="{GREENS[2]}" stroke-width="1.4" fill="none" stroke-linecap="round"/>'
+                   + "".join(f'<circle cx="{x + math.cos(p * math.tau / 5) * 2.8:.1f}" cy="{y + math.sin(p * math.tau / 5) * 2.8:.1f}" r="2.3" fill="{c}" stroke="#e3d6c2" stroke-width="0.3"/>' for p in range(5))
+                   + f'<circle cx="{x}" cy="{y}" r="1.6" fill="#e0a23a"/>')  # fmt: skip
     if n == 0:
         out.append(f'<ellipse cx="{gx}" cy="{gy - 3}" rx="6" ry="4" fill="#6b4a2f"/>')
     else:
@@ -98,8 +107,8 @@ def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
         cells += f'<span title="{d.month}월 {d.day}일" style="width:18px;height:18px;border-radius:4px;{look}"></span>'
         d += timedelta(days=1)
     legend = "".join(f'<span style="width:11px;height:11px;border-radius:3px;background:{c};display:inline-block"></span>' for c in LEVEL)
-    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%">{cells}</div>'
-            f'<p style="margin:8px 0 0;display:flex;align-items:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
+    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%;margin:0 auto">{cells}</div>'
+            f'<p style="margin:8px 0 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
 
 
 if __name__ == "__main__":

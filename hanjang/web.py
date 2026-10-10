@@ -1356,8 +1356,11 @@ class App:
 
     def log(self, uid: int, page_: str, ticker: str | None = None) -> None:
         try:
-            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
-                             (uid, page_, ticker, datetime.now().isoformat()))  # fmt: skip
+            now = datetime.now().isoformat()
+            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)", (uid, page_, ticker, now))
+            # 들어온 날 수 — 하루에 한 번만 더한다. 처음엔 남아 있는 기록의 날 수에서 시작 (내 나무, 10/11)
+            self.con.execute("update users set days = coalesce(days, (select count(distinct substr(at, 1, 10)) from views where user_id = ? and substr(at, 1, 10) < ?)) + 1,"
+                             " last_day = ? where id = ? and coalesce(last_day, '') != ?", (uid, now[:10], now[:10], uid, now[:10]))  # fmt: skip
             self.con.commit()
         except sqlite3.OperationalError:  # DB 가 잠깐 잠겨도 화면은 보여 준다 — 기록 한 줄을 잃는 쪽이 낫다
             self.con.rollback()
@@ -2181,9 +2184,9 @@ class App:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.my_tree(uid)  # 내 나무는 맨 위, 위아래로 넉넉히 띄워서 (사용자 10/11)
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
                  + self.suggest(uid)
-                 + self.my_tree(uid)  # 내 나무는 맨 밑 (사용자 10/11)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2192,16 +2195,16 @@ class App:
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
-        n = len(counts)
+        n = self.con.execute("select days from users where id = ?", (uid,)).fetchone()[0] or len(counts)  # 누적 — 기록이 지워져도 줄지 않는다
         name, left = tree.stage(n)
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
-        return ('<section class="mt-space-lg"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+        return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
                 '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
                 f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                 f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
                 f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
-                f'<p class="mt-space-xl mb-2 font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
+                f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
                 f'{grass}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:
