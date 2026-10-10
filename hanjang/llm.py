@@ -81,12 +81,78 @@ def _openai(model: str, system: str, user: str | list, schema: dict | None = Non
     return out
 
 
+BATCH_WAIT = 30 * 60  # 묶음 처리를 기다리는 시간(초) — 넘으면 거두고, 못 받은 것은 부르는 쪽이 평소처럼 하나씩 묻는다
+API = "https://api.openai.com/v1"
+
+
+def user_of(task: str, payload) -> str:
+    return json.dumps({"task": task, "input": payload}, ensure_ascii=False, default=str)
+
+
+def batch(prompt: str, task: str, jobs: dict[str, tuple], prompt_file: str | None = None, wait: float | None = None) -> dict[str, str]:
+    """여러 건을 한꺼번에 맡겨 반값에 받는다(OpenAI Batch) — jobs = {이름: (payload, schema)} → {이름: 답 글}.
+    검사는 하지 않는다(부르는 쪽이 한다). 기다려도 안 끝나거나 무엇이든 잘못되면 받은 것만 돌려준다 — 빈 것일 수도 있다.
+    매일 실행은 급하지 않아서 쓴다: 같은 모델·같은 답, 값만 절반 (2026-10-11)."""
+    if not jobs or spent.get("no_credit"):
+        return {}
+    name = prompt_file or prompt
+    model = BY_TASK.get(name) or MODELS[prompt]
+    system = (PROMPTS / f"{name}.md").read_text(encoding="utf-8")
+    head = {"Authorization": f"Bearer {env()['OPENAI_API_KEY']}"}
+    users = {k: user_of(task, payload) for k, (payload, _) in jobs.items()}
+    lines = "\n".join(json.dumps({"custom_id": k, "method": "POST", "url": "/v1/chat/completions", "body": {
+        "model": model, "temperature": 0,
+        "response_format": {"type": "json_schema", "json_schema": {"name": "out", "strict": True, "schema": schema}},
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": users[k]}]}}, ensure_ascii=False)
+        for k, (_, schema) in jobs.items())  # fmt: skip
+    out: dict[str, str] = {}
+    t0 = datetime.now(timezone.utc)
+    try:
+        f = httpx.post(f"{API}/files", headers=head, data={"purpose": "batch"}, files={"file": ("batch.jsonl", lines.encode("utf-8"))}, timeout=120)
+        f.raise_for_status()
+        b = httpx.post(f"{API}/batches", headers=head, timeout=60,
+                       json={"input_file_id": f.json()["id"], "endpoint": "/v1/chat/completions", "completion_window": "24h"})  # fmt: skip
+        b.raise_for_status()
+        bid, end = b.json()["id"], time.time() + (BATCH_WAIT if wait is None else wait)
+        while True:
+            st = httpx.get(f"{API}/batches/{bid}", headers=head, timeout=60).json()
+            if st["status"] in ("completed", "failed", "expired", "cancelled"):
+                break
+            if time.time() > end:  # 못 기다린다 — 거두고(끝난 것까지는 값이 나간다) 받은 것만 쓴다
+                httpx.post(f"{API}/batches/{bid}/cancel", headers=head, timeout=60)
+                end = float("inf")
+            time.sleep(20)
+        if not st.get("output_file_id"):
+            return {}
+        pin, pcached, pout = PRICE[model]
+        for ln in httpx.get(f"{API}/files/{st['output_file_id']}/content", headers=head, timeout=120).text.splitlines():
+            r = json.loads(ln)
+            body = (r.get("response") or {}).get("body") or {}
+            if (r.get("response") or {}).get("status_code") != 200 or r["custom_id"] not in users:
+                continue
+            tin, tout = body["usage"]["prompt_tokens"], body["usage"]["completion_tokens"]
+            cached = (body["usage"].get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+            usd = ((tin - cached) * pin + cached * pcached + tout * pout) / 1e6 / 2  # 묶음 처리는 반값
+            spent["usd"] += usd
+            spent["calls"] += 1
+            out[r["custom_id"]] = body["choices"][0]["message"]["content"]
+            try:
+                with LOG.open("a", encoding="utf-8") as fh:
+                    fh.write(f"{datetime.now().isoformat(timespec='seconds')},{name}:{task},{model}-batch,{tin},{tout},{cached},{usd:.6f}\n")
+            except OSError:
+                pass
+            trace(model, system, users[r["custom_id"]], out[r["custom_id"]], (tin, tout, cached), usd, t0, f"{name}:{task}:batch")
+    except (httpx.HTTPError, KeyError, ValueError) as err:  # 묶음 처리가 안 돼도 매일 실행은 간다 — 하나씩 묻는 길로
+        print(f"묶음 처리 실패 — 하나씩 묻는다: {type(err).__name__} {str(err)[:120]}")
+    return out
+
+
 def ask(prompt: str, task: str, payload, check, schema: dict | None = None, image: str | None = None,
         prompt_file: str | None = None):
     """묻고 `check(parsed)` 로 검사 — 실패하면 두 번까지 다시, 그래도 실패면 None.
     같은 입력에도 답이 매번 조금 달라서, 한 번 더 물으면 통과하는 일이 많다(실측 12장 중 2장)."""
     system = (PROMPTS / f"{prompt_file or prompt}.md").read_text(encoding="utf-8")  # prompt = 모델(MODELS 의 열쇠)
-    user = json.dumps({"task": task, "input": payload}, ensure_ascii=False, default=str)
+    user = user_of(task, payload)
     if image:  # 사진 한 장(data URL) — 캡처 읽기. 저장하지 않고 이 요청에만 싣는다
         user = [{"type": "text", "text": user}, {"type": "image_url", "image_url": {"url": image}}]
     for _ in range(3):

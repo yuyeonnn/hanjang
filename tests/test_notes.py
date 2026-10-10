@@ -638,7 +638,7 @@ def test_monday_carries_unchanged_notes(monkeypatch, tmp_path):
     monkeypatch.setattr(notes, "read_disclosures", lambda con: (0, 0))
     monkeypatch.setattr(notes, "facts", lambda con, t, today: fs("새 사실" if t == "000660" else "그대로"))
     wrote = []
-    monkeypatch.setattr(notes, "write", lambda name, f, today: (wrote.append(name), ({"headline": "새 글"}, "llm:x"))[1])
+    monkeypatch.setattr(notes, "write", lambda name, f, today, draft=None: (wrote.append(name), ({"headline": "새 글"}, "llm:x"))[1])
     notes.main([], date(2026, 10, 12), read=False, carry=True)
     assert wrote == ["SK하이닉스", "NAVER"]  # 삼성전자만 옮겨 적었다
     got = dict(real(tmp_path / "x.db").execute("select ticker, body from notes where week = '2026-10-12'").fetchall())
@@ -646,3 +646,46 @@ def test_monday_carries_unchanged_notes(monkeypatch, tmp_path):
     wrote.clear()
     notes.main(["005930"], date(2026, 10, 19), read=False)  # 손으로 다시 쓸 땐 옮기지 않는다
     assert wrote == ["삼성전자"]
+
+
+def test_batch_drafts_used_and_fallback(monkeypatch, tmp_path):
+    """묶음 처리 — 받은 답이 검사를 통과하면 그대로, 못 받았거나 검사에 떨어지면 하나씩 다시 묻는다. 적으면 맡기지 않는다 (비용, 2026-10-11)."""
+    real = db.connect
+    con = real(tmp_path / "x.db")
+    names = {"000001": "가", "000002": "나", "000003": "다", "000004": "라"}
+    for t, n in names.items():
+        con.execute("insert into stocks (ticker, name) values (?, ?)", (t, n))
+    con.commit()
+    monkeypatch.setattr(notes.db, "connect", lambda: real(tmp_path / "x.db"))
+    monkeypatch.setattr(notes, "read_disclosures", lambda con: (0, 0))
+    monkeypatch.setattr(notes, "facts", lambda con, t, today: [{"id": "F1", "text": t, "url": "u", "tone": 0, "slots": {}}])
+    monkeypatch.setattr(notes, "fill_note", lambda j, fs: j if j.get("ok") else (_ for _ in ()).throw(ValueError("x")))
+    monkeypatch.setattr(notes, "finish", lambda note, fs, name="": note)
+    sent, asked = [], []
+    monkeypatch.setattr(notes.llm, "batch", lambda prompt, task, jobs: (sent.append(sorted(jobs)), {"000001": '{"ok": 1, "headline": "묶음"}', "000002": '{"ok": 0}'})[1])
+    monkeypatch.setattr(notes.llm, "ask", lambda prompt, task, payload, check, schema: (asked.append(payload["name"]), {"ok": 1, "headline": "하나씩"})[1])
+    notes.main([], date(2026, 10, 12), read=False, batch=True)
+    assert sent == [["000001", "000002", "000003", "000004"]] and asked == ["나", "다", "라"]  # 가 는 묶음 답 그대로
+    got = dict(real(tmp_path / "x.db").execute("select ticker, body from notes").fetchall())
+    assert json.loads(got["000001"])["headline"] == "묶음" and json.loads(got["000002"])["headline"] == "하나씩"
+    sent.clear()
+    notes.main(["000001", "000002"], date(2026, 10, 19), read=False, batch=True)
+    assert sent == []  # 두 건뿐이면 맡기지 않는다
+
+
+def test_mend_cheap_model_habits():
+    """싼 모델의 버릇을 코드로 고친다 — 괄호 속 문장 · 받침 뒤 「였어요」 · 「지난 ○월」 · 날짜 토막 문장 (2026-10-11 평가)."""
+    m = notes.mend
+    assert m("자기 주식을 사들이기로 했어요(회사가 시장에서 자기 회사 주식을 사들이기로 했어요. 시중에 도는 주식이 줄어요, 8월 21일).") == "자기 주식을 사들이기로 했어요(8월 21일)."
+    assert m("본업으로 남긴 돈이 더 빠르게 늘었어요(매출이 10.9% 늘었어요(333.6조원). 영업이익은 33.2% 늘었어요(43.6조원)).") == \
+        "본업으로 남긴 돈이 더 빠르게 늘었어요. 매출이 10.9% 늘었어요(333.6조원). 영업이익은 33.2% 늘었어요(43.6조원)."
+    assert m("빚이 자기 돈보다 적어요(부채비율 29.9%).") == "빚이 자기 돈보다 적어요(부채비율 29.9%)."  # 보통 괄호는 그대로
+    assert m("늘린 보고가 764건, 줄인 보고가 40건였어요.") == "늘린 보고가 764건, 줄인 보고가 40건이었어요."
+    assert m("지난 8월에는 회사가 자기 주식을 사들이기로 했어요.") == "8월에는 회사가 자기 주식을 사들이기로 했어요."
+    assert m("자기 주식을 없애기로 했어요. 이 결정은 8월 26일에 알려졌어요.") == "자기 주식을 없애기로 했어요(8월 26일)."
+    assert m("살림은 비교적 여유가 있어요.") == "살림은 여유가 있어요."
+    fs = [{"id": "N1", "text": "소식", "url": "u", "tone": 0, "slots": {}}]
+    for bad in ("엔비디아 수혜주로 꼽힌다는 보도가 있었어요.", "주가가 오를 수 있다는 보도가 있었어요.", "계약 금액은 이 사실만으로는 알 수 없어요.", "이 결정은 8월 21일에 알려졌어요."):
+        with pytest.raises(ValueError):
+            notes.check_sentence({"text": bad, "refs": ["N1"]}, fs)
+    notes.check_sentence({"text": "실적 발표 뒤 주가가 내렸다는 기사가 있었어요.", "refs": ["N1"]}, fs)  # 지난 일은 괜찮다

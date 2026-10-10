@@ -1006,6 +1006,39 @@ def reword(text: str) -> str:
     return re.sub(r"(미리 알렸[^.]*\.)\s*아직 숫자는 없어요\.?", r"\1", text)  # 「…알렸다고도 했어요. 아직 숫자는 없어요.」
 
 
+DAY = r"\d{1,2}월 \d{1,2}일"
+# 주가가 어떻게 될지·누가 사고파는지를 옮기는 말 — 기사에 있어도 싣지 않는다(불변식 1). 「주가가 10% 내렸다」 같은 지난 일은 걸리지 않는다
+PRICE_TALK = re.compile(r"수혜주|상승확률|수급|주가 ?전망|주가(?:가|는|도)? ?(?:오를|내릴|반등|상승할|하락할|뛸)|반등할|반등 기대")
+META = re.compile(r"자료[는가]? ?없어요|알 수 없어요|나와 있지 않아요|주어진 (?:사실|자료)|이 사실만으로는")  # 재료 사정을 글에 드러내는 말
+DAY_ONLY = re.compile(rf"(?:이|그|이번) ?[가-힣 ]{{0,10}}(?:결정|계약|공시|보고|소식)[은는도] ({DAY})에 (?:알려졌|나왔|이뤄졌)어요\.?")  # 날짜만 알리는 토막
+
+
+def unparen(text: str) -> str:
+    """괄호 속에 「~어요」 문장이 통째로 든 것을 편다 — 숫자가 없으면 날짜만 남기고(「(8월 21일)」), 숫자가 있으면 괄호를 풀어 뒤 문장으로.
+    싼 모델이 날짜를 괄호에 넣으면서 재료 문장까지 같이 넣는 버릇 (2026-10-11 평가 30편 중 16번)."""
+    out, i = [], 0
+    while i < len(text):
+        if text[i] == "(":
+            depth, j = 1, i + 1
+            while j < len(text) and depth:
+                depth += (text[j] == "(") - (text[j] == ")")
+                j += 1
+            inner = text[i + 1:j - 1]
+            flat = re.sub(r"\([^()]*\)", "", inner)
+            if not depth and re.search(r"(?:어요|해요|예요)[.,]?(?:\s|$|,)", flat + " "):
+                days = re.findall(DAY, flat)
+                if re.search(r"\d", re.sub(DAY, "", flat)):  # 숫자가 든 문장 — 버리면 숫자가 사라진다. 괄호를 풀어 문장으로
+                    prev = "".join(out).rstrip()
+                    out = [prev + ("" if prev.endswith((".", "!", "?")) else ".") + " " + inner.rstrip(". ")]
+                else:
+                    out.append(f"({days[-1]})" if days else "")
+                i = j
+                continue
+        out.append(text[i])
+        i += 1
+    return re.sub(r"\s+([.,])", r"\1", "".join(out))
+
+
 def mend(text: str) -> str:
     """빈칸 값(낱말 줄기 「4번째로 많았」「줄였」, 「2021년」)에 AI 가 토씨·글자를 또 붙여 깨진 이음을 고친다.
     fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」 (사용자 10/9 검토)."""
@@ -1013,6 +1046,12 @@ def mend(text: str) -> str:
     text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
     text = re.sub(r"(\d년)년", r"\1", text)
     text = re.sub(r"(\d주)이에요", lambda m: m[1] + "예요", text)
+    text = re.sub(r"(\d(?:건|원|명|척|곳|일|편))였어요", r"\1이었어요", text)  # 받침 있는 단위 뒤 — 「40건였어요」「1.8조원였어요」
+    text = re.sub(r"(\d(?:건|원|명|척|곳|일|편))예요", r"\1이에요", text)
+    text = re.sub(r"지난 (\d{1,2}월)", r"\1", text)  # 「지난 10월」 — 이번 달이어도 「지난」을 붙인다. 달만 남긴다
+    text = re.sub(r"(?<=[가-힣] )(?:비교적|꽤) ", "", text)  # 뭉개는 말
+    text = re.sub(rf"(?<=[가-힣)])([.!?]) {DAY_ONLY.pattern}", lambda m: f"({m[2]}){m[1]}", text)  # 「…했어요. 이 결정은 8월 21일에 알려졌어요.」 → 「…했어요(8월 21일).」
+    text = unparen(text)
     text = re.sub(r"([았었였했])어요고(?=[,\s])", lambda m: m[1] + "고", text)  # 「발표했어요고,」 — 끝맺은 말 뒤에 「고」를 또 붙였다  # 「433만 2,118주이에요」
     text = re.sub(r"달러이(에요|라서|라(?=\s)|었)", lambda m: "달러" + {"에요": "예요", "라서": "라서", "라": "라", "었": "였"}[m[1]], text)  # 「26달러이라서」 — 미국 노트
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
@@ -1143,6 +1182,12 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"금지어: {text!r}")
     if PREDICT.search(bare) and not all(r.startswith("N") for r in refs):
         raise ValueError(f"예측 말투: {text!r}")
+    if PRICE_TALK.search(bare):
+        raise ValueError(f"주가·수급 이야기: {text!r}")
+    if META.search(bare):
+        raise ValueError(f"재료 사정을 드러냄: {text!r}")
+    if DAY_ONLY.fullmatch(text.strip()):
+        raise ValueError(f"날짜만 알리는 문장: {text!r}")
     if text.count("(") != text.count(")") or text.count("「") != text.count("」"):
         raise ValueError(f"괄호 짝이 안 맞음: {text!r}")
     outside = re.sub(r"\([^()]*\)|「[^」]*」", "", text)
@@ -1316,14 +1361,24 @@ def finish(note: dict, fs: list[dict], name: str = "") -> dict:
     return note
 
 
-def write(name: str, fs: list[dict], today: date) -> tuple[dict, str]:
-    """(노트, writer) — writer 는 'llm:<모델>' 또는 'code'."""
+def payload_of(name: str, fs: list[dict], today: date) -> dict:
     label = {1: "좋게 본 것", -1: "걱정되는 것", 0: "중립"}
-    payload = {"today": today.isoformat(), "name": name,
-               "facts": [{"id": f["id"], "text": f["text"], "tone": label[f["tone"]],
-                          "slots": [f"{{{f['id']}.{k}}}" for k in f["slots"]]} | ({"body": f["body"]} if f.get("body") else {})
-                         for f in fs]}  # fmt: skip
-    got = llm.ask("writer", "note", payload, lambda j: fill_note(j, fs), schema(fs))
+    return {"today": today.isoformat(), "name": name,
+            "facts": [{"id": f["id"], "text": f["text"], "tone": label[f["tone"]],
+                       "slots": [f"{{{f['id']}.{k}}}" for k in f["slots"]]} | ({"body": f["body"]} if f.get("body") else {})
+                      for f in fs]}  # fmt: skip
+
+
+def write(name: str, fs: list[dict], today: date, draft: str | None = None) -> tuple[dict, str]:
+    """(노트, writer) — writer 는 'llm:<모델>' 또는 'code'.
+    draft: 묶음 처리로 미리 받은 답 — 검사를 통과하면 그대로 쓰고, 아니면 평소처럼 다시 묻는다."""
+    got = None
+    if draft:
+        try:
+            got = fill_note(json.loads(draft), fs)
+        except (ValueError, KeyError, TypeError):
+            pass
+    got = got or llm.ask("writer", "note", payload_of(name, fs, today), lambda j: fill_note(j, fs), schema(fs))
     note, writer = (got, f"llm:{llm.MODELS['writer']}") if got else (code_note(fs), "code")
     return finish(note, fs, name), writer
 
@@ -1349,9 +1404,13 @@ def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
     return sig(fs) != sig(old)
 
 
-def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True, carry: bool = False) -> None:
+BATCH_MIN = 4  # 이보다 적으면 묶음 처리로 맡기지 않는다 — 기다리는 시간이 아깝다
+
+
+def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True, carry: bool = False, batch: bool = False) -> None:
     """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행).
     carry: 월요일 — 사실이 지난 노트와 한 글자도 다르지 않으면 그 글을 이번 주로 옮겨 적는다(AI 를 부르지 않는다).
+    batch: 쓸 노트가 여럿이면 한꺼번에 맡겨 반값에 받는다(llm.batch) — 매일 실행만. 못 받은 종목은 평소처럼 하나씩.
     서버 실측(2026-10-11) 103곳 중 95곳이 그대로였다 — 월요일마다 전부 다시 쓰던 비용의 대부분. 손으로 다시 쓸 땐(--rewrite) 끈다.
     read=False: 사업보고서 읽기(DART)를 건너뛴다 — DART 점검 중에 노트만 다시 쓸 때 (python -m hanjang.notes --rewrite)."""
     con = db.connect()
@@ -1365,6 +1424,7 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
     by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
     # 예시 사람(personas.py)이 담은 종목은 「누가 담은 종목」으로 치지 않는다 — 소식 하나 바뀐 것으로 다시 쓰지 않게 (비용, 2026-10-11)
     held = {t for (t,) in con.execute("select distinct h.ticker from holdings h join users u on u.id = h.user_id where u.email not like '%@persona.hanjang.local'")}
+    todo = []  # 새로 쓸 종목 — (종목, 이름, 사실)
     for t, name in rows:
         fs = facts(con, t, today)
         if not fs:
@@ -1381,7 +1441,13 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
                 con.commit()
                 by["carried"] = by.get("carried", 0) + 1
                 continue
-        note, writer = write(name, fs, today)
+        todo.append((t, name, fs))
+    drafts = (llm.batch("writer", "note", {t: (payload_of(name, fs, today), schema(fs)) for t, name, fs in todo})
+              if batch and len(todo) >= BATCH_MIN else {})  # fmt: skip
+    if batch and len(todo) >= BATCH_MIN:
+        print(f"묶음 처리 {len(drafts)}/{len(todo)}건 받음")
+    for t, name, fs in todo:
+        note, writer = write(name, fs, today, drafts.get(t))
         note["links"] = {f["id"]: f["url"] for f in fs}
         con.execute("insert or replace into notes values (?, ?, ?, ?, ?, ?)",
                     (t, week, json.dumps(fs, ensure_ascii=False), json.dumps(note, ensure_ascii=False),
