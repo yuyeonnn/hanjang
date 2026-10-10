@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources, tree
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -2079,10 +2079,28 @@ class App:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.my_tree(uid)
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
                  + self.suggest(uid)  # 추천 프로필은 내 프로필 맨 밑 (사용자 10/10)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def my_tree(self, uid: int, today: date | None = None) -> str:
+        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 이번 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views)."""
+        today = today or date.today()
+        counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
+        counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
+        n = len(counts)
+        name, left = tree.stage(n)
+        this = sum(1 for d in counts if d[:7] == today.isoformat()[:7])
+        nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
+        return ('<section class="mt-space-lg"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+                '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
+                f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
+                f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
+                f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
+                f'<p class="mt-space-md mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">{today.month}월 · {this}일 들어왔어요</p>'
+                f'{tree.month(counts, today)}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:
         email, created, mail_on, nick, bio, private = self.con.execute(

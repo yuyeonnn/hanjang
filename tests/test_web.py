@@ -1187,3 +1187,17 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
     assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
     h = ask(1000, "5.5.5.5")["headers"]
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+
+
+def test_my_tree_grows_with_days_and_shows_this_month():
+    from hanjang import tree
+
+    assert tree.stage(0) == ("씨앗", 1) and tree.stage(3) == ("새싹", 1) and tree.stage(50) == ("잎이 풍성한 나무", 40) and tree.stage(200)[1] is None
+    assert all(tree.svg(n, k).startswith("<svg") for n in (0, 2, 8, 60, 120) for k in tree.STYLES)
+    assert tree.svg(40) == tree.svg(40)  # 같은 날수면 같은 나무
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.executemany("insert into views (user_id, page, at) values (1, 'cards', ?)", [(f"2026-09-{d:02d}T08:00:00",) for d in range(1, 21)])
+    con.commit()
+    body = call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "내 나무" in body and "지금까지 21일 들어왔어요" in body and "자라는 나무" in body and "잎이 풍성한 나무까지 19일" in body
