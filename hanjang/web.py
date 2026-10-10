@@ -205,6 +205,28 @@ PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
 
 
+# 「홈 화면에 추가」 안내 — 내 종목 화면, 휴대폰에서만. 아이폰은 앱 없이 이것만 둔다(docs/launch.md: 웹을 감싼 앱은 심사에서 잘 떨어진다).
+# 아이폰·아이패드 사파리: 설치 단추를 띄울 길이 없어 「공유 → 홈 화면에 추가」를 글로 알린다. 안드로이드 크롬: 브라우저가 설치할 수 있다고 알려 오면(beforeinstallprompt) 단추를 보인다.
+# 이미 홈 화면 앱으로 열었거나 한 번 닫은 사람에겐 다시 안 보인다(이 브라우저에만 기억 — 서버에 남기지 않는다).
+INSTALL_HINT = (
+    '<div class="hidden lg:hidden fixed bottom-16 left-0 right-0 z-40 px-margin pb-safe" id="a2hs"><div class="max-w-[480px] mx-auto flex items-start gap-3 rounded-xl bg-surface-container-lowest border border-outline-variant/50 shadow-sm px-space-md py-3">'
+    '<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">install_mobile</span>'
+    '<div class="flex-1 min-w-0"><b class="font-label-regular text-label-regular text-on-surface font-semibold">홈 화면에 추가하면 앱처럼 열려요</b>'
+    '<p class="font-label-micro text-label-micro text-on-surface-variant leading-normal mt-0.5" id="a2hs-how"></p>'
+    '<button class="hidden mt-2 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold" id="a2hs-go" type="button">설치</button></div>'
+    '<button aria-label="안내 닫기" class="shrink-0 text-outline hover:text-on-surface" id="a2hs-x" type="button"><span class="material-symbols-outlined text-[18px]">close</span></button></div></div>'
+    "<script>(()=>{const box=document.getElementById('a2hs'),how=document.getElementById('a2hs-how'),go=document.getElementById('a2hs-go');"
+    "let seen=false;try{seen=localStorage.getItem('a2hs')==='x'}catch(e){}"
+    "if(seen||matchMedia('(display-mode: standalone)').matches||navigator.standalone)return;"
+    "const show=()=>box.classList.remove('hidden');"
+    "document.getElementById('a2hs-x').onclick=()=>{box.classList.add('hidden');try{localStorage.setItem('a2hs','x')}catch(e){}};"
+    "const ua=navigator.userAgent,ios=/iphone|ipad|ipod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);"
+    "if(ios){how.textContent=/crios|fxios|edgios|kakaotalk|naver|instagram|fban|fbav/i.test(ua)?'사파리로 연 다음, 아래 공유 단추(네모에서 화살표가 나오는 모양) → 「홈 화면에 추가」를 눌러 주세요.':'아래 공유 단추(네모에서 화살표가 나오는 모양) → 「홈 화면에 추가」를 눌러 주세요.';show();return;}"
+    "addEventListener('beforeinstallprompt',ev=>{ev.preventDefault();how.textContent='주소창 없이 바로 열리고, 홈 화면에 아이콘이 생겨요.';go.classList.remove('hidden');"
+    "go.onclick=async()=>{ev.prompt();await ev.userChoice;box.classList.add('hidden');};show();});"
+    "addEventListener('appinstalled',()=>box.classList.add('hidden'));})();</script>")
+
+
 def page(title: str, body_attr: str, inner: str) -> str:
     return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{CSS_TAG}{share_tags()}{PWA_TAGS}<title>{e(title)} · 한장</title></head>'
             f'<body class="{body_attr}">{inner}{STAY}{HL}</body></html>')  # fmt: skip
@@ -1861,14 +1883,14 @@ class App:
                  # 캡처 → 브라우저에서 1600px 로 줄여 JPEG 로 → /scan. 끝나면 결과 문장과 함께 새로 그린다
                  "const sc=document.getElementById('scan-input'),wait=document.getElementById('scan-wait');"
                  "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;"
-                 "if(!confirm('캡처에서 종목 이름을 읽으려고 이 사진을 AI(OpenAI, 미국)에 보내요.\n한장은 사진을 저장하지 않고, 읽어 낸 종목 이름만 담아요.\n계좌번호·금액이 보이면 가리고 올려도 돼요.\n\n보낼까요?')){sc.value='';return;}"
+                 "if(!confirm('캡처에서 종목 이름을 읽으려고 이 사진을 AI(OpenAI, 미국)에 보내요.\\n한장은 사진을 저장하지 않고, 읽어 낸 종목 이름만 담아요.\\n계좌번호·금액이 보이면 가리고 올려도 돼요.\\n\\n보낼까요?')){sc.value='';return;}"
                  "wait.classList.remove('hidden');wait.classList.add('flex');"
                  "try{const bmp=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');"
                  "c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);"
                  "const r=await fetch('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
                  "const j=await r.json();location.href='/?msg='+encodeURIComponent(j.msg);}"
                  "catch(err){location.href='/?msg='+encodeURIComponent('사진을 읽지 못했어요. 다시 해 주세요.');}});</script></main>"
-                 + bottom_nav("cards"))  # fmt: skip
+                 + INSTALL_HINT + bottom_nav("cards"))  # fmt: skip
         return page("내 종목", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     # ---- 설문 (시안에 없는 칸 — 시험 판정에 꼭 필요해 노트 끝에, 시안과 같은 모양으로) ----

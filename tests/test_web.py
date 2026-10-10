@@ -1383,3 +1383,37 @@ def test_big_bodies_only_for_logged_in_photo_uploads_and_few_at_once():
     for _ in range(web.BIG_AT_ONCE):
         app.uploads.release()
     assert post("/scan", web.FORM_MAX + 1, me)[0] != "503" and app.uploads._value == web.BIG_AT_ONCE  # 끝나면 자리를 돌려준다
+
+
+def test_inline_scripts_on_main_pages_are_valid_javascript(tmp_path):
+    """파이썬 문자열 안의 「\n」 하나가 내 종목 화면 스크립트를 통째로 깨뜨려, 검색 자동완성과 캡처 올리기가 서버에서 멈춰 있었다 (10/11).
+    글자만 보는 테스트는 이런 걸 못 잡는다 — 화면의 스크립트를 node 에 넣어 문법을 본다(node 가 없는 곳에선 건너뛴다)."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 없음")
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into users (id, email, created_at, nickname) values (77, 'o@b.c', '2026-10-01', '남남')")
+    con.execute("insert into articles (id, ref, ticker, date, kind, body, made_at) values (1, 'r1', '005930', '2026-10-01', 'MAJOR_CONTRACT', ?, 'x')",
+                (json.dumps({"title": "계약", "paragraphs": [{"text": "계약금액은 935억 원이에요.", "refs": []}], "links": {}}, ensure_ascii=False),))
+    con.commit()
+    pages = {"로그인": call(app, "/")[2], "로그인(보냄)": app.login_page("a@b.c"), "닉네임": app.welcome_page()}
+    for p in ("/", "/n/005930", "/feed", "/a/1", "/calendar", "/learn", "/learn/dividend", "/me", "/me/settings", "/me/notices", "/u/77", "/privacy", "/rules"):
+        s, _, body = call(app, p, cookie=ck)
+        assert s.startswith("200"), p
+        pages[p] = body
+    n = 0
+    for name, body in pages.items():
+        for k, src in enumerate(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", body, re.S)):
+            f = tmp_path / f"s{n}.js"
+            f.write_text(src, encoding="utf-8")
+            r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            assert r.returncode == 0, f"{name} 의 {k + 1}번째 스크립트: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else r.stderr}"
+            n += 1
+    assert n > 20
