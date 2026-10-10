@@ -1447,3 +1447,38 @@ def test_line_tree_on_notice_error_and_offline_pages():
     app.cards = lambda *x, **k: 1 / 0  # 화면을 그리다 터져도
     s500, _, body = call(app, "/", cookie=a)
     assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body
+
+
+def test_for_you_ranks_my_stocks_events_by_score():
+    """오늘의 내 종목 — 담은 종목의 공시·다가오는 일정·큰손 움직임만, 가까운 것·무거운 것 먼저. 남의 종목은 안 나온다."""
+    from datetime import date
+
+    from hanjang import sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    (uid,) = con.execute("select id from users").fetchone()
+    today = date(2026, 10, 11)
+    assert "오늘은 내 종목에 새로 생긴 일이 없어요" in app.for_you(uid, today)
+    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", date(2026, 10, 10), "주요사항보고서(자기주식취득결정)"),
+                                   sources.Disclosure("20261001000009", "005930", date(2026, 10, 1), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    con.execute("insert into events values ('005930', '2026-10-14', 'EARNINGS', '실적 발표', 'r1')")
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-08', 'r2')")
+    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', '2026-10-09', '임원', '상무', -100)")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
+    con.execute("insert into events values ('000660', '2026-10-12', 'EARNINGS', '남의 종목 실적', 'r4')")
+    h = app.for_you(uid, today)
+    order = [h.index(x) for x in ("자기주식취득결정", "실적 발표", "국민연금이 지분을 늘렸어요", "임원 주식 거래 보고 1건")]
+    assert order == sorted(order) and ">어제<" in h and ">D-3<" in h and "판 쪽이 많아요" in h
+    assert "남의 종목 실적" not in h and "공급계약" not in h and "오늘은 여기까지예요" in h
+    assert "오늘의 내 종목" in call(app, "/feed", cookie=ck)[2]
+
+
+def test_cookie_of_a_deleted_account_goes_to_login_not_error():
+    app, con = _app()
+    ck = _login(app)
+    con.execute("delete from users")
+    s, h, _ = call(app, "/feed", cookie=ck)  # 다른 기기에서 탈퇴한 뒤 남은 쿠키
+    assert s.startswith("303") and h["Location"] == "/" and "Max-Age=0" in h["Set-Cookie"]

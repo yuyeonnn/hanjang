@@ -1462,7 +1462,10 @@ class App:
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)
         # 이용 규칙 동의도 여기서 — 남에게 보이는 프로필을 만들기 전에 (이미 닉네임이 있는 사람도 한 번 동의를 받는다)
-        nick, agreed, banned = self.con.execute("select nickname, rules_at, banned from users where id = ?", (uid,)).fetchone()
+        me = self.con.execute("select nickname, rules_at, banned from users where id = ?", (uid,)).fetchone()
+        if not me:  # 쿠키는 남았는데 계정이 없다(다른 기기에서 탈퇴) — 오류 화면 대신 쿠키를 지우고 처음으로
+            return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
+        nick, agreed, banned = me
         if banned:  # 운영자가 막은 계정 — 쿠키를 지우고 알린다
             contact = env().get("PRIVACY_CONTACT", "")
             return "403 Forbidden", [("Set-Cookie", "s=; Path=/; Max-Age=0")], self.simple(
@@ -2846,12 +2849,74 @@ class App:
                 f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
 
+    def for_you(self, uid: int, today: date | None = None) -> str:
+        """오늘의 내 종목 — 담은 종목에 생긴 일을 점수 큰 순으로 한 줄씩(맞춤 피드 1차, 사용자 10/11).
+        재료: ① 최근 7일 큰 공시 ② 앞으로 14일 일정(실적 발표·주총·배당) ③ 큰손 움직임(기관 5% 지분 변화 30일 · 임원 거래 14일).
+        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다. 끝이 있는 피드(「오늘은 여기까지」)."""
+        today = today or date.today()
+        iso = today.isoformat()
+        back = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+        mine = "join holdings h on h.ticker = s.ticker and h.user_id = ?"
+        cards = []  # (점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크)
+
+        def ago(d: str) -> str:
+            n = (today - date.fromisoformat(d)).days
+            return "오늘" if n <= 0 else "어제" if n == 1 else f"{n}일 전"
+
+        for rno, d, title, code, imp, dr, t, name, home, aid in self.con.execute(
+                "select d.rcept_no, d.date, d.title, d.code, d.importance, d.direction, s.ticker, s.name, s.homepage,"
+                " (select a.id from articles a where a.ref = d.rcept_no)"
+                f" from disclosures d join stocks s on s.ticker = d.ticker {mine}"
+                " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date desc", (uid, back(7), iso)):  # fmt: skip
+            n = (today - date.fromisoformat(d)).days
+            cards.append((100 - 10 * n + 5 * (imp or 0), "campaign", "text-primary", name, home, clean_title(title, code),
+                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}"))
+        for d, kind, what, t, name, home in self.con.execute(
+                f"select e.date, e.kind, e.title, s.ticker, s.name, s.homepage from events e join stocks s on s.ticker = e.ticker {mine}"
+                " where e.date between ? and ? order by e.date", (uid, iso, (today + timedelta(days=14)).isoformat())):  # fmt: skip
+            n = (date.fromisoformat(d) - today).days
+            dd = date.fromisoformat(d)
+            cards.append((95 - 5 * n, "event_upcoming", "text-secondary", name, home, what,
+                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar"))
+        for inst, rate, chg, d, t, name, home in self.con.execute(
+                f"select b.inst, b.rate, b.rate_chg, b.date, s.ticker, s.name, s.homepage from big_holdings b join stocks s on s.ticker = b.stock_code {mine}"
+                " where b.rate_chg is not null and b.rate_chg != 0 and b.date >= ? order by b.date desc", (uid, back(30))):  # fmt: skip
+            if inst not in holders.BIG:
+                continue
+            n = (today - date.fromisoformat(d)).days
+            who = holders.BIG[inst][0]
+            cards.append((70 - 2 * n, "account_balance", "text-tertiary", name, home, f'{who}{notes.josa(who, "이")} 지분을 {"늘렸어요" if chg > 0 else "줄였어요"}',
+                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}"))
+        for t, name, home, cnt, net, last in self.con.execute(
+                f"select s.ticker, s.name, s.homepage, count(*), sum(i.change), max(i.date) from insiders i join stocks s on s.ticker = i.ticker {mine}"
+                " where i.kind = '임원' and i.date >= ? group by s.ticker", (uid, back(14))):  # fmt: skip
+            n = (today - date.fromisoformat(last)).days
+            side = "사들인 쪽이 많아요" if (net or 0) > 0 else "판 쪽이 많아요" if (net or 0) < 0 else "사고판 양이 비슷해요"
+            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}"))
+        cards.sort(key=lambda c: -c[0])
+        items = "".join(
+            f'<a href="{e(href)}" class="py-3.5 flex items-start gap-3">{logo(name, home, "w-9 h-9")}'
+            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="flex items-center gap-1.5 text-[12px] text-outline">'
+            f'<span class="material-symbols-outlined text-[15px] {tint}">{icon}</span><b class="font-medium text-on-surface-variant truncate">{e(name)}</b></span>'
+            f'<span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(head)}</span>'
+            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(sub)}</span></span>'
+            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
+            for _, icon, tint, name, home, head, sub, when, href in cards[:12])  # fmt: skip
+        (has,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
+        empty = ("아직 담은 종목이 없어요. 종목을 담으면 그 종목에 생긴 일을 여기에 모아 드려요." if not has
+                 else "오늘은 내 종목에 새로 생긴 일이 없어요.")
+        return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">오늘의 내 종목</h2>'
+                '<p class="mt-0.5 text-[12px] text-outline">내가 담은 종목에 생긴 일을 관련 큰 순으로 모았어요.</p>'
+                + (f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
+                   '<p class="py-3 text-center text-[12px] text-outline">오늘은 여기까지예요. 사실만 모았어요 — 사고팔라는 뜻이 아니에요.</p>' if items
+                   else f'<p class="py-6 text-center text-[13px] text-on-surface-variant">{empty}</p>') + "</section>")  # fmt: skip
+
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
+        body = self.for_you(uid) + self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
