@@ -149,6 +149,35 @@ def write(con: sqlite3.Connection, ev: dict, today: date, dart: "sources.Dart | 
     return got and got | {"links": {f["id"]: f["url"] for f in fs if f.get("url")}}
 
 
+def pick_marks(j: dict, texts: list[str]) -> list[list[str]]:
+    """AI 가 고른 강조할 말 — 그 문단에 글자 그대로 있는 4~24자, 문단마다 둘까지만 받는다(나머지는 버린다). 본문은 건드리지 않는다."""
+    if len(j["marks"]) != len(texts):
+        raise ValueError("문단 수가 다름")
+    out = [[m for m in dict.fromkeys(ms) if 4 <= len(m) <= 24 and m in t][:2] for ms, t in zip(j["marks"], texts)]
+    if not any(out):
+        raise ValueError("고른 말이 없음")
+    return out
+
+
+def emphasize(con: sqlite3.Connection, limit: int = 20) -> int:
+    """읽기 팁처럼 핵심 말을 진하게 (사용자 10/10) — 강조가 아직 없는 기사에 문단마다 `marks` 를 붙인다. 새 기사도, 예전 기사도 여기서."""
+    schema = {"type": "object", "additionalProperties": False, "required": ["marks"],
+              "properties": {"marks": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}}}  # fmt: skip
+    n = 0
+    for aid, body in con.execute("select id, body from articles where body not like '%\"marks\"%' order by id desc limit ?", (limit,)).fetchall():
+        b = json.loads(body)
+        texts = [p["text"] for p in b["paragraphs"]]
+        got = llm.ask("reader", "emphasis", {"paragraphs": texts}, lambda j: pick_marks(j, texts), schema, prompt_file="emphasis")
+        if not got:
+            continue
+        for p, ms in zip(b["paragraphs"], got):
+            p["marks"] = ms
+        con.execute("update articles set body = ? where id = ?", (json.dumps(b, ensure_ascii=False), aid))
+        con.commit()
+        n += 1
+    return n
+
+
 def main(today: date, limit: int = MAX_PER_RUN) -> None:
     con = db.connect()
     made, dart = 0, sources.Dart()
@@ -159,7 +188,7 @@ def main(today: date, limit: int = MAX_PER_RUN) -> None:
                         (ev["ref"], ev["ticker"], ev["date"], ev["kind"], json.dumps(a, ensure_ascii=False), datetime.now().isoformat()))  # fmt: skip
             con.commit()
             made += 1
-    print(f"기사 {made}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
+    print(f"기사 {made}편 · 강조 {emphasize(con)}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 if __name__ == "__main__":

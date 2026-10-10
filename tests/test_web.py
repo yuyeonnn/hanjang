@@ -969,3 +969,25 @@ def test_month_list_sorts_and_drops_minor():
     old = call(app, "/calendar?m=2026-10&s=old", cookie=a)[2]
     old = old[old.index('id="month-list"'):]
     assert old.index("유상증자") < old.index("단일판매")  # 날짜순
+
+
+def test_article_key_phrases_are_emphasized_without_touching_the_text(monkeypatch):
+    from hanjang import articles, llm
+
+    app, con = _app()
+    paras = [{"text": "계약금액은 935억 원이에요. <b>장기 계약</b>입니다.", "refs": []}, {"text": "위탁생산(CMO) 계약이에요.", "refs": []}]
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r1', '005930', '2026-10-01', 'CONTRACT', ?, 'x')",
+                (json.dumps({"title": "계약", "paragraphs": paras, "links": {}}, ensure_ascii=False),))
+    con.commit()
+    # AI 답: 본문에 없는 말·너무 짧은 말·셋째 것은 버리고, 그대로 있는 말만 받는다
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: a[3]({"marks": [["935억 원", "없는 말이에요", "계약", "계약금액은 935억", "장기 계약"], ["위탁생산(CMO)"]]}))
+    assert articles.emphasize(con) == 1 and articles.emphasize(con) == 0  # 한 번 붙이면 다시 묻지 않는다
+    (body,) = con.execute("select body from articles").fetchone()
+    b = json.loads(body)
+    assert [p["text"] for p in b["paragraphs"]] == [p["text"] for p in paras]  # 글은 한 글자도 안 바뀐다
+    assert [p["marks"] for p in b["paragraphs"]] == [["935억 원", "계약금액은 935억"], ["위탁생산(CMO)"]]
+    ck = _login(app)
+    page_ = call(app, "/a/1", cookie=ck)[2]
+    assert '<strong class="font-semibold text-primary">935억 원</strong>' in page_ and "계약금액은 <strong" in page_  # 겹치면 먼저 고른 것만
+    assert '<strong class="font-semibold text-primary">위탁생산(CMO)</strong>' in page_ and "&lt;b&gt;장기 계약&lt;/b&gt;" in page_  # 나머지는 그대로 탈출
+    assert "**" not in call(app, "/feed", cookie=ck)[2]

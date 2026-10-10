@@ -2418,8 +2418,21 @@ class App:
         b = json.loads(body)
         img = self.article_photo(aid, kind, ind, name)
 
+        def strong(text: str, marks: list[str]) -> str:
+            """강조할 말(articles.emphasize 가 고른, 본문에 그대로 있는 말)만 읽기 팁처럼 진한 초록 굵은 글씨로. 겹치면 먼저 고른 것만."""
+            spans: list[tuple[int, int]] = []
+            for m in marks:
+                i = text.find(m)
+                if i >= 0 and all(i >= b or i + len(m) <= a for a, b in spans):
+                    spans.append((i, i + len(m)))
+            out, k = "", 0
+            for a, b in sorted(spans):
+                out += e(text[k:a]) + f'<strong class="font-semibold text-primary">{e(text[a:b])}</strong>'
+                k = b
+            return out + e(text[k:])
+
         def cite(p):  # 출처 번호 → 원문 바로 열기 (작은 회색 위첨자)
-            return e(p["text"]) + "".join(f'<a class="{CITE}" href="{e(safe_url(b["links"].get(r, "#")))}" target="_blank" rel="noopener">[{e(r)}]</a>' for r in p["refs"])
+            return strong(p["text"], p.get("marks", [])) + "".join(f'<a class="{CITE}" href="{e(safe_url(b["links"].get(r, "#")))}" target="_blank" rel="noopener">[{e(r)}]</a>' for r in p["refs"])
 
         paras = "".join(f'<p class="text-[15px] leading-[27px] text-on-surface mb-4">{cite(p)}</p>' for p in b["paragraphs"])
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
