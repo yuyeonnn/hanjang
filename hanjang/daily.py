@@ -5,6 +5,7 @@
 
 import json
 import sqlite3
+import subprocess
 import sys
 import traceback
 from datetime import date, timedelta
@@ -59,6 +60,13 @@ def today_state(today: date) -> dict:
         return {}
 
 
+def apart(code: str) -> None:
+    """메모리를 많이 쓰는 단계는 따로 띄운 파이썬에서 — 끝나면 그 메모리가 운영체제로 돌아간다.
+    한 프로세스에서 다 돌리면 앞 단계가 쓴 메모리가 잘 돌아오지 않고 쌓여, 1GB 서버에서 350MB 까지 올랐다(미국 받기 혼자 185MB · 메모리 점검 10/11).
+    출력은 그대로 서버 기록에 찍히고, 실패하면 예외(CalledProcessError)로 올라와 step 이 알린다. AI 를 쓰는 단계는 여기 넣지 않는다(비용 합계·상한이 이 프로세스에 있다)."""
+    subprocess.run([sys.executable, "-X", "utf8", "-c", "import sys; sys.stdout.reconfigure(encoding='utf-8'); " + code], check=True)
+
+
 def main(today: date) -> None:
     """하루 세 번 불린다(07·13·19시). 아침에 끝까지 돌았으면 오후엔 바로 끝난다. DART 가 쉬는 날(점검)엔 DART 가 필요한 일만 건너뛰고
     나머지는 어제까지의 자료로 끝까지 돈다 — 오후에 DART 가 돌아오면 그때 마저 한다(월요일 안내 메일도 그때).
@@ -95,8 +103,9 @@ def main(today: date) -> None:
         print(f"서버 밖 백업 {backup.offsite(saved)}")
     except Exception as err:  # 서버 밖에 못 올려도 오늘 노트는 쓴다 — 운영자에게만 알린다
         alert(err, "서버 밖 백업 실패")
-    got = step("국내 받기", collect.main, today, dart_up)
-    step("미국 받기", us.main, today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
+    day = f"date.fromisoformat('{today.isoformat()}')"
+    got = step("국내 받기", apart, f"from datetime import date; from hanjang import collect; collect.main({day}, {dart_up})")
+    step("미국 받기", apart, f"from datetime import date; from hanjang import us; us.main({day})")  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     step("미국 읽기", us.read, today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
     wrote = step("노트", notes.main, [], today, only_changed=not monday, read=dart_up, carry=monday, batch=True)  # 월요일 — 사실이 그대로인 노트는 옮겨 적는다
     if dart_up:
@@ -106,6 +115,7 @@ def main(today: date) -> None:
     if dart_up:
         step("큰손", holders.main, today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
     step("유명 투자자", gurus.main, today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
+    step("정리", lambda: print(f"정리 — 지운 줄 {db.tidy(db.connect(), today)}"))  # 반년 지난 열어본 기록 · 두 달 지난 소식
     step("국민연금", nps.main, today)  # 국민연금 한국+미국 — 1년에 한 번 새 공시(공공데이터포털), 같은 날 13F
     if sources.env().get("DEMO") == "1":  # 둘러보기 예시 사람들 — 활동 시각을 다시 「최근」으로
         step("예시 사람", lambda: print(f"예시 사람 {personas.seed(db.connect())}명"))

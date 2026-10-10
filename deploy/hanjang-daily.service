@@ -7,4 +7,9 @@ Type=oneshot
 User=hanjang
 WorkingDirectory=/srv/hanjang
 Environment=TZ=Asia/Seoul PYTHONUNBUFFERED=1
-ExecStart=/home/hanjang/.local/bin/uv run --frozen python -m hanjang.daily
+ExecStart=/srv/hanjang/.venv/bin/python -m hanjang.daily
+# 메모리(1GB 서버 · 메모리 점검 10/11): 가장 큰 단계(미국 받기)가 185MB. 400MB 를 넘으면 운영체제가 눌러 주고(스왑), 600MB 면 멈춘다 —
+# 화면 서버 대신 이쪽이 죽는다(실패하면 운영자 메일 · 13시·19시에 다시 돈다)
+MemoryHigh=400M
+MemoryMax=600M
+OOMScoreAdjust=500

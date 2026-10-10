@@ -1,0 +1,205 @@
+"""내 나무 — 들어온 날이 쌓일수록 자라는 나무 + 이번 달 잔디 (프로필, 사용자 10/11).
+
+씨앗 → 새싹 → 어린 나무 → 자라는 나무 → 잎이 풍성한 나무 → 꽃이 핀 나무. 안 들어와도 시들지 않는다(벌 없음).
+자라는 기준은 「들어온 날」뿐 — 주가·수익과 잇지 않는다. 그림은 코드가 그린 SVG(같은 날수면 늘 같은 나무).
+
+    uv run python -m hanjang.tree   # 시안 보기 → data/tree-sample.html (자라는 단계)
+"""
+
+import math
+import random
+from datetime import date, timedelta
+from html import escape as e
+
+STAGES = ((0, "씨앗"), (1, "새싹"), (4, "어린 나무"), (15, "자라는 나무"), (40, "잎이 풍성한 나무"), (90, "꽃이 핀 나무"), (120, "열매가 열리는 나무"), (160, "새가 찾아온 나무"))
+LEVEL = ("#eae7ea", "#bceddc", "#86c5a4", "#3f7d5c", "#154539")  # 잔디 — 안 온 날 → 많이 본 날
+
+
+def stage(n: int) -> tuple[str, int | None]:
+    """(지금 단계 이름, 다음 단계까지 남은 날 — 마지막 단계면 None)."""
+    name = [s for k, s in STAGES if n >= k][-1]
+    nxt = next((k - n for k, _ in STAGES if k > n), None)
+    return name, nxt
+
+
+GREENS = ("#2f5d50", "#3f7d5c", "#5c9a72", "#86b98f", "#a9d1ae")
+
+
+def _spots() -> tuple[list, list]:
+    """잎 360장·꽃 14송이의 정해진 자리 — 사용자가 고른 시안(10/11 데모)과 똑같은 난수로. 날이 쌓이면 앞에서부터 차례로 달린다."""
+    seed = 7
+
+    def rnd() -> float:
+        nonlocal seed
+        seed = (seed * 1664525 + 1013904223) % 4294967296
+        return seed / 4294967296
+
+    leaves = []
+    for _ in range(360):
+        a, r = rnd() * math.tau, math.sqrt(rnd())
+        leaves.append((math.cos(a) * r, math.sin(a) * r, GREENS[int(rnd() * len(GREENS))], int(rnd() * 180), 0.8 + rnd() * 0.6))
+    flowers = []
+    for _ in range(14):
+        a, r = rnd() * math.tau, math.sqrt(rnd()) * 0.9
+        flowers.append((math.cos(a) * r, math.sin(a) * r))
+    return leaves, flowers
+
+
+LEAVES, FLOWERS = _spots()
+
+
+def _fruit_spots() -> list[tuple[float, float]]:
+    """다 자란 수관(120일) 안에서 서로 떨어진 열매 자리 14곳."""
+    rng, out = random.Random(5), []
+    while len(out) < 14:
+        a, d = rng.uniform(0, math.tau), math.sqrt(rng.random()) * 0.82
+        x, y = 160 + math.cos(a) * 118 * d, 78.6 + math.sin(a) * 92 * d + 8
+        if all((x - px) ** 2 + (y - py) ** 2 > 28**2 for px, py in out):
+            out.append((x, y))
+    return out
+
+
+FRUITS = _fruit_spots()
+
+
+def _fruit(x: float, y: float) -> str:
+    return (f'<path d="M{x:.1f} {y - 5:.1f} q1 -4 3 -5" stroke="#6b4a2f" stroke-width="1.2" fill="none" stroke-linecap="round"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.2" fill="#d9534a"/><circle cx="{x - 1.8:.1f}" cy="{y - 1.8:.1f}" r="1.6" fill="#f3a79b"/>')  # fmt: skip
+
+
+def _bird(x: float, y: float, flip: int = 1, body: str = "#5b8fb9", wing: str = "#3f6f96", belly: str = "#f3e3c3") -> str:
+    """작은 새 한 마리 — 왼쪽을 본다(flip=-1 이면 오른쪽). 휴대폰에서도 보이게 1.7배 (사용자 10/11)."""
+    return (f'<g transform="translate({x:.1f} {y:.1f}) scale({1.7 * flip} 1.7)"><path d="M6 -1 l9 -4 l-1 5 z" fill="{body}"/>'
+            f'<ellipse cx="0" cy="0" rx="8" ry="6" fill="{body}"/><ellipse cx="-1.5" cy="2" rx="5.5" ry="3.6" fill="{belly}"/>'
+            f'<circle cx="-6.5" cy="-5" r="4.3" fill="{body}"/><path d="M-10.5 -5.5 l-4.5 1.3 l4.5 1.6 z" fill="#e0a23a"/>'
+            f'<circle cx="-7.6" cy="-5.8" r="0.9" fill="#1b1b1d"/><path d="M1 -1 q4 -3 7 1 q-4 2 -7 -1 z" fill="{wing}"/>'
+            '<path d="M-1 5.5 v4 M2 5.5 v4" stroke="#8a6a48" stroke-width="1"/></g>')  # fmt: skip
+
+
+def svg(n: int) -> str:
+    """들어온 날 n → 나무 그림 한 장(같은 n 이면 늘 같은 그림). 하루에 잎 세 장, 120일이면 360장. 90일부터 꽃, 120일 뒤엔 열매와 새."""
+    name, _ = stage(n)
+    gx, gy = 160, 270
+    out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#b99a6b" opacity="0.35"/>']
+    # 발밑 — 잔디가 나무 둘레에서부터 번져 한 달쯤이면 땅을 다 덮는다. 그 위에 작은 꽃(보름쯤부터) (사용자 10/11: 잔디로 뒤덮이게)
+    cover = min(1.0, (n + 3) / 30) if n else 0
+    if cover:
+        rx = 40 + 80 * cover
+        out.append(f'<ellipse cx="{gx}" cy="{gy + 6}" rx="{rx:.0f}" ry="{6 + 4 * cover:.1f}" fill="#7fae7a"/>')
+        rng, blades = random.Random(3), []
+        for _ in range(int(170 * cover)):
+            ux = rng.uniform(-1, 1)
+            x, y = gx + ux * rx, gy + 6 + (6 + 4 * cover) * math.sqrt(1 - ux * ux) * rng.uniform(-0.9, 1)
+            lean, tall = rng.uniform(-3, 3), rng.uniform(5, 10)
+            blades.append((y, f'<path d="M{x:.1f} {y:.1f} q{lean / 2:.1f} -{tall / 2:.1f} {lean:.1f} -{tall:.1f}" stroke="{rng.choice(("#3f7d5c", "#5c9a72", "#86b98f", "#4f8f63"))}"/>'))
+        out.append('<g fill="none" stroke-width="1.5" stroke-linecap="round">' + "".join(b for _, b in sorted(blades)) + "</g>")
+    if n == 0:  # 흙 둔덕은 씨앗일 때만 — 싹이 난 뒤엔 잔디 위에 바로 선다 (사용자 10/11: 갈색 동그라미가 어색하다)
+        out.append(f'<ellipse cx="{gx}" cy="{gy + 2}" rx="34" ry="7" fill="#8a6a48"/>')
+    for i, x in enumerate((92, 232, 60, 262, 120, 204)[: min(6, n // 15)]):
+        y, c = 262 + (i % 2) * 2, ("#f4c6cf", "#f6dc8a", "#ffffff")[i % 3]
+        out.append(f'<path d="M{x} {y + 12} q-1 -6 0 -11" stroke="{GREENS[2]}" stroke-width="1.4" fill="none" stroke-linecap="round"/>'
+                   + "".join(f'<circle cx="{x + math.cos(p * math.tau / 5) * 2.8:.1f}" cy="{y + math.sin(p * math.tau / 5) * 2.8:.1f}" r="2.3" fill="{c}" stroke="#e3d6c2" stroke-width="0.3"/>' for p in range(5))
+                   + f'<circle cx="{x}" cy="{y}" r="1.6" fill="#e0a23a"/>')  # fmt: skip
+    if n == 0:
+        out.append(f'<ellipse cx="{gx}" cy="{gy - 3}" rx="6" ry="4" fill="#6b4a2f"/>')
+    else:
+        h, tw = min(150, 14 + n * 1.5), min(16, 2 + n * 0.14)
+        ty = gy - h
+        out.append(f'<path d="M{gx - tw / 2:.1f} {gy} Q{gx - tw / 3:.1f} {gy - h / 2:.1f} {gx - 1} {ty:.1f} L{gx + 1} {ty:.1f} Q{gx + tw / 3:.1f} {gy - h / 2:.1f} {gx + tw / 2:.1f} {gy} Z" fill="#7a5a3c"/>')
+        rx, ry = min(118, 8 + n * 1.1), min(92, 7 + n * 0.85)
+        cy = ty - ry * 0.45
+        if n >= 12:  # 가지 — 열흘쯤마다 하나씩
+            for i, (bx, by) in enumerate(((-0.55, 0.15), (0.55, 0.05), (-0.3, -0.4), (0.32, -0.45))):
+                if n >= 12 + i * 10:
+                    out.append(f'<path d="M{gx} {ty + h * 0.28:.1f} Q{gx + bx * rx * 0.5:.1f} {cy + by * ry + 18:.1f} {gx + bx * rx:.1f} {cy + by * ry:.1f}" '
+                               f'fill="none" stroke="#7a5a3c" stroke-width="{max(1.5, tw * 0.3):.1f}" stroke-linecap="round"/>')  # fmt: skip
+        ls = min(9, 4 + n * 0.06)
+        for ux, uy, c, rot, s in LEAVES[: min(360, n * 3)]:
+            x, y = gx + ux * rx, cy + uy * ry
+            out.append(f'<ellipse cx="{x:.1f}" cy="{y:.1f}" rx="{ls * s:.1f}" ry="{ls * s * 0.55:.1f}" fill="{c}" transform="rotate({rot} {x:.1f} {y:.1f})"/>')
+        if n >= 90:  # 꽃 — 분홍 꽃잎 다섯 장에 노란 가운데
+            for ux, uy in FLOWERS[: min(len(FLOWERS), int((n - 90) / 1.5) + 2)]:
+                x, y = gx + ux * rx, cy + uy * ry
+                out.append("".join(f'<circle cx="{x + math.cos(p * math.tau / 5) * 3.2:.1f}" cy="{y + math.sin(p * math.tau / 5) * 3.2:.1f}" r="2.6" fill="#f4c6cf"/>' for p in range(5))
+                           + f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.8" fill="#e0a23a"/>')  # fmt: skip
+    if n > 120:  # 다 자란 뒤 — 나무는 그대로, 열매가 열흘에 하나씩(14개까지) 열리고 새가 찾아온다(160·260·380일) (사용자 10/11)
+        out.append("".join(_fruit(x, y) for x, y in FRUITS[: min(14, (n - 120) // 10 + 1)]))
+        if n >= 160:
+            out.append(_bird(gx + 30, 78.6 - 92 * 0.8))
+        if n >= 260:
+            out.append(_bird(gx - 74, 78.6 - 92 * 0.56, -1, "#e2a03f", "#c17f24", "#fbe9c8"))
+        if n >= 380:
+            out.append(_bird(62, 266, 1, "#c96a5a", "#a24d40", "#f6dccf"))
+    return f'<svg viewBox="0 -18 320 310" width="100%" role="img" aria-label="내 나무 — {e(name)}" xmlns="http://www.w3.org/2000/svg">{"".join(out)}</svg>'
+
+
+WEEKS = 13  # 잔디 — 최근 석 달쯤. 한 달은 초순에 두 줄뿐이라 허전하고, 여섯 달(26주)은 휴대폰 너비를 넘는다 (10/11)
+
+
+def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
+    """최근 13주 잔디(깃허브 모양) — 요일이 왼쪽에 세로로(일~토), 한 주가 세로 한 줄, 위에 달 이름. 이번 주는 오늘까지만 그린다.
+    그날 본 화면 수에 따라 네 단계 초록. (그림, 그 기간에 들어온 날 수)"""
+    start = today - timedelta(days=(today.weekday() + 1) % 7 + 7 * (WEEKS - 1))  # 13주 전 일요일
+    cells = '<span></span>' + "".join(f'<span style="font-size:11px;line-height:18px;color:#68706c;padding-right:4px">{d if d in "월수금" else ""}</span>' for d in "일월화수목금토")
+    came, d = 0, start
+    while d <= today:
+        if d.weekday() == 6:  # 줄 맨 위 — 이 주에 1일이 들어 있으면 달 이름
+            week = [d + timedelta(days=i) for i in range(7)]
+            first = next((x for x in week if x.day == 1), None)
+            cells += f'<span style="font-size:11px;line-height:14px;color:#68706c;white-space:nowrap;width:18px;overflow:visible">{f"{first.month}월" if first else ""}</span>'
+        c = counts.get(d.isoformat(), 0)
+        came += c > 0
+        lv = 0 if c == 0 else 1 if c <= 2 else 2 if c <= 5 else 3 if c <= 10 else 4
+        look = f"background:{LEVEL[lv]}" + (";outline:2px solid #154539;outline-offset:1px" if d == today else "")
+        cells += f'<span title="{d.month}월 {d.day}일" style="width:18px;height:18px;border-radius:4px;{look}"></span>'
+        d += timedelta(days=1)
+    legend = "".join(f'<span style="width:11px;height:11px;border-radius:3px;background:{c};display:inline-block"></span>' for c in LEVEL)
+    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%;margin:0 auto">{cells}</div>'
+            f'<p style="margin:8px 0 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
+
+
+def line(mood: str = "calm") -> str:
+    """가는 선으로만 그린 나무 한 그루 — 가지가 갈라지고 끝마다 잎 윤곽. 안내·오류·기다림 화면에 (사용자 10/11: 캐릭터·표정 없이, 감성적인 나무).
+    mood: "oops"(잎 몇 장이 떨어진다 — 오류) · "wait"(가지가 살랑 — 기다림) · "calm"(가만히 — 그 밖의 안내)."""
+    rng = random.Random(21)
+    leaf = "M0 0C3.6 -2.6 3.8 -8.6 0 -12.5C-3.8 -8.6 -3.6 -2.6 0 0M0 -1.5V-9.5"
+    twigs, leaves = [], []
+
+    def put(x, y, ang):
+        leaves.append(f'<path transform="translate({x:.1f} {y:.1f}) rotate({math.degrees(ang) + 90 + rng.uniform(-28, 28):.0f}) scale({rng.uniform(0.8, 1.15):.2f})" d="{leaf}"/>')
+
+    def grow(x, y, ang, length, d):
+        bend = rng.uniform(-0.16, 0.16)
+        x2, y2 = x + math.cos(ang) * length, y + math.sin(ang) * length
+        mx, my = (x + x2) / 2 + math.cos(ang + 1.57) * length * bend, (y + y2) / 2 + math.sin(ang + 1.57) * length * bend
+        twigs.append(f"M{x:.1f} {y:.1f}Q{mx:.1f} {my:.1f} {x2:.1f} {y2:.1f}")
+        if d <= 2:  # 잔가지 — 가운데쯤에 잎 하나
+            put(mx, my, ang + (0.9 if rng.random() < 0.5 else -0.9))
+        if d == 0:
+            put(x2, y2, ang)
+            put(x2, y2, ang - 0.8)
+            put(x2, y2, ang + 0.8)
+            return
+        spread = 0.46 + rng.uniform(-0.05, 0.1)
+        grow(x2, y2, ang - spread, length * 0.74, d - 1)
+        grow(x2, y2, ang + spread * rng.uniform(0.85, 1.1), length * 0.72, d - 1)
+
+    grow(120, 152, -1.57, 40, 4)
+    sway = ('<animateTransform attributeName="transform" type="rotate" values="-1.6 120 152;1.6 120 152;-1.6 120 152" dur="3s" repeatCount="indefinite"/>' if mood == "wait" else "")
+    fallen = ("".join(f'<path transform="translate({x} {y}) rotate({r})" d="{leaf}"/>' for x, y, r in ((186, 104, 70), (200, 132, 130), (172, 150, 95))) if mood == "oops" else "")
+    return ('<svg viewBox="0 0 240 170" width="210" role="img" aria-label="나무" xmlns="http://www.w3.org/2000/svg">'
+            '<g fill="none" stroke="#7d8f88" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M52 152H188M70 152q-2 -7 -5 -9M72 152q1 -7 3 -10M166 152q2 -6 5 -8M163 152q-1 -7 -3 -9"/>'  # 땅과 풀 몇 가닥
+            f'<g>{sway}<path d="{"".join(twigs)}"/><g stroke-width="1.1">{"".join(leaves)}</g></g><g stroke-width="1.1">{fallen}</g></g></svg>')  # fmt: skip
+
+
+if __name__ == "__main__":
+    from pathlib import Path
+
+    rows = ('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'
+            + "".join(f'<figure style="margin:0;background:#fff;border-radius:14px;padding:6px">{svg(n)}<figcaption style="font:12px sans-serif;text-align:center;color:#404945">{n}일 · {stage(n)[0]}</figcaption></figure>'
+                      for n in (0, 2, 6, 12, 25, 45, 70, 110)) + "</div>")  # fmt: skip
+    out = Path(__file__).parent.parent / "data" / "tree-sample.html"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(f'<!doctype html><meta charset="utf-8"><body style="background:#fcf8fb;margin:16px">{rows}</body>', encoding="utf-8")
+    print(out)

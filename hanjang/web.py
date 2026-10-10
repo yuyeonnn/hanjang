@@ -11,17 +11,19 @@ import html
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import sys
 import threading
+import traceback
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources, tree
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -37,7 +39,15 @@ MAX_STOCKS = 20  # PRD F2
 COHORT = re.compile(r"[a-z0-9-]{1,20}")  # 시험 묶음 이름 — 초대 링크 /?c=trial-1 (python -m hanjang.trial 이 센다)
 NICK = re.compile(r"[가-힣A-Za-z0-9_]{2,20}")  # 남에게 보이는 이름 — 이메일은 절대 보이지 않는다
 BIO_MAX = 150
+CODE_TRIES = 5  # 로그인 코드를 틀릴 수 있는 횟수 — 넘으면 그 코드는 버린다
+REPORT_WHY = ("욕설·혐오·성적인 표현", "사칭·남의 사진", "종목 추천·리딩방·광고", "기타")
+# 닉네임·자기소개에 쓸 수 없는 말 (이용 규칙 /rules) — 욕설 · 리딩방·광고 유도 · 연락처와 바깥 링크. 다 막지는 못한다: 빠져나간 것은 신고 → 운영자가 지운다
+BAD = re.compile(r"씨발|시발|ㅅㅂ|ㅆㅂ|병신|ㅂㅅ|좆|존나|개새|새끼|fuck|shit|bitch|섹스|야동"
+                 r"|리딩|수익 ?보장|원금 ?보장|무료 ?추천|종목 ?추천|단톡|오픈 ?채팅|open\.kakao|카톡|텔레그램|t\.me|https?://|www\.|\d{2,3}[- .]\d{3,4}[- .]\d{4}", re.I)
 BODY_MAX = 6_000_000  # 요청 본문 상한 — 캡처 사진(브라우저에서 줄여 보낸다)도 이 안에
+FORM_MAX = 64_000  # 사진이 아닌 요청(폼) 본문 상한. 큰 본문은 로그인한 사람의 사진 두 곳(BIG_POSTS)만 받는다
+BIG_POSTS = ("/scan", "/me/photo")
+BIG_AT_ONCE = 3  # 큰 본문을 동시에 받는 수 — 한 건이 메모리에서 본문의 서너 배(6MB → 20MB 남짓)를 쓴다. 1GB 서버를 채우지 못하게 (메모리 점검 10/11)
 PHOTO_MAX = 300_000  # 프로필 사진 — 브라우저가 256px JPEG 로 줄여 보낸다. 이보다 크면 받지 않는다
 SCAN_HOURLY = 10
 DEMO_EMAIL = "demo@hanjang.local"  # 둘러보기 계정 — .env DEMO=1 일 때만. 보기만 된다
@@ -63,6 +73,30 @@ def sign(value: str, secret: str) -> str:
 def unsign(token: str, secret: str) -> str | None:
     value, _, _ = token.rpartition(".")
     return value if value and hmac.compare_digest(sign(value, secret), token) else None
+
+
+SESSION_TTL = 90 * 86400  # 로그인 쿠키는 발급 뒤 90일 — 서버가 센다(브라우저의 Max-Age 는 정직한 브라우저만 지킨다)
+# 날짜 없는 옛 쿠키(「사용자 번호」만 서명)는 이날까지만 받고, 그 사이 들어오면 날짜가 든 새 쿠키로 바꿔 준다 — 아무도 갑자기 로그아웃되지 않게.
+# 이날이 지나면 옛 쿠키는 통하지 않는다(새 나간 쿠키가 영영 쓰이던 구멍, 보안 점검 10/11). ponytail: 2026-11-15 뒤엔 이 줄과 legacy 갈래를 지운다
+LEGACY_UNTIL = datetime(2026, 11, 15).timestamp()
+
+
+def session_cookie(uid: int, secret: str, now: float, age: int = SESSION_TTL) -> str:
+    ck = f"s={sign(f'{uid}|{int(now)}', secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age={age}"
+    return ck + ("; Secure" if mail.base_url().startswith("https://") else "")
+
+
+def read_session(token: str, secret: str, now: float) -> tuple[int | None, bool]:
+    """쿠키 → (사용자 번호, 옛 쿠키라 새로 구워 줘야 하나). 서명이 틀리거나 90일이 지났으면 (None, False)."""
+    v = unsign(token, secret)
+    if not v:
+        return None, False
+    uid, _, at = v.partition("|")
+    if not uid.isdigit():
+        return None, False
+    if at:
+        return (int(uid), False) if at.isdigit() and now - int(at) <= SESSION_TTL else (None, False)
+    return (int(uid), True) if now < LEGACY_UNTIL else (None, False)
 
 
 def login_token(email: str, secret: str, now: float) -> str:
@@ -165,11 +199,33 @@ OFFLINE = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta nam
            '<title>연결이 끊겼어요 · 한장</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
            'background:#fcf8fb;color:#1b1b1d;font-family:system-ui,sans-serif;word-break:keep-all;text-align:center}main{padding:24px;max-width:360px}'
            'h1{font-size:20px;color:#154539}p{color:#404945;line-height:1.7}button{margin-top:12px;padding:12px 20px;border:0;border-radius:8px;background:#154539;color:#fff;font-size:15px}</style></head>'
-           '<body><main><h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
+           '<body><main>' + tree.line("oops") + '<h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
            '<button onclick="location.reload()">다시 열기</button></main></body></html>')  # fmt: skip
 PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#154539">'
             '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png"><link rel="icon" href="/static/icon-192.png" type="image/png">'
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
+
+
+# 「홈 화면에 추가」 안내 — 내 종목 화면, 휴대폰에서만. 아이폰은 앱 없이 이것만 둔다(docs/launch.md: 웹을 감싼 앱은 심사에서 잘 떨어진다).
+# 아이폰·아이패드 사파리: 설치 단추를 띄울 길이 없어 「공유 → 홈 화면에 추가」를 글로 알린다. 안드로이드 크롬: 브라우저가 설치할 수 있다고 알려 오면(beforeinstallprompt) 단추를 보인다.
+# 이미 홈 화면 앱으로 열었거나 한 번 닫은 사람에겐 다시 안 보인다(이 브라우저에만 기억 — 서버에 남기지 않는다).
+INSTALL_HINT = (
+    '<div class="hidden lg:hidden fixed bottom-16 left-0 right-0 z-40 px-margin pb-safe" id="a2hs"><div class="max-w-[480px] mx-auto flex items-start gap-3 rounded-xl bg-surface-container-lowest border border-outline-variant/50 shadow-sm px-space-md py-3">'
+    '<span class="material-symbols-outlined text-primary text-[20px] mt-0.5">install_mobile</span>'
+    '<div class="flex-1 min-w-0"><b class="font-label-regular text-label-regular text-on-surface font-semibold">홈 화면에 추가하면 앱처럼 열려요</b>'
+    '<p class="font-label-micro text-label-micro text-on-surface-variant leading-normal mt-0.5" id="a2hs-how"></p>'
+    '<button class="hidden mt-2 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold" id="a2hs-go" type="button">설치</button></div>'
+    '<button aria-label="안내 닫기" class="shrink-0 text-outline hover:text-on-surface" id="a2hs-x" type="button"><span class="material-symbols-outlined text-[18px]">close</span></button></div></div>'
+    "<script>(()=>{const box=document.getElementById('a2hs'),how=document.getElementById('a2hs-how'),go=document.getElementById('a2hs-go');"
+    "let seen=false;try{seen=localStorage.getItem('a2hs')==='x'}catch(e){}"
+    "if(seen||matchMedia('(display-mode: standalone)').matches||navigator.standalone)return;"
+    "const show=()=>box.classList.remove('hidden');"
+    "document.getElementById('a2hs-x').onclick=()=>{box.classList.add('hidden');try{localStorage.setItem('a2hs','x')}catch(e){}};"
+    "const ua=navigator.userAgent,ios=/iphone|ipad|ipod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);"
+    "if(ios){how.textContent=/crios|fxios|edgios|kakaotalk|naver|instagram|fban|fbav/i.test(ua)?'사파리로 연 다음, 아래 공유 단추(네모에서 화살표가 나오는 모양) → 「홈 화면에 추가」를 눌러 주세요.':'아래 공유 단추(네모에서 화살표가 나오는 모양) → 「홈 화면에 추가」를 눌러 주세요.';show();return;}"
+    "addEventListener('beforeinstallprompt',ev=>{ev.preventDefault();how.textContent='주소창 없이 바로 열리고, 홈 화면에 아이콘이 생겨요.';go.classList.remove('hidden');"
+    "go.onclick=async()=>{ev.prompt();await ev.userChoice;box.classList.add('hidden');};show();});"
+    "addEventListener('appinstalled',()=>box.classList.add('hidden'));})();</script>")
 
 
 def page(title: str, body_attr: str, inner: str) -> str:
@@ -1247,7 +1303,20 @@ class App:
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
+        self.codes: dict[str, list] = {}  # 이메일 → [코드, 만료 시각, 틀린 횟수]
+        self.uploads = threading.Semaphore(BIG_AT_ONCE)
+        self.memo: dict = {}  # cached() — 매일 실행 뒤에만 바뀌는 큰 조각(종목 목록 186KB · 국민연금·유명 투자자 페이지)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
+
+    def cached(self, name: str, build):
+        """매일 실행(다른 연결)이 쓰기 전까지는 한 번 만든 것을 돌려준다 — `pragma data_version` 은 다른 연결이 커밋할 때마다 바뀐다.
+        이 연결이 직접 쓰는 표(열어본 기록·좋아요·팔로우…)는 여기 넣는 조각과 상관없다. 버전이 바뀌면 통째로 비운다 (DB 점검 10/11)."""
+        v = self.con.execute("pragma data_version").fetchone()[0]
+        if self.memo.get("v") != v:
+            self.memo = {"v": v}
+        if name not in self.memo:
+            self.memo[name] = build()
+        return self.memo[name]
 
     @contextmanager
     def outside(self):
@@ -1264,27 +1333,54 @@ class App:
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
+        cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
+        uid, renew = read_session(cookie.get("s", ""), self.secret, self.clock())
+        n = int(environ.get("CONTENT_LENGTH") or 0) if method == "POST" else 0
+        # 본문을 읽기 전에 거른다 — 전에는 로그인하지 않은 누구든 어느 주소로든 6MB 를 보낼 수 있었고, 여럿이 한꺼번에 보내면 메모리가 찼다
+        if n > (BODY_MAX if uid and path in BIG_POSTS else FORM_MAX):
+            start_response("413 Payload Too Large", [("Content-Type", "text/plain; charset=utf-8")])
+            return ["사진이 너무 커요".encode()]
+        big = n > FORM_MAX
+        if big and not self.uploads.acquire(blocking=False):
+            start_response("503 Service Unavailable", [("Content-Type", "application/json; charset=utf-8"), ("Retry-After", "5")])
+            return [json.dumps({"msg": "지금 사진을 읽는 사람이 많아요. 잠시 뒤에 다시 해 주세요."}, ensure_ascii=False).encode()]
+        try:
+            return self.respond(environ, start_response, method, path, n, cookie, uid, renew)
+        except Exception:  # 무엇이 잘못됐든 사용자는 「다시 불러오기」를 본다. 까닭은 서버 기록에 (journalctl -u hanjang-web)
+            traceback.print_exc()
+            try:
+                self.con.rollback()
+            except sqlite3.Error:
+                pass
+            body = page("문제가 생겼어요", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
+                        '<main class="w-full max-w-[480px] mx-auto px-margin pt-14 flex flex-col items-center text-center">'
+                        f'<div class="mt-12">{tree.line("oops")}</div><p class="mt-space-md font-body-reading text-body-reading">앗, 뭔가 문제가 있는 것 같아요!</p>'
+                        '<button class="mt-space-lg px-5 py-3 rounded-lg bg-primary text-on-primary font-body-reading-strong text-body-compact" onclick="location.reload()" type="button">다시 불러오기</button></main>')  # fmt: skip
+            start_response("500 Internal Server Error", [("Content-Type", "text/html; charset=utf-8")])
+            return [body.encode()]
+        finally:
+            if big:
+                self.uploads.release()
+
+    def respond(self, environ, start_response, method, path, n, cookie, uid, renew):
         form = {}
         if method == "POST":
-            n = int(environ.get("CONTENT_LENGTH") or 0)
-            if n > BODY_MAX:
-                start_response("413 Payload Too Large", [("Content-Type", "text/plain; charset=utf-8")])
-                return ["사진이 너무 커요".encode()]
             raw = environ["wsgi.input"].read(n).decode()
             if environ.get("CONTENT_TYPE", "").startswith("application/json"):
                 form = {"_json": json.loads(raw or "{}")}
             else:
                 form = {k: v[0] for k, v in parse_qs(raw).items()}
+            del raw
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
-        cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
-        uid = unsign(cookie.get("s", ""), self.secret)
         self.local.ip = (environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR") or "").split(",")[-1].strip()  # 앞의 Caddy 가 붙여 준 마지막 값이 실제 접속 주소
         with self.turn:
             self.local.held = True
             try:
-                status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+                status, headers, body = self.route(method, path, form, query, uid)
             finally:
                 self.local.held = False
+        if renew and not any(k == "Set-Cookie" for k, _ in headers):  # 옛 쿠키 → 날짜가 든 새 쿠키로 (로그아웃·탈퇴처럼 쿠키를 지우는 응답은 그대로)
+            headers = [*headers, ("Set-Cookie", session_cookie(uid, self.secret, self.clock()))]
         kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8"), ("Content-Security-Policy", CSP)]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
@@ -1295,8 +1391,11 @@ class App:
 
     def log(self, uid: int, page_: str, ticker: str | None = None) -> None:
         try:
-            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)",
-                             (uid, page_, ticker, datetime.now().isoformat()))  # fmt: skip
+            now = datetime.now().isoformat()
+            self.con.execute("insert into views (user_id, page, ticker, at) values (?, ?, ?, ?)", (uid, page_, ticker, now))
+            # 들어온 날 수 — 하루에 한 번만 더한다. 처음엔 남아 있는 기록의 날 수에서 시작 (내 나무, 10/11)
+            self.con.execute("update users set days = coalesce(days, (select count(distinct substr(at, 1, 10)) from views where user_id = ? and substr(at, 1, 10) < ?)) + 1,"
+                             " last_day = ? where id = ? and coalesce(last_day, '') != ?", (uid, now[:10], now[:10], uid, now[:10]))  # fmt: skip
             self.con.commit()
         except sqlite3.OperationalError:  # DB 가 잠깐 잠겨도 화면은 보여 준다 — 기록 한 줄을 잃는 쪽이 낫다
             self.con.rollback()
@@ -1311,8 +1410,10 @@ class App:
         return me
 
     def simple(self, title: str, msg: str) -> str:
+        art = tree.line("oops" if title == "없음" else "calm")  # 없는 화면엔 걱정스러운 얼굴, 그 밖의 안내엔 웃는 얼굴
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
-                    f'<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto px-margin pt-14"><p class="font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
+                    f'<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto px-margin pt-14 flex flex-col items-center text-center">'
+                    f'<div class="mt-12">{art}</div><p class="mt-space-md font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
 
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
@@ -1341,7 +1442,9 @@ class App:
             return "200 OK", [], OFFLINE
         if path == "/.well-known/assetlinks.json":  # 안드로이드 앱(TWA)이 이 사이트 것임을 증명 — 서명 키 지문을 .env 에 넣으면 열린다
             return self.assetlinks()
-        if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
+        if path == "/login/code" and method == "POST":
+            return self.login_code(form.get("email", "").strip().lower(), form.get("code", ""), form.get("c", ""))
+        if path in ("/privacy", "/method", "/help/login", "/rules"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
             email = check_login(query.get("t", ""), self.secret, self.clock())
@@ -1358,10 +1461,19 @@ class App:
         if path == "/logout":
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)
-        if not self.con.execute("select nickname from users where id = ?", (uid,)).fetchone()[0]:
+        # 이용 규칙 동의도 여기서 — 남에게 보이는 프로필을 만들기 전에 (이미 닉네임이 있는 사람도 한 번 동의를 받는다)
+        me = self.con.execute("select nickname, rules_at, banned from users where id = ?", (uid,)).fetchone()
+        if not me:  # 쿠키는 남았는데 계정이 없다(다른 기기에서 탈퇴) — 오류 화면 대신 쿠키를 지우고 처음으로
+            return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
+        nick, agreed, banned = me
+        if banned:  # 운영자가 막은 계정 — 쿠키를 지우고 알린다
+            contact = env().get("PRIVACY_CONTACT", "")
+            return "403 Forbidden", [("Set-Cookie", "s=; Path=/; Max-Age=0")], self.simple(
+                "이용 제한", "이용 규칙을 어겨 이 계정은 쓸 수 없게 됐어요." + (f" 문의: {e(contact)}" if contact else "") + " <a class='text-primary underline' href='/rules'>이용 규칙</a>")
+        if not nick or not agreed:
             if path == "/welcome" and method == "POST":
-                return self.welcome(uid, form.get("nickname", "").strip())
-            return "200 OK", [], self.welcome_page()
+                return self.welcome(uid, form.get("nickname", "").strip(), form.get("rules") == "1")
+            return "200 OK", [], self.welcome_page(nick or "")
         if path == "/welcome":
             return self.see("/")
         if path == "/add" and method == "POST":
@@ -1401,9 +1513,14 @@ class App:
                 return self.see("/me")
             self.log(uid, "user")
             return self.user_page(uid, int(path[3:]))
+        if path in ("/block", "/report") and method == "POST":
+            other = int(form["u"]) if form.get("u", "").isdigit() else 0
+            if other == uid or not self.con.execute("select 1 from users where id = ?", (other,)).fetchone():
+                return self.see("/feed")
+            return self.block(uid, other) if path == "/block" else self.report_user(uid, other, form.get("why", ""))
         if path == "/follow" and method == "POST":  # 한 번 더 누르면 언팔로우
             other = int(form["u"]) if form.get("u", "").isdigit() else 0
-            if other != uid and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
+            if other != uid and other not in self.blocked(uid) and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
                 if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
                     shut = self.con.execute("select private from users where id = ?", (other,)).fetchone()[0]
                     self.con.execute("insert into follows (follower_id, followee_id, at, ok) values (?, ?, ?, ?)", (uid, other, datetime.now().isoformat(), 0 if shut else 1))
@@ -1453,7 +1570,8 @@ class App:
         if path == "/me/delete" and method == "POST":
             # 탈퇴 — 이 사용자의 모든 행을 지운다 (되돌릴 수 없음, 화면에서 한 번 더 확인)
             for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("likes", "user_id"),
-                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"), ("users", "id")):  # fmt: skip
+                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
+                               ("blocks", "user_id"), ("blocks", "blocked_id"), ("reports", "user_id"), ("reports", "target_id"), ("users", "id")):  # fmt: skip
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
@@ -1482,7 +1600,13 @@ class App:
         box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
             '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
             f'<span class="font-body-reading-strong text-body-compact text-on-surface truncate" id="target-email-preview">{e(sent)}</span></div>'
-            '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크를 보냈어요. 15분 안에 메일함 속 링크를 눌러 주세요.</p><div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
+            '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크와 6자리 코드를 보냈어요. 15분 안에 메일 속 링크를 누르거나, 코드를 아래에 넣어 주세요.</p>'
+            # 코드 넣기 — 앱(웹뷰)이나 홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열려 로그인이 안 이어진다. 코드는 어디서든 된다 (앱 출시 준비 10/11)
+            f'<form method="post" action="/login/code" class="mt-2.5 flex items-center gap-2"><input type="hidden" name="email" value="{e(sent)}">{hidden}'
+            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
+            'class="flex-1 min-w-0 font-body-reading text-body-reading bg-surface-container-lowest text-on-surface placeholder:text-outline rounded-lg px-4 py-2.5 focus:outline-none tracking-widest">'
+            '<button class="shrink-0 px-4 py-2.5 bg-primary text-on-primary font-label-regular text-label-regular font-semibold rounded-lg" type="submit">확인</button></form>'
+            '<div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
             f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
@@ -1541,15 +1665,13 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
         self.con.execute("insert or ignore into users (email, created_at, nickname, mail_on) values (?, ?, '둘러보기', 0)",
                          (DEMO_EMAIL, datetime.now().isoformat()))  # fmt: skip
+        self.con.execute("update users set rules_at = coalesce(rules_at, created_at) where email = ?", (DEMO_EMAIL,))  # 공용 계정 — 닉네임이 정해져 있어 규칙 동의 관문을 지나게
         (u,) = self.con.execute("select id from users where email = ?", (DEMO_EMAIL,)).fetchone()
         for t in DEMO_STOCKS:
             if self.con.execute("select 1 from stocks where ticker = ?", (t,)).fetchone():
                 self.con.execute("insert or ignore into holdings values (?, ?, ?)", (u, t, datetime.now().isoformat()))
         self.con.commit()
-        ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400"
-        if mail.base_url().startswith("https://"):
-            ck += "; Secure"
-        return self.see("/", ("Set-Cookie", ck))
+        return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock(), 86400)))
 
     def start(self, email: str, cohort: str = ""):
         """이 이메일로 로그인 — 계정이 없으면 만든다. 초대 링크 묶음은 처음 한 번만 붙는다."""
@@ -1558,10 +1680,7 @@ class App:
             self.con.execute("update users set cohort = ? where email = ? and cohort is null", (cohort, email))
         self.con.commit()
         (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
-        ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
-        if mail.base_url().startswith("https://"):
-            ck += "; Secure"
-        return self.see("/", ("Set-Cookie", ck))
+        return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock())))
 
     def login(self, email: str, agreed: bool = False, cohort: str = ""):
         if "@" not in email or len(email) > 200:
@@ -1577,11 +1696,32 @@ class App:
         by_ip, by_all = ([t for t in self.sent.get(k, []) if now - t < 3600] for k in (ip, "*"))
         if len(by_ip) >= LOGIN_IP_HOURLY or len(by_all) >= LOGIN_ALL_HOURLY:
             return "429 Too Many Requests", [], self.login_page(error="로그인 요청이 너무 많아요. 한 시간쯤 뒤에 다시 해 주세요.", cohort=cohort)
+        if len(self.sent) > 2000:  # 한 시간 지난 요청 기록·만료된 코드를 비운다 — 주소·IP 마다 한 칸씩 끝없이 늘지 않게
+            self.sent = {k: v for k, v in self.sent.items() if v and now - v[-1] < 3600}
+            self.codes = {k: v for k, v in self.codes.items() if now <= v[1]}
         self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
+        code = f"{secrets.randbelow(10**6):06d}"
+        self.codes[email] = [code, now + LINK_TTL, 0]  # ponytail: 메모리에 — 서버를 다시 켜면 코드는 사라지고 링크만 남는다(링크는 서명이라 그대로 된다)
         with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
-            mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+            mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
+
+    def login_code(self, email: str, code: str, cohort: str = ""):
+        """메일로 받은 6자리 코드로 들어온다. 틀리면 CODE_TRIES 번까지 — 넘으면 그 코드는 버리고 새로 받아야 한다
+        (6자리는 100만 가지라 마구 넣어 볼 수 있다. 코드 하나에 5번, 새 코드는 한 시간에 5통 → 한 시간에 많아야 25번)."""
+        row = self.codes.get(email)
+        if not row or self.clock() > row[1]:
+            self.codes.pop(email, None)
+            return "200 OK", [], self.login_page(error="코드가 만료됐어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
+        if not hmac.compare_digest(row[0], code.strip()):
+            row[2] += 1
+            if row[2] >= CODE_TRIES:
+                del self.codes[email]
+                return "200 OK", [], self.login_page(error="코드를 여러 번 틀렸어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
+            return "200 OK", [], self.login_page(email, error=f"코드가 맞지 않아요. 메일의 숫자 6자리를 다시 봐 주세요. ({CODE_TRIES - row[2]}번 남음)", cohort=cohort)
+        del self.codes[email]  # 한 번만 쓴다
+        return self.start(email, cohort)
 
     def src(self, rno: str | None) -> str:
         """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽."""
@@ -1596,7 +1736,10 @@ class App:
         return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
 
     def stocks_js(self) -> str:
-        """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만)."""
+        """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만). 186KB 를 매번 만들지 않게 cached."""
+        return self.cached("stocks_js", self._stocks_js)
+
+    def _stocks_js(self) -> str:
         rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
                 self.con.execute("select ticker, name, induty_code, market from stocks order by active desc, market, name")]  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
@@ -1719,10 +1862,10 @@ class App:
                  '<form method="post" action="/add" class="h-11 w-full bg-surface-container-low/60 rounded-xl flex items-center px-3 border border-surface-container-high/60 focus-within:border-primary-container focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline text-[20px] mr-2">search</span>'
                  '<input autocomplete="off" class="w-full bg-transparent text-on-surface font-body-compact text-body-compact placeholder:text-outline focus:outline-none" id="stock-search-input" name="q" placeholder="종목 이름 또는 코드로 담기" type="text">'
                  '<button class="shrink-0 ml-1.5 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold shadow-sm active:scale-95 transition-transform" id="btn-quick-add" type="submit">담기</button>'
-                 '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기" title="보유 종목 캡처로 담기">'
+                 '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기 (사진을 AI 에 보내 종목 이름을 읽어요)" title="보유 종목 캡처로 담기 — 사진을 AI(OpenAI)에 보내 종목 이름을 읽어요. 저장하지 않아요">'
                  '<span class="material-symbols-outlined text-[20px]">photo_camera</span><input accept="image/*" class="hidden" id="scan-input" type="file"></label></form>'
                  '<div class="hidden fixed inset-0 z-[60] bg-surface/90 backdrop-blur-sm flex-col items-center justify-center gap-3 px-margin text-center" id="scan-wait" role="status">'
-                 '<span class="material-symbols-outlined text-primary text-[40px] animate-pulse">document_scanner</span>'
+                 + tree.line("wait") +
                  '<p class="font-headline-sm text-headline-sm text-on-surface">분석 중…</p>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant">캡처에서 종목 이름만 읽고 있어요. 사진은 저장하지 않아요.</p></div>'
                  '<div class="hidden absolute left-0 right-0 top-12 mt-1 bg-surface-container-lowest rounded-xl shadow-sm border border-surface-container-high/70 overflow-hidden z-40" id="search-flyout"><div class="p-1.5 flex flex-col gap-0.5" id="search-results"></div></div>'
@@ -1757,13 +1900,15 @@ class App:
                  "document.addEventListener('click',ev=>{if(!inp.contains(ev.target)&&!fly.contains(ev.target))fly.classList.add('hidden');});"
                  # 캡처 → 브라우저에서 1600px 로 줄여 JPEG 로 → /scan. 끝나면 결과 문장과 함께 새로 그린다
                  "const sc=document.getElementById('scan-input'),wait=document.getElementById('scan-wait');"
-                 "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;wait.classList.remove('hidden');wait.classList.add('flex');"
+                 "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;"
+                 "if(!confirm('캡처에서 종목 이름을 읽으려고 이 사진을 AI(OpenAI, 미국)에 보내요.\\n한장은 사진을 저장하지 않고, 읽어 낸 종목 이름만 담아요.\\n계좌번호·금액이 보이면 가리고 올려도 돼요.\\n\\n보낼까요?')){sc.value='';return;}"
+                 "wait.classList.remove('hidden');wait.classList.add('flex');"
                  "try{const bmp=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');"
                  "c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);"
                  "const r=await fetch('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
                  "const j=await r.json();location.href='/?msg='+encodeURIComponent(j.msg);}"
                  "catch(err){location.href='/?msg='+encodeURIComponent('사진을 읽지 못했어요. 다시 해 주세요.');}});</script></main>"
-                 + bottom_nav("cards"))  # fmt: skip
+                 + INSTALL_HINT + bottom_nav("cards"))  # fmt: skip
         return page("내 종목", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     # ---- 설문 (시안에 없는 칸 — 시험 판정에 꼭 필요해 노트 끝에, 시안과 같은 모양으로) ----
@@ -2079,10 +2224,36 @@ class App:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.my_tree(uid)  # 내 나무는 맨 위, 위아래로 넉넉히 띄워서 (사용자 10/11)
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
-                 + self.suggest(uid)  # 추천 프로필은 내 프로필 맨 밑 (사용자 10/10)
+                 + self.suggest(uid)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+
+    def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
+        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무와 날 수만(언제 들어왔는지 보이는 잔디·다음 단계는 본인만). 비공개 계정은 부르는 쪽이 거른다."""
+        today = today or date.today()
+        counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
+        if nick is None:
+            counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
+        n = self.con.execute("select days from users where id = ?", (uid,)).fetchone()[0] or len(counts)  # 누적 — 기록이 지워져도 줄지 않는다
+        name, left = tree.stage(n)
+        if nick is not None:
+            return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+                    f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
+                    f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
+                    f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
+                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p></section>')  # fmt: skip
+        grass, came = tree.grass(counts, today)
+        nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
+        return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+                '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
+                f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
+                f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
+                f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
+                f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
+                f'{grass}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:
         email, created, mail_on, nick, bio, private = self.con.execute(
@@ -2100,7 +2271,7 @@ class App:
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
         lock = (f'<form method="post" action="/me/private" class="py-3.5 flex items-center justify-between gap-3"><span class="flex flex-col">'
                 '<span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><span class="material-symbols-outlined text-primary text-[18px]">lock</span>비공개 계정</span>'
-                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 리그램과 팔로워 목록을 봐요</span></span>'
+                '<span class="font-label-micro text-label-micro text-outline">켜면 내가 수락한 사람만 나무와 리그램, 팔로워 목록을 봐요</span></span>'
                 f'<button aria-label="비공개 계정 {"끄기" if private else "켜기"}" aria-pressed="{"true" if private else "false"}" type="submit" class="flex items-center gap-2 shrink-0">'
                 f'<span class="font-label-micro text-label-micro {"text-primary" if private else "text-outline"} font-semibold">{"ON" if private else "OFF"}</span>'
                 f'<span class="w-11 h-6 rounded-full p-0.5 {"bg-primary" if private else "bg-surface-container-highest"} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {"translate-x-5" if private else "translate-x-0"}"></span></span></button></form>')  # fmt: skip
@@ -2166,7 +2337,7 @@ class App:
                  + go("bookmark", "내 저장 목록", "/me/saved") + go("favorite", "내 좋아요 목록", "/me/liked")
                  + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
                  + row("inventory_2", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
-                 + switch + lock + "</section>"
+                 + switch + lock + go("description", "이용 규칙", "/rules") + "</section>" + self.blocked_list(uid) +
                  '<button class="mt-space-xl w-full py-3 rounded-lg border border-outline-variant/60 text-on-surface-variant font-body-reading-strong text-body-compact hover:bg-surface-container-low transition-colors" '
                  'onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button>'
                  '<form method="post" action="/me/delete" onsubmit="return confirm(\'탈퇴하면 이메일과 담은 종목, 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?\')">'
@@ -2330,7 +2501,7 @@ class App:
         """닉네임 검사 — 문제가 없으면 빈 글. 겹침은 대소문자를 무시하고 본다(DB 유일 색인과 같게)."""
         if not NICK.fullmatch(nick):
             return "닉네임은 한글·영문·숫자·_ 2~20자로 정해 주세요."
-        if notes.FORBIDDEN.search(nick):
+        if notes.FORBIDDEN.search(nick) or BAD.search(nick):
             return "닉네임에 쓸 수 없는 말이 들어 있어요."
         if self.con.execute("select 1 from users where nickname = ? collate nocase and id != ?", (nick, uid)).fetchone():
             return f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요."
@@ -2343,16 +2514,21 @@ class App:
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">다른 사람에게는 이메일 대신 이 이름이 보여요. 한글·영문·숫자 2~20자, 다른 사람과 겹칠 수 없어요.</p>'
                  '<form method="post" action="/welcome" class="mt-space-lg flex flex-col gap-space-sm">'
                  f'<input autofocus class="w-full font-body-reading text-body-reading bg-surface-container-low rounded-lg px-4 py-3.5 focus:outline-none" maxlength="20" name="nickname" required value="{e(nick)}">'
+                 # 이용 규칙 동의 — 닉네임·소개·사진이 남에게 보이기 전에 (앱 마켓이 사용자 콘텐츠가 있는 앱에 요구한다)
+                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1">'
+                 '<span>[필수] <a class="text-primary underline" href="/rules" target="_blank">이용 규칙</a>에 동의해요 — 욕설·사칭·종목 추천·광고는 올리지 않아요</span></label>'
                  + (f'<p class="font-body-compact text-body-compact text-tertiary" role="alert">{e(error)}</p>' if error else "")
                  + '<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">시작하기</button></form>'
                  '</div></main>')  # fmt: skip
         return page("닉네임", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
-    def welcome(self, uid: int, nick: str):
+    def welcome(self, uid: int, nick: str, agreed: bool = False):
         if err := self.nick_error(uid, nick):
             return "200 OK", [], self.welcome_page(nick, err)
+        if not agreed:
+            return "200 OK", [], self.welcome_page(nick, "이용 규칙에 동의해야 시작할 수 있어요.")
         try:
-            self.con.execute("update users set nickname = ? where id = ?", (nick, uid))
+            self.con.execute("update users set nickname = ?, rules_at = ? where id = ?", (nick, datetime.now().isoformat(), uid))
             self.con.commit()
         except sqlite3.IntegrityError:  # 거의 같은 때 누가 먼저 가져간 경우
             return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.")
@@ -2363,6 +2539,8 @@ class App:
             return self.see("/me/settings?msg=" + quote(err))
         if len(bio) > BIO_MAX or notes.FORBIDDEN.search(bio):
             return self.see("/me/settings?msg=" + quote("자기소개에 종목을 사라·팔라는 말이나 추천은 쓸 수 없어요."))
+        if BAD.search(bio):
+            return self.see("/me/settings?msg=" + quote("자기소개에 욕설·광고·연락처·바깥 링크는 쓸 수 없어요."))
         try:
             self.con.execute("update users set nickname = ?, bio = ? where id = ?", (nick, bio or None, uid))
             self.con.commit()
@@ -2519,7 +2697,9 @@ class App:
         if not q:
             return ""
         rows = self.con.execute("select id, nickname, bio, photo_at from users where nickname is not null and id != ? and nickname like ?"
-                                " limit 20", (uid, f"%{q}%")).fetchall()  # fmt: skip
+                                " limit 40", (uid, f"%{q}%")).fetchall()  # fmt: skip
+        gone = self.blocked(uid)  # 차단한·차단당한 사람은 찾기에도 안 나온다
+        rows = [r for r in rows if r[0] not in gone][:20]
         items = "".join(f'<a href="/u/{i}" class="py-space-sm flex items-center gap-space-sm">{self.face(n, photo=photo_url(i, p))}<span class="flex flex-col min-w-0">'
                         f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(n)}</span>'
                         f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(b or "")}</span></span></a>' for i, n, b, p in rows)  # fmt: skip
@@ -2617,7 +2797,8 @@ class App:
             " (select count(*) from follows f where f.followee_id = u.id and f.ok = 1) fer"
             " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)",
             (since, since, uid, uid)).fetchall()  # fmt: skip
-        rows = sorted(rows, key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
+        gone = self.blocked(uid)
+        rows = sorted((r for r in rows if r[0] not in gone), key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
         if not rows:
             return ""
 
@@ -2668,12 +2849,74 @@ class App:
                 f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
 
+    def for_you(self, uid: int, today: date | None = None) -> str:
+        """오늘의 내 종목 — 담은 종목에 생긴 일을 점수 큰 순으로 한 줄씩(맞춤 피드 1차, 사용자 10/11).
+        재료: ① 최근 7일 큰 공시 ② 앞으로 14일 일정(실적 발표·주총·배당) ③ 큰손 움직임(기관 5% 지분 변화 30일 · 임원 거래 14일).
+        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다. 끝이 있는 피드(「오늘은 여기까지」)."""
+        today = today or date.today()
+        iso = today.isoformat()
+        back = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+        mine = "join holdings h on h.ticker = s.ticker and h.user_id = ?"
+        cards = []  # (점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크)
+
+        def ago(d: str) -> str:
+            n = (today - date.fromisoformat(d)).days
+            return "오늘" if n <= 0 else "어제" if n == 1 else f"{n}일 전"
+
+        for rno, d, title, code, imp, dr, t, name, home, aid in self.con.execute(
+                "select d.rcept_no, d.date, d.title, d.code, d.importance, d.direction, s.ticker, s.name, s.homepage,"
+                " (select a.id from articles a where a.ref = d.rcept_no)"
+                f" from disclosures d join stocks s on s.ticker = d.ticker {mine}"
+                " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date desc", (uid, back(7), iso)):  # fmt: skip
+            n = (today - date.fromisoformat(d)).days
+            cards.append((100 - 10 * n + 5 * (imp or 0), "campaign", "text-primary", name, home, clean_title(title, code),
+                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}"))
+        for d, kind, what, t, name, home in self.con.execute(
+                f"select e.date, e.kind, e.title, s.ticker, s.name, s.homepage from events e join stocks s on s.ticker = e.ticker {mine}"
+                " where e.date between ? and ? order by e.date", (uid, iso, (today + timedelta(days=14)).isoformat())):  # fmt: skip
+            n = (date.fromisoformat(d) - today).days
+            dd = date.fromisoformat(d)
+            cards.append((95 - 5 * n, "event_upcoming", "text-secondary", name, home, what,
+                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar"))
+        for inst, rate, chg, d, t, name, home in self.con.execute(
+                f"select b.inst, b.rate, b.rate_chg, b.date, s.ticker, s.name, s.homepage from big_holdings b join stocks s on s.ticker = b.stock_code {mine}"
+                " where b.rate_chg is not null and b.rate_chg != 0 and b.date >= ? order by b.date desc", (uid, back(30))):  # fmt: skip
+            if inst not in holders.BIG:
+                continue
+            n = (today - date.fromisoformat(d)).days
+            who = holders.BIG[inst][0]
+            cards.append((70 - 2 * n, "account_balance", "text-tertiary", name, home, f'{who}{notes.josa(who, "이")} 지분을 {"늘렸어요" if chg > 0 else "줄였어요"}',
+                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}"))
+        for t, name, home, cnt, net, last in self.con.execute(
+                f"select s.ticker, s.name, s.homepage, count(*), sum(i.change), max(i.date) from insiders i join stocks s on s.ticker = i.ticker {mine}"
+                " where i.kind = '임원' and i.date >= ? group by s.ticker", (uid, back(14))):  # fmt: skip
+            n = (today - date.fromisoformat(last)).days
+            side = "사들인 쪽이 많아요" if (net or 0) > 0 else "판 쪽이 많아요" if (net or 0) < 0 else "사고판 양이 비슷해요"
+            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}"))
+        cards.sort(key=lambda c: -c[0])
+        items = "".join(
+            f'<a href="{e(href)}" class="py-3.5 flex items-start gap-3">{logo(name, home, "w-9 h-9")}'
+            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="flex items-center gap-1.5 text-[12px] text-outline">'
+            f'<span class="material-symbols-outlined text-[15px] {tint}">{icon}</span><b class="font-medium text-on-surface-variant truncate">{e(name)}</b></span>'
+            f'<span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(head)}</span>'
+            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(sub)}</span></span>'
+            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
+            for _, icon, tint, name, home, head, sub, when, href in cards[:12])  # fmt: skip
+        (has,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
+        empty = ("아직 담은 종목이 없어요. 종목을 담으면 그 종목에 생긴 일을 여기에 모아 드려요." if not has
+                 else "오늘은 내 종목에 새로 생긴 일이 없어요.")
+        return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">오늘의 내 종목</h2>'
+                '<p class="mt-0.5 text-[12px] text-outline">내가 담은 종목에 생긴 일을 관련 큰 순으로 모았어요.</p>'
+                + (f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
+                   '<p class="py-3 text-center text-[12px] text-outline">오늘은 여기까지예요. 사실만 모았어요 — 사고팔라는 뜻이 아니에요.</p>' if items
+                   else f'<p class="py-6 text-center text-[13px] text-on-surface-variant">{empty}</p>') + "</section>")  # fmt: skip
+
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
+        body = self.for_you(uid) + self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
@@ -2682,24 +2925,74 @@ class App:
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return page("피드", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
+    def blocked(self, uid: int) -> set[int]:
+        """내가 차단했거나 나를 차단한 사람 — 서로 보이지 않는다."""
+        return {a if a != uid else b for a, b in self.con.execute("select user_id, blocked_id from blocks where user_id = ? or blocked_id = ?", (uid, uid))}
+
+    def blocked_list(self, uid: int) -> str:
+        """설정 화면 — 차단한 사람. 찾기에 안 나오니 푸는 길은 여기(이름을 누르면 「차단 풀기」가 있는 화면)."""
+        rows = self.con.execute("select u.id, u.nickname from blocks b join users u on u.id = b.blocked_id where b.user_id = ? order by b.at desc", (uid,)).fetchall()
+        if not rows:
+            return ""
+        return ('<section class="mt-space-lg"><h2 class="font-label-regular text-label-regular text-on-surface font-semibold">차단한 사람</h2><div class="mt-1 flex flex-col">'
+                + "".join(f'<a class="py-2 font-body-compact text-body-compact text-primary underline" href="/u/{i}">{e(n or "(이름 없음)")}</a>' for i, n in rows) + "</div></section>")
+
+    def block(self, uid: int, other: int):
+        """차단(한 번 더 누르면 풀기) — 서로의 팔로우·요청을 지운다. 그래서 피드에도 저절로 안 나온다."""
+        if not self.con.execute("delete from blocks where user_id = ? and blocked_id = ?", (uid, other)).rowcount:
+            self.con.execute("insert into blocks values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
+            self.con.execute("delete from follows where (follower_id = ? and followee_id = ?) or (follower_id = ? and followee_id = ?)", (uid, other, other, uid))
+        self.con.commit()
+        return self.see(f"/u/{other}")
+
+    def report_user(self, uid: int, other: int, why: str):
+        """신고 — 적어 두고 운영자에게 바로 메일. 같은 사람을 여러 번 눌러도 처리 전에는 한 건. 처리는 `python -m hanjang.moderate`."""
+        why = why if why in REPORT_WHY else "기타"
+        if not self.con.execute("select 1 from reports where user_id = ? and target_id = ? and done_at is null", (uid, other)).fetchone():
+            self.con.execute("insert into reports (user_id, target_id, why, at) values (?, ?, ?, ?)", (uid, other, why, datetime.now().isoformat()))
+            self.con.commit()
+            nick, bio, has_photo = self.con.execute("select nickname, bio, photo is not null from users where id = ?", (other,)).fetchone()
+            if to := env().get("SMTP_USER"):
+                with self.outside():
+                    mail.send(to, f"[한장] 신고 — {why}", f"신고된 사람: #{other} {nick or '(닉네임 없음)'}\n자기소개: {bio or '(없음)'}\n프로필 사진: {'있음' if has_photo else '없음'}\n"
+                              f"프로필: {mail.base_url()}/u/{other}\n신고한 사람: #{uid}\n\n24시간 안에 확인해요(이용 규칙). 서버에서:\n"
+                              f"  프로필 지우기  python -m hanjang.moderate wipe {other}\n  계정 막기      python -m hanjang.moderate ban {other}\n  문제없음       python -m hanjang.moderate ok {other}")  # fmt: skip
+        return "200 OK", [], self.simple("신고", f"신고를 받았어요. 운영자가 24시간 안에 확인해요. <a class='text-primary underline' href='/u/{other}'>돌아가기</a>")
+
     def user_page(self, uid: int, other: int):
         row = self.con.execute("select nickname, bio, photo_at from users where id = ? and nickname is not null", (other,)).fetchone()
-        if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
+        mine = self.con.execute("select 1 from blocks where user_id = ? and blocked_id = ?", (uid, other)).fetchone()
+        if not row or (other in self.blocked(uid) and not mine):  # 닉네임이 없는 사람 · 나를 차단한 사람은 보이지 않는다
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
         nick, bio, pat = row
+        if mine:  # 내가 차단한 사람 — 이름과 풀기 단추만
+            return "200 OK", [], self.simple(nick, f"<b>{e(nick)}</b> 님을 차단했어요. 서로의 프로필과 리그램이 보이지 않아요."
+                                             f"<form method='post' action='/block' class='mt-4'><input type='hidden' name='u' value='{other}'>"
+                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>")
+        # 신고·차단 — 눈에 띄지 않게 접어 둔다 (앱 마켓의 사용자 콘텐츠 요구: 신고 · 차단 · 빠른 처리)
+        more = ('<details class="mt-space-lg"><summary class="font-label-micro text-label-micro text-outline cursor-pointer">신고 · 차단</summary>'
+                '<div class="mt-2 flex flex-col gap-3 rounded-xl border border-outline-variant/50 px-space-md py-3">'
+                f'<form method="post" action="/report" class="flex flex-col gap-2"><input type="hidden" name="u" value="{other}">'
+                '<span class="font-label-regular text-label-regular text-on-surface font-semibold">이 프로필 신고하기</span>'
+                + "".join(f'<label class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><input class="accent-primary" name="why" required type="radio" value="{w}">{w}</label>' for w in REPORT_WHY)
+                + '<button class="self-start font-label-regular text-label-regular text-tertiary underline" type="submit">신고 보내기</button></form>'
+                f'<form method="post" action="/block" onsubmit="return confirm(\'차단하면 서로 팔로우가 풀리고, 서로의 프로필과 리그램이 보이지 않아요. 차단할까요?\')"><input type="hidden" name="u" value="{other}">'
+                '<button class="font-label-regular text-label-regular text-tertiary underline" type="submit">이 사람 차단하기</button></form>'
+                '<a class="font-label-micro text-label-micro text-outline underline" href="/rules">이용 규칙</a></div></details>')  # fmt: skip
         label, on = self.follow_state(uid, other)
         btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
         shut = ('<div class="mt-space-xl py-10 flex flex-col items-center gap-2 border-t border-surface-container-high text-center">'
                 '<span class="material-symbols-outlined text-outline text-[30px]">lock</span>'
                 '<b class="font-body-reading-strong text-body-compact text-on-surface">비공개 계정이에요</b>'
-                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 리그램과 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
+                '<span class="font-body-compact text-body-compact text-on-surface-variant">팔로우 요청을 수락하면 나무와 리그램, 팔로워 목록을 볼 수 있어요.</span></div>')  # fmt: skip
         see = self.can_see(uid, other)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  f'<header class="pt-5 flex items-center gap-space-md">{self.face(nick, "w-14 h-14", photo_url(other, pat))}<div class="flex flex-col min-w-0 flex-1">'
                  f'<div class="flex items-center gap-2 min-w-0"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick)}</h1></div>{self.follow_line(other, see)}</div>'
                  f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)
+                 + ((self.my_tree(other, nick=nick) + self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True)) if see else shut)
+                 + (more if other != uid else "")
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2817,77 +3110,87 @@ class App:
         if key not in gurus.GURUS:
             return "404 Not Found", [], self.simple("없음", "없는 투자자예요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, cik, intro, home = gurus.GURUS[key]
-        rows = self.con.execute(
-            "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
-            " exists(select 1 from notes n where n.ticker = g.ticker), g.sic from guru_holdings g left join stocks s on s.ticker = g.ticker"
-            " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
-        if not rows:
+        def build():
+            rows = self.con.execute(
+                "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
+                " exists(select 1 from notes n where n.ticker = g.ticker), g.sic from guru_holdings g left join stocks s on s.ticker = g.ticker"
+                " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
+            if not rows:
+                return None
+            period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
+            total = sum(r[2] for r in rows)
+            sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
+            top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows])
+            pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
+                        "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
+
+            def row(i, r):
+                issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
+                label = issuer_name(issuer, kname)
+                inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
+                         f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
+                         f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
+                if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
+                    return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
+                return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
+
+            top = rows[:TOP_LIST]
+            body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
+                    f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                    f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
+                    f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + top_pie + pie_
+                    + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                    + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
+                    + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
+                    + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
+                    + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
+                    + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a>'
+                    + (f' · 사진: <a class="underline" href="{e(PEOPLE[key][2])}" target="_blank" rel="noopener">{e(PEOPLE[key][0])}</a>, {e(PEOPLE[key][1])}, 위키미디어 공용'
+                       if key in PEOPLE else "") + '</p>')  # fmt: skip
+            return body
+
+        body = self.cached(f"guru:{key}", build)
+        if body is None:
             return "404 Not Found", [], self.simple("없음", "아직 받은 신고가 없어요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
-        period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
-        total = sum(r[2] for r in rows)
-        sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
-        top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows])
-        pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
-                    "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
-
-        def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
-            label = issuer_name(issuer, kname)
-            inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
-                     f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
-            if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
-                return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
-            return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
-
-        top = rows[:TOP_LIST]
-        body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + top_pie + pie_
-                + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
-                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
-                + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
-                + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
-                + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a>'
-                + (f' · 사진: <a class="underline" href="{e(PEOPLE[key][2])}" target="_blank" rel="noopener">{e(PEOPLE[key][0])}</a>, {e(PEOPLE[key][1])}, 위키미디어 공용'
-                   if key in PEOPLE else "") + '</p>')  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     def big(self, uid: int, key: str, wrap: str, end: str):
         if key not in holders.BIG:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, _, intro = holders.BIG[key]
-        (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
-        (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
-        us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
-        rows = self.con.execute(
-            "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
-            " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
-        inds = [x for (x,) in self.con.execute("select induty_code from big_holdings where inst = ?", (key,))]
-        industry = bars([sector(x) for x in inds], [1] * len(inds), "곳", "한국에서 5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요. 위 그림과 기준이 달라요.")
-        # 파이 → 업종 → 많이 가진 순서. 「최근 늘리고 줄인 회사」·「지분이 큰 순서」는 뺐다(너무 자세하다, 사용자 10/10 — 5% 보고는 종목 노트 맨 밑에 남아 있다)
-        port = self.nps_portfolio(industry) if key == "nps" else ""
-        port = port or self.us_portfolio(key, industry)
+        def build():
+            (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
+            (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
+            us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
+            rows = self.con.execute(
+                "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
+                " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
+            inds = [x for (x,) in self.con.execute("select induty_code from big_holdings where inst = ?", (key,))]
+            industry = bars([sector(x) for x in inds], [1] * len(inds), "곳", "한국에서 5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요. 위 그림과 기준이 달라요.")
+            # 파이 → 업종 → 많이 가진 순서. 「최근 늘리고 줄인 회사」·「지분이 큰 순서」는 뺐다(너무 자세하다, 사용자 10/10 — 5% 보고는 종목 노트 맨 밑에 남아 있다)
+            port = self.nps_portfolio(industry) if key == "nps" else ""
+            port = port or self.us_portfolio(key, industry)
 
-        def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
-            code, corp, rate, _, d, rno, ours, home = r
-            href = f"/n/{code}" if ours else DART_VIEW.format(rno)
-            return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
-                    f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
-                    f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'
-                    f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}%</span></span></a>')  # fmt: skip
+            def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
+                code, corp, rate, _, d, rno, ours, home = r
+                href = f"/n/{code}" if ours else DART_VIEW.format(rno)
+                return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
+                        f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
+                        f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'
+                        f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}%</span></span></a>')  # fmt: skip
 
-        kr_only = ("" if port else industry
-                   + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">5% 넘게 가진 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                   + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
-                   + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
-                   "따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
-        body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + port + kr_only)  # fmt: skip
+            kr_only = ("" if port else industry
+                       + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">5% 넘게 가진 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                       + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
+                       + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
+                       "따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
+            body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
+                    f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                    f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
+                    f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + port + kr_only)  # fmt: skip
+            return body
+
+        body = self.cached(f"big:{key}", build)
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
@@ -2895,7 +3198,7 @@ class App:
     def doc(self, path: str, uid: int | None) -> str:
         contact = env().get("PRIVACY_CONTACT", "")
         title, parts = {"/privacy": ("개인정보 처리방침", policy.privacy(contact)), "/method": ("계산 방법", policy.method()),
-                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact))}[path]  # fmt: skip
+                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact)), "/rules": ("이용 규칙", policy.rules(contact))}[path]  # fmt: skip
         body = "".join(
             f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
             + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)
@@ -2975,7 +3278,7 @@ class App:
                       f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
                       for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + groups + self.guru_list() + self.big_list() + end)  # fmt: skip
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
@@ -3001,7 +3304,7 @@ if __name__ == "__main__":
     if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
-    app = App(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False), cfg["SECRET"])
+    app = App(db.tune(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False)), cfg["SECRET"])
     host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
     make_server(host, port, app, server_class=Server).serve_forever()

@@ -13,6 +13,8 @@ SECRET = "test-secret"
 
 def _app(now=1_000_000.0):
     con = db.connect(":memory:")
+    # 테스트가 표에 바로 넣는 사람(닉네임 있음)은 이용 규칙에 동의한 것으로 — 동의 관문 자체는 닉네임 테스트가 본다
+    con.execute("create trigger agreed after insert on users when new.nickname is not null begin update users set rules_at = 'x' where id = new.id; end")
     collect.save_universe(con, [("005930", "삼성전자")], {})
     body = {"headline": "<script>x</script> 매출이 늘었어요.", "summary": [],
             "sections": [{"title": "회사 사정은 어떤가요?",
@@ -46,7 +48,7 @@ def _login(app, nick="나"):
     link = "/auth?t=" + quote(web.login_token("me@x.kr", SECRET, 1_000_000.0))
     _, h, _ = call(app, link)
     ck = h["Set-Cookie"].split(";")[0]
-    call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉"), ck)  # 가입할 때 닉네임
+    call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉") + "&rules=1", ck)  # 가입할 때 닉네임 + 이용 규칙 동의
     return ck
 
 
@@ -374,7 +376,8 @@ def test_nickname_is_asked_at_signup_and_unique():
     assert "닉네임을 정해 주세요" in call(app, "/feed", cookie=ck)[2]
     assert "이미 누가 쓰고 있어요" in call(app, "/welcome", "POST", "nickname=hanjang", ck)[2]  # 대소문자만 달라도 겹침
     assert "2~20자" in call(app, "/welcome", "POST", "nickname=a", ck)[2]
-    assert call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[1]["Location"] == "/"
+    assert "이용 규칙에 동의해야" in call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[2]  # 동의 없이는 안 된다
+    assert call(app, "/welcome", "POST", "nickname=" + quote("새사람") + "&rules=1", ck)[1]["Location"] == "/"
     assert "닉네임을 정해 주세요" not in call(app, "/", cookie=ck)[2]
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=", ck)[1]["Location"]  # 비울 수 없다
 
@@ -952,8 +955,8 @@ def test_save_lists_and_highlighter():
     app, con = _app()
     con.execute("insert into users (id, email, created_at) values (1, 'me@b.c', '2026-10-01'), (2, 'you@b.c', '2026-10-01')")
     me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
-    con.execute("update users set nickname = '나닉' where id = 1")
-    con.execute("update users set nickname = '너닉' where id = 2")
+    con.execute("update users set nickname = '나닉', rules_at = 'x' where id = 1")
+    con.execute("update users set nickname = '너닉', rules_at = 'x' where id = 2")
     assert 'action="/save"' in call(app, "/n/005930", cookie=me)[2]
     call(app, "/save", "POST", "k=note&r=005930&w=2026-10-05", me)
     call(app, "/save", "POST", "k=learn&r=start&w=", me)
@@ -1136,13 +1139,16 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     monkeypatch.setattr(daily.mail, "send", lambda to, subject, *a, **k: mails.append(subject))
     monkeypatch.setattr(daily.backup, "backup", lambda today: ran.append("백업") or tmp_path)
     monkeypatch.setattr(daily.backup, "offsite", lambda p: None)
-    monkeypatch.setattr(daily.collect, "main", lambda today, dart_up: ran.append(f"받기:{dart_up}"))
+    # 국내 받기·미국 받기는 따로 띄운 파이썬에서 돈다(메모리) — 여기선 무엇을 띄우려 했는지만 본다
+    monkeypatch.setattr(daily, "apart", lambda code: ran.append(f"받기:{'True' in code}" if "collect.main" in code else "미국"))
     monkeypatch.setattr(daily.notes, "main", lambda t, today, only_changed, read, carry=False, batch=False: ran.append(f"노트:전부={not only_changed}:읽기={read}"))
     monkeypatch.setattr(daily.us, "read", lambda today: (_ for _ in ()).throw(RuntimeError("SEC 오류")))  # 한 단계가 실패해도
-    for mod, name in ((daily.us, "미국"), (daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
+    for mod, name in ((daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
     monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
     monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
+    monkeypatch.setattr(daily.db, "connect", lambda: None)  # 진짜 DB 를 열지 않는다
+    monkeypatch.setattr(daily.db, "tidy", lambda con, today: {})
     monday = date(2026, 10, 12)
 
     with pytest.raises(SystemExit, match="미국 읽기"):  # 실패한 단계가 있으면 끝에 실패로 — 그래도 뒤 단계는 다 돌았다
@@ -1187,3 +1193,292 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
     assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
     h = ask(1000, "5.5.5.5")["headers"]
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+
+
+def test_login_with_six_digit_code_from_the_mail(monkeypatch):
+    """앱(웹뷰)·홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열린다 — 메일의 6자리 코드를 화면에 넣어 들어온다 (앱 출시 준비 10/11)."""
+    app, _ = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((to, subject, text)))
+    body = call(app, "/login", "POST", "email=a%40b.c&agree=1")[2]
+    assert 'action="/login/code"' in body and 'name="code"' in body
+    code = mails[0][1].split()[-1]
+    assert re.fullmatch(r"\d{6}", code) and code in mails[0][2] and "/auth?t=" in mails[0][2]  # 링크와 코드 둘 다
+    wrong = "000000" if code != "000000" else "111111"
+    s, h, body = call(app, "/login/code", "POST", f"email=a%40b.c&code={wrong}")
+    assert s.startswith("200") and "Set-Cookie" not in h and "맞지 않아요" in body and "4번 남음" in body
+    s, h, _ = call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")
+    assert s.startswith("303") and "s=" in h["Set-Cookie"]
+    assert "만료" in call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")[2]  # 한 번만 쓴다
+    assert "만료" in call(app, "/login/code", "POST", "email=x%40b.c&code=123456")[2]  # 받은 적 없는 주소
+
+    app, _ = _app()  # 다섯 번 틀리면 그 코드는 버린다 — 맞는 코드도 더는 안 된다
+    mails.clear()
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    code = mails[0][1].split()[-1]
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(web.CODE_TRIES):
+        last = call(app, "/login/code", "POST", f"email=a%40b.c&code={wrong}")[2]
+    assert "여러 번 틀렸어요" in last and "Set-Cookie" not in call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")[1]
+
+    app, _ = _app(now=1_000_000.0)  # 15분이 지나면 만료
+    mails.clear()
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    app.clock = lambda: 1_000_000.0 + web.LINK_TTL + 1
+    assert "만료" in call(app, "/login/code", "POST", f"email=a%40b.c&code={mails[0][1].split()[-1]}")[2]
+
+
+def test_report_block_rules_and_ban(monkeypatch):
+    """앱 마켓이 남에게 보이는 프로필(사용자 콘텐츠)이 있는 앱에 요구하는 것 — 이용 규칙 동의 · 금지 말 거르기 · 신고 · 차단 · 계정 막기 (10/11)."""
+    from hanjang import moderate
+
+    app, con = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((subject, text)))
+    monkeypatch.setattr(web, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
+    con.execute("insert into users (id, email, created_at, nickname, bio) values (1, 'a@b.c', '2026-10-01', '가가', '소개'), (2, 'b@b.c', '2026-10-01', '나나', null), (3, 'c@b.c', '2026-10-01', '다다', null)")
+    con.commit()
+    a, b, c = (f"s={web.sign(str(i), SECRET)}" for i in (1, 2, 3))
+    assert "올리면 안 되는 것" in call(app, "/rules")[2] and "help@x.kr" in call(app, "/rules")[2]  # 로그인 없이 · 연락처
+    # 금지 말 — 닉네임·자기소개
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("리딩방장") + "&bio=", a)[1]["Location"]
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가가") + "&bio=" + quote("문의 open.kakao.com/o/x"), a)[1]["Location"]
+    # 신고 — 한 건으로 적히고 운영자에게 메일
+    p = call(app, "/u/1", cookie=b)[2]
+    assert 'action="/report"' in p and 'action="/block"' in p and 'action="/report"' not in call(app, "/u/1", cookie=a)[2]  # 내 프로필엔 없다
+    assert "24시간" in call(app, "/report", "POST", "u=1&why=" + quote("사칭·남의 사진"), b)[2]
+    call(app, "/report", "POST", "u=1&why=x", b)
+    assert con.execute("select user_id, target_id, why from reports").fetchall() == [(2, 1, "사칭·남의 사진")] and len(mails) == 1
+    assert "사칭" in mails[0][0] and "moderate wipe 1" in mails[0][1] and "가가" in mails[0][1]
+    # 차단 — 서로 팔로우가 풀리고, 서로 안 보이고, 다시 팔로우도 안 된다. 풀면 돌아온다
+    call(app, "/follow", "POST", "u=1", b), call(app, "/follow", "POST", "u=2", a)
+    call(app, "/block", "POST", "u=1", b)
+    assert con.execute("select count(*) from follows").fetchone() == (0,)
+    assert call(app, "/u/2", cookie=a)[0].startswith("404") and "차단 풀기" in call(app, "/u/1", cookie=b)[2]  # 당한 쪽엔 없는 사람, 한 쪽엔 풀기
+    call(app, "/follow", "POST", "u=2", a)
+    assert con.execute("select count(*) from follows").fetchone() == (0,)
+    assert "가가" not in call(app, "/feed?q=" + quote("가"), cookie=b)[2] and "가가" in call(app, "/feed?q=" + quote("가"), cookie=c)[2]  # 사람 찾기
+    assert "차단한 사람" in call(app, "/me/settings", cookie=b)[2] and "차단한 사람" not in call(app, "/me/settings", cookie=a)[2]
+    call(app, "/block", "POST", "u=1", b)
+    assert call(app, "/u/2", cookie=a)[0].startswith("200")
+    # 운영자 처리 — 프로필 지우기: 닉네임부터 다시(규칙 동의도), 신고는 닫힌다. 막기: 쿠키가 있어도 못 쓴다
+    assert [r[0] for r in moderate.pending(con)] == [1]
+    moderate.act(con, "wipe", 1)
+    assert moderate.pending(con) == [] and "닉네임을 정해 주세요" in call(app, "/", cookie=a)[2] and call(app, "/u/1", cookie=c)[0].startswith("404")
+    moderate.act(con, "ban", 1)
+    s, h, body = call(app, "/", cookie=a)
+    assert s.startswith("403") and "Max-Age=0" in h["Set-Cookie"] and "help@x.kr" in body
+    # 탈퇴하면 차단·신고 기록도 지운다
+    call(app, "/block", "POST", "u=3", b), call(app, "/report", "POST", "u=3&why=" + quote("기타"), b)
+    call(app, "/me/delete", "POST", "", b)
+    assert con.execute("select (select count(*) from blocks) + (select count(*) from reports)").fetchone() == (0,)
+
+
+def test_my_tree_grows_with_days_and_shows_this_month():
+    from hanjang import tree
+
+    assert tree.stage(0) == ("씨앗", 1) and tree.stage(3) == ("새싹", 1) and tree.stage(50) == ("잎이 풍성한 나무", 40) and tree.stage(200)[1] is None
+    assert all(tree.svg(n).startswith("<svg") for n in (0, 2, 8, 60, 120))
+    assert tree.svg(40) == tree.svg(40)  # 같은 날수면 같은 나무
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.executemany("insert into views (user_id, page, at) values (1, 'cards', ?)", [(f"2026-09-{d:02d}T08:00:00",) for d in range(1, 21)])
+    con.commit()
+    body = call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert con.execute("select days from users where id = 1").fetchone()[0] == 21  # 남은 기록 20일 + 오늘
+    con.execute("delete from views")  # 열어본 기록이 지워져도(180일) 나무는 줄지 않는다
+    con.commit()
+    assert "지금까지 21일 들어왔어요" in call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "내 나무" in body and "지금까지 21일 들어왔어요" in body and "자라는 나무" in body and "잎이 풍성한 나무까지 19일" in body
+
+
+def test_login_cookie_expires_on_the_server_and_old_cookies_are_upgraded():
+    """쿠키에 날짜가 없어, 한 번 새 나간 쿠키가 영영 통했다 (보안 점검 10/11). 옛 쿠키는 정한 날까지만 받고 그 사이 새 쿠키로 바꿔 준다."""
+    now = [1_000_000.0]
+    app, con = _app()
+    app.clock = lambda: now[0]
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    new = web.session_cookie(1, SECRET, now[0]).split(";")[0]
+    assert "내 종목" in call(app, "/", cookie=new)[2] and "Set-Cookie" not in call(app, "/", cookie=new)[1]
+    now[0] += web.SESSION_TTL + 1
+    assert "시작하기" in call(app, "/", cookie=new)[2]  # 90일이 지나면 서버가 받지 않는다 — 다시 로그인
+    assert "시작하기" in call(app, "/", cookie="s=" + web.sign("1|9999999999999", SECRET).replace("1|", "2|"))[2]  # 번호 바꿔치기
+
+    old = f"s={web.sign('1', SECRET)}"  # 날짜 없는 옛 쿠키
+    now[0] = web.LEGACY_UNTIL - 10
+    s, h, body = call(app, "/", cookie=old)
+    assert "내 종목" in body and web.read_session(h["Set-Cookie"].split(";")[0][2:], SECRET, now[0]) == (1, False)  # 받아 주고, 새 쿠키로 바꿔 준다
+    assert "Max-Age=0" in call(app, "/logout", cookie=old)[1]["Set-Cookie"]  # 로그아웃은 그대로 지운다
+    now[0] = web.LEGACY_UNTIL + 10
+    assert "시작하기" in call(app, "/", cookie=old)[2]  # 정한 날이 지나면 옛 쿠키는 끝
+
+
+def test_tidy_drops_old_views_and_news_and_hot_queries_use_indexes():
+    """DB 점검(10/11) — 지우는 규칙이 백업뿐이었고, 화면이 자주 묻는 조회가 표 전체를 훑었다."""
+    _, con = _app()
+    con.execute("insert into users (id, email, created_at) values (1, 'a@b.c', '2026-01-01')")
+    con.executemany("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', ?)", [("2026-03-01T10:00",), ("2026-10-01T10:00",)])
+    con.executemany("insert into news (url, ticker, date, press, title) values (?, '005930', ?, '삼성전자 뉴스룸', 't')", [("u1", "2026-07-01"), ("u2", "2026-10-01")])
+    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1}
+    assert con.execute("select at from views").fetchall() == [("2026-10-01T10:00",)] and con.execute("select url from news").fetchall() == [("u2",)]
+    for q in ("select count(*) from views where page = 'note' and ticker = '005930' and at >= '2026-10-05'", "select count(*) from follows where followee_id = 1 and ok = 1",
+              "select * from highlights where user_id = 1 and page = '/n/005930'", "select * from news where ticker = '005930' and date >= '2026-10-01'",
+              "select * from disclosures where ticker = '005930' and date >= '2026-07-01'", "select count(*) from regrams where kind = 'note' and ref = '005930' and week = '2026-10-05'",
+              "select count(*) from likes where ticker = '005930' and week = '2026-10-05'"):
+        plan = " ".join(r[3] for r in con.execute("explain query plan " + q))
+        assert "SEARCH" in plan and "SCAN" not in plan, (q, plan)
+
+
+def test_cached_fragments_refresh_when_another_connection_writes(tmp_path):
+    """종목 목록(186KB)·국민연금·유명 투자자 페이지는 매일 실행 뒤에만 바뀐다 — 그때까지 한 번 만든 것을 돌려주고, 다른 연결이 쓰면 새로 만든다 (DB 점검 10/11)."""
+    import sqlite3
+
+    path = tmp_path / "h.db"
+    con = db.connect(path)
+    con.execute("insert into stocks (ticker, name) values ('005930', '삼성전자')")
+    con.commit()
+    app = web.App(con, SECRET)
+    first = app.stocks_js()
+    assert "삼성전자" in first and app.stocks_js() is first  # 같은 것을 그대로
+    con.execute("insert into views (user_id, page, at) select 1, 'x', 'now' where 0")  # 이 연결의 쓰기(열어본 기록 같은 것)는 캐시와 상관없다
+    con.commit()
+    assert app.stocks_js() is first
+    other = sqlite3.connect(path)  # 매일 실행 — 다른 연결
+    other.execute("insert into stocks (ticker, name) values ('000660', 'SK하이닉스')")
+    other.commit()
+    second = app.stocks_js()
+    assert second is not first and "SK하이닉스" in second
+    assert db.connect(":memory:").execute("pragma synchronous").fetchone()[0] == 1  # normal — 커밋마다 디스크 확인을 기다리지 않는다
+
+
+def test_big_bodies_only_for_logged_in_photo_uploads_and_few_at_once():
+    """로그인하지 않은 누구든 어느 주소로든 6MB 를 보낼 수 있었다 — 여럿이 한꺼번에 보내면 1GB 서버의 메모리가 찬다 (메모리 점검 10/11)."""
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    me = web.session_cookie(1, SECRET, 1_000_000.0).split(";")[0]
+
+    def post(path, size, cookie=""):
+        read = []
+
+        class Body(io.BytesIO):
+            def read(self, n=-1):
+                read.append(n)
+                return super().read(n)
+
+        env = {"REQUEST_METHOD": "POST", "PATH_INFO": path, "QUERY_STRING": "", "HTTP_COOKIE": cookie, "CONTENT_TYPE": "application/json",
+               "CONTENT_LENGTH": str(size), "wsgi.input": Body(b'{"img": "' + b"x" * (size - 11) + b'"}')}
+        got = {}
+        b"".join(app(env, lambda s, h: got.update(status=s)))
+        return got["status"][:3], bool(read)
+
+    assert post("/scan", web.FORM_MAX + 1) == ("413", False)  # 로그인 안 함 — 읽지도 않는다
+    assert post("/login", web.FORM_MAX + 1, me) == ("413", False)  # 사진 받는 곳이 아니면 로그인해도
+    assert post("/scan", web.BODY_MAX + 1, me) == ("413", False)
+    assert post("/scan", web.FORM_MAX + 1, me)[1]  # 로그인한 사람의 캡처는 받는다
+    for _ in range(web.BIG_AT_ONCE):  # 큰 본문 자리가 다 찼으면 기다리게 하지 않고 돌려보낸다
+        app.uploads.acquire()
+    assert post("/scan", web.FORM_MAX + 1, me) == ("503", False)
+    for _ in range(web.BIG_AT_ONCE):
+        app.uploads.release()
+    assert post("/scan", web.FORM_MAX + 1, me)[0] != "503" and app.uploads._value == web.BIG_AT_ONCE  # 끝나면 자리를 돌려준다
+
+
+def test_inline_scripts_on_main_pages_are_valid_javascript(tmp_path):
+    """파이썬 문자열 안의 「\n」 하나가 내 종목 화면 스크립트를 통째로 깨뜨려, 검색 자동완성과 캡처 올리기가 서버에서 멈춰 있었다 (10/11).
+    글자만 보는 테스트는 이런 걸 못 잡는다 — 화면의 스크립트를 node 에 넣어 문법을 본다(node 가 없는 곳에선 건너뛴다)."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 없음")
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into users (id, email, created_at, nickname) values (77, 'o@b.c', '2026-10-01', '남남')")
+    con.execute("insert into articles (id, ref, ticker, date, kind, body, made_at) values (1, 'r1', '005930', '2026-10-01', 'MAJOR_CONTRACT', ?, 'x')",
+                (json.dumps({"title": "계약", "paragraphs": [{"text": "계약금액은 935억 원이에요.", "refs": []}], "links": {}}, ensure_ascii=False),))
+    con.commit()
+    pages = {"로그인": call(app, "/")[2], "로그인(보냄)": app.login_page("a@b.c"), "닉네임": app.welcome_page()}
+    for p in ("/", "/n/005930", "/feed", "/a/1", "/calendar", "/learn", "/learn/dividend", "/me", "/me/settings", "/me/notices", "/u/77", "/privacy", "/rules"):
+        s, _, body = call(app, p, cookie=ck)
+        assert s.startswith("200"), p
+        pages[p] = body
+    n = 0
+    for name, body in pages.items():
+        for k, src in enumerate(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", body, re.S)):
+            f = tmp_path / f"s{n}.js"
+            f.write_text(src, encoding="utf-8")
+            r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            assert r.returncode == 0, f"{name} 의 {k + 1}번째 스크립트: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else r.stderr}"
+            n += 1
+    assert n > 20
+
+
+def test_others_see_my_tree_unless_private():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname, days) values (1, 'a@b.c', '2026-10-01', '가가', 50), (2, 'b@b.c', '2026-10-01', '나나', 1)")
+    con.commit()
+    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    p = call(app, "/u/1", cookie=b)[2]
+    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" not in p  # 나무와 날 수만 — 잔디는 본인만
+    call(app, "/me/private", "POST", "", a)
+    assert "가가의 나무" not in call(app, "/u/1", cookie=b)[2]  # 비공개 — 승인 전엔 안 보인다
+    call(app, "/follow", "POST", "u=1", b)
+    call(app, "/follow/answer", "POST", "u=2&yes=1", a)
+    assert "가가의 나무" in call(app, "/u/1", cookie=b)[2]
+
+
+def test_line_tree_on_notice_error_and_offline_pages():
+    from hanjang import tree
+
+    assert "animateTransform" in tree.line("wait") and "animateTransform" not in tree.line("oops")
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    a = f"s={web.sign('1', SECRET)}"
+    s404, _, body = call(app, "/nope", cookie=a)
+    assert s404.startswith("404") and 'aria-label="나무"' in body and "없는 화면이에요" in body
+    assert 'aria-label="나무"' in call(app, "/offline")[2]
+    app.cards = lambda *x, **k: 1 / 0  # 화면을 그리다 터져도
+    s500, _, body = call(app, "/", cookie=a)
+    assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body
+
+
+def test_for_you_ranks_my_stocks_events_by_score():
+    """오늘의 내 종목 — 담은 종목의 공시·다가오는 일정·큰손 움직임만, 가까운 것·무거운 것 먼저. 남의 종목은 안 나온다."""
+    from datetime import date
+
+    from hanjang import sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    (uid,) = con.execute("select id from users").fetchone()
+    today = date(2026, 10, 11)
+    assert "오늘은 내 종목에 새로 생긴 일이 없어요" in app.for_you(uid, today)
+    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", date(2026, 10, 10), "주요사항보고서(자기주식취득결정)"),
+                                   sources.Disclosure("20261001000009", "005930", date(2026, 10, 1), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    con.execute("insert into events values ('005930', '2026-10-14', 'EARNINGS', '실적 발표', 'r1')")
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-08', 'r2')")
+    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', '2026-10-09', '임원', '상무', -100)")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
+    con.execute("insert into events values ('000660', '2026-10-12', 'EARNINGS', '남의 종목 실적', 'r4')")
+    h = app.for_you(uid, today)
+    order = [h.index(x) for x in ("자기주식취득결정", "실적 발표", "국민연금이 지분을 늘렸어요", "임원 주식 거래 보고 1건")]
+    assert order == sorted(order) and ">어제<" in h and ">D-3<" in h and "판 쪽이 많아요" in h
+    assert "남의 종목 실적" not in h and "공급계약" not in h and "오늘은 여기까지예요" in h
+    assert "오늘의 내 종목" in call(app, "/feed", cookie=ck)[2]
+
+
+def test_cookie_of_a_deleted_account_goes_to_login_not_error():
+    app, con = _app()
+    ck = _login(app)
+    con.execute("delete from users")
+    s, h, _ = call(app, "/feed", cookie=ck)  # 다른 기기에서 탈퇴한 뒤 남은 쿠키
+    assert s.startswith("303") and h["Location"] == "/" and "Max-Age=0" in h["Set-Cookie"]
