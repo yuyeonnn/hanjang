@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 import json
 from urllib.parse import quote, unquote
 
-from hanjang import collect, db, mail, notes, web
+from hanjang import collect, db, learn, mail, notes, web
 
 SECRET = "test-secret"
 
@@ -945,6 +945,56 @@ def test_personas_seen_by_everyone_with_label():
     assert "반도체일기" in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
     assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
     assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
+
+
+def test_save_lists_and_highlighter():
+    """저장 — 나만 보는 목록 · 좋아요 목록 · 형광펜(칠하기·다시 불러오기·지우기·남의 것은 못 지움) (사용자 10/10)."""
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at) values (1, 'me@b.c', '2026-10-01'), (2, 'you@b.c', '2026-10-01')")
+    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    con.execute("update users set nickname = '나닉' where id = 1")
+    con.execute("update users set nickname = '너닉' where id = 2")
+    assert 'action="/save"' in call(app, "/n/005930", cookie=me)[2]
+    call(app, "/save", "POST", "k=note&r=005930&w=2026-10-05", me)
+    call(app, "/save", "POST", "k=learn&r=start&w=", me)
+    call(app, "/like", "POST", "t=005930&w=2026-10-05", me)
+    saved = call(app, "/me/saved", cookie=me)[2]
+    assert "내 저장 목록" in saved and "삼성전자" in saved and learn.BY_SLUG["start"]["title"] in saved
+    assert "삼성전자" in call(app, "/me/liked", cookie=me)[2]
+    assert "아직 저장한 글이 없어요" in call(app, "/me/saved", cookie=you)[2]  # 남의 저장은 안 보인다
+    assert "내 저장 목록" in call(app, "/me/settings", cookie=me)[2] and "내 좋아요 목록" in call(app, "/me/settings", cookie=me)[2]
+    call(app, "/save", "POST", "k=note&r=005930&w=2026-10-05&undo=1", me)
+    assert "삼성전자" not in call(app, "/me/saved", cookie=me)[2]
+    assert con.execute("select count(*) from regrams").fetchone()[0] == 0  # 저장은 리그램이 아니다
+    # 형광펜
+    got = json.loads(call(app, "/hl", "POST", "p=/n/005930&s=3&e=9&c=y&t=" + quote("많이 팔았어요"), me)[2])
+    assert got["id"] and json.loads(call(app, "/hl?p=/n/005930", cookie=me)[2]) == [{"id": got["id"], "s": 3, "e": 9, "t": "많이 팔았어요", "c": "y"}]
+    assert json.loads(call(app, "/hl?p=/n/005930", cookie=you)[2]) == []  # 남의 형광펜은 안 보인다
+    for bad in ("p=/evil&s=1&e=2&c=y&t=a", "p=/n/005930&s=5&e=2&c=y&t=a", "p=/n/005930&s=1&e=2&c=red&t=a", "p=/n/005930&s=1&e=2&c=y&t=" + "a" * 501):
+        assert json.loads(call(app, "/hl", "POST", bad, me)[2]) == {}
+    call(app, "/hl/del", "POST", f"id={got['id']}", you)
+    assert con.execute("select count(*) from highlights").fetchone()[0] == 1  # 남의 것은 못 지운다
+    call(app, "/hl/del", "POST", f"id={got['id']}", me)
+    assert con.execute("select count(*) from highlights").fetchone()[0] == 0
+    assert "selectionchange" in call(app, "/n/005930", cookie=me)[2]  # 형광펜 스크립트가 실린다
+
+
+def test_share_quote_to_profile():
+    """형광펜 띠의 「공유」 — 글에 실제로 있는 문장만 내 프로필(리그램)에 인용구로 (사용자 10/10)."""
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉')")
+    me = f"s={web.sign('1', SECRET)}"
+    said = lambda form: json.loads(call(app, "/hl/share", "POST", form, me)[2])["msg"]  # noqa: E731
+    assert said("p=/n/005930&t=" + quote("많이 팔았어요.")) == "내 프로필에 올렸어요"
+    body = call(app, "/me", cookie=me)[2]
+    assert "“많이 팔았어요.”" in body and "삼성전자" in body
+    assert said("p=/n/005930&t=" + quote("지금 당장 담으세요 여러분")) == "글에 있는 문장만 공유할 수 있어요"  # 제 말은 못 올린다
+    assert said("p=/n/005930&t=" + quote("가")) != "내 프로필에 올렸어요" and said("p=/evil&t=" + quote("많이 팔았어요.")) != "내 프로필에 올렸어요"
+    first = learn.BY_SLUG["start"]["body"][0].replace("**", "")[:30]
+    assert said("p=/learn/start&t=" + quote(first)) == "내 프로필에 올렸어요"
+    assert said("p=/n/005930&t=" + quote("매출이 늘었어요.")) == "내 프로필에 올렸어요"  # 같은 글에서 다시 — 바뀐다
+    rows = con.execute("select kind, ref, comment from regrams where user_id = 1 order by kind").fetchall()
+    assert rows == [("learn", "start", first), ("note", "005930", "매출이 늘었어요.")]
 
 
 def test_month_list_sorts_and_drops_minor():

@@ -95,6 +95,12 @@ create table if not exists follows (
 create table if not exists regrams (
   id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
   week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));
+create table if not exists saves (
+  id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
+  week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));
+create table if not exists highlights (
+  id integer primary key, user_id integer not null references users, page text not null,
+  s integer not null, e integer not null, text text not null, color text not null, at text not null);
 create table if not exists feedback (
   id integer primary key, user_id integer not null references users, ticker text, week text,
   helpful integer, would_pay integer, comment text, at text not null);
