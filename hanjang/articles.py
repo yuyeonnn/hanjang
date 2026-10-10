@@ -13,7 +13,12 @@ from hanjang import db, llm, notes, sources
 
 DAYS = 14  # 이 기간의 사건만
 BUYSELL = re.compile(r"샀|팔았|사들|팔아|담았|매입|처분")
-GUESS = re.compile(r"려는 (걸|것)|(걸|것)으로 볼 수|걸로 볼 수|걸 수도|셈일 수|의도|긍정적|부정적|호재|악재|영향을 (줄|미칠) 수|바빠지|바빠진|기대돼|기대가")  # 회사의 속뜻을 짐작하는 말
+GUESS = re.compile(r"려는 (걸|것)|(걸|것)으로 볼 수|걸로 볼 수|걸 수도|셈일 수|의도|긍정적|부정적|호재|악재|영향을 (줄|미칠) 수|바빠지|바빠진|기대돼|기대가"
+                   r"|으로 보여요|로 보여요|견실|안정적인 재무|좋은 실적|주목받|관심이 쏠|눈길을 끄")  # 회사의 속뜻을 짐작하는 말 · 좋다 나쁘다 평가 (22편 읽기 10/10)
+# 굵게 해도 줄거리가 안 잡히는 말 — 날짜만 · 값 없는 항목 이름만 · 주가 움직임 (22편 읽기 10/10)
+DULL = re.compile(r"^(\d{4}년 ?)?(\d{1,2}월 ?)?(\d{1,2}일)?$|^(\d{4}년 ?)?(상반기 ?)?(누적 ?)?(매출|영업이익|순이익|부채비율|영업이익률|ROE(\(자기자본이익률\))?|업종 평균|결산 실적)$"
+                  r"|^(계약|공급) ?(기간|상대방?|금액)$|하락|상승|급등|급락|주가")
+PRESS = re.compile(r"언론|보도(가|도|했|에 따르면)|기사(가|에)")  # 남의 보도를 말하려면 소식(N) 근거가 있어야 한다
 MAX_PER_RUN = 30  # 한 번에 쓰는 기사 수 상한 (비용) — 담은 종목의 사건부터
 MIN_CHARS = 900  # 본문이 이보다 짧으면 다시 쓰게 한다 (뉴닉 분량 — 사용자 10/8)
 
@@ -122,6 +127,8 @@ def check(j: dict, fs: list[dict]) -> dict:
             raise ValueError(f"금지어·예측·짐작: {text!r}")
         if holder and BUYSELL.search(text):
             raise ValueError("지분 보고를 사고팜으로")
+        if PRESS.search(text) and not any(r[0] == "N" for r in refs):
+            raise ValueError(f"근거 없는 언론 이야기: {text!r}")
         if any(f"「{t[1]}」" in text for t in n_titles):
             raise ValueError(f"소식 제목 인용: {text!r}")
     if (n := sum(len(x["text"]) for x in items(j))) < MIN_CHARS:
@@ -140,8 +147,10 @@ def write(con: sqlite3.Connection, ev: dict, today: date, dart: "sources.Dart | 
     name = con.execute("select name from stocks where ticker = ?", (ev["ticker"],)).fetchone()[0]
     try:
         doc = clean_doc((dart or sources.Dart()).doc_text(ev["ref"]))
-    except Exception:  # noqa: BLE001  원문을 못 받으면 요약 한 줄로만 (그래도 쓴다)
+    except Exception:  # noqa: BLE001
         doc = ""
+    if len(doc) < 200:  # 원문을 못 받았으면 쓰지 않는다 — 제목 한 줄로 쓰게 하면 AI 가 내용을 지어낸다(22편 읽기 10/10: 「자세한 건 공시에」만 되풀이, 없는 공급 품목). 내일 다시 받아 본다
+        return None
     fs = materials(con, ev, today, doc)
     payload = {"today": today.isoformat(), "name": name,
                "facts": [{"id": f["id"], "text": f["text"]} | ({"doc": f["doc"]} if f.get("doc") else {}) for f in fs]}  # fmt: skip
@@ -153,7 +162,12 @@ def pick_marks(j: dict, texts: list[str]) -> list[list[str]]:
     """AI 가 고른 강조할 말 — 그 문단에 글자 그대로 있는 4~24자, 문단마다 둘까지만 받는다(나머지는 버린다). 본문은 건드리지 않는다."""
     if len(j["marks"]) != len(texts):
         raise ValueError("문단 수가 다름")
-    out = [[m for m in dict.fromkeys(ms) if 4 <= len(m) <= 24 and m in t][:2] for ms, t in zip(j["marks"], texts)]
+    seen: set[str] = set()  # 같은 말을 문단마다 또 굵게 하지 않는다 (22편 읽기 10/10: 「유상증자」「계약금액은 …」이 두 번씩)
+    out = []
+    for ms, t in zip(j["marks"], texts):
+        ok = [m for m in dict.fromkeys(ms) if 4 <= len(m) <= 24 and m in t and m not in seen and not DULL.search(m) and not notes.LONGNUM.search(m)][:2]
+        seen.update(ok)
+        out.append(ok)
     if not any(out):
         raise ValueError("고른 말이 없음")
     return out

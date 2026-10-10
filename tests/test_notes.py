@@ -344,6 +344,8 @@ def test_article_check_rules():
     assert articles.check(ok, fs)["paragraphs"][0]["text"] == "9월 15일에 국민연금공단이 보고했어요."  # 원문(doc) 숫자는 그대로 옮겨도 된다
     for bad in ({"title": "국민연금, 주식 더 샀다"}, {"title": "실적에 긍정적일까"}, {"title": "3배 늘었다"}, {"title": "국민연금, 99% 늘렸다"},
                 {"paragraphs": ok["paragraphs"] + [s("보유 주식이 20,000,000주예요.")]},  # 재료에 없는 숫자
+                {"paragraphs": ok["paragraphs"] + [s("언론에서는 이 보고에 관심을 보였어요.")]},  # 소식(N) 근거 없이 언론 이야기 (22편 읽기 10/10)
+                {"paragraphs": ok["paragraphs"] + [s("재무 상태가 견실하다는 걸 보여줘요.", ("F1",))]},  # 좋다 나쁘다 평가
                 {"paragraphs": [ok["paragraphs"][0], ok["paragraphs"][2], ok["paragraphs"][3]]}):  # 너무 짧음
         with pytest.raises(ValueError):
             articles.check(ok | bad, fs)

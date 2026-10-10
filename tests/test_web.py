@@ -991,3 +991,22 @@ def test_article_key_phrases_are_emphasized_without_touching_the_text(monkeypatc
     assert '<strong class="font-semibold text-primary">935억 원</strong>' in page_ and "계약금액은 <strong" in page_  # 겹치면 먼저 고른 것만
     assert '<strong class="font-semibold text-primary">위탁생산(CMO)</strong>' in page_ and "&lt;b&gt;장기 계약&lt;/b&gt;" in page_  # 나머지는 그대로 탈출
     assert "**" not in call(app, "/feed", cookie=ck)[2]
+    # 굵게 해도 알려 주는 게 없는 말은 버린다 — 날짜만 · 값 없는 항목 이름 · 주가 움직임 · 긴 숫자 · 앞 문단에서 고른 말 (22편 읽기 10/10)
+    texts = ["2026년 10월 2일 영업이익은 2.1조 원이에요. 7%대 하락했어요. 24,480,000,000원이에요.", "영업이익은 2.1조 원이고 부채비율은 48.4%예요."]
+    got = articles.pick_marks({"marks": [["2026년 10월 2일", "영업이익", "7%대 하락", "24,480,000,000원", "영업이익은 2.1조 원"], ["영업이익은 2.1조 원", "부채비율", "부채비율은 48.4%"]]}, texts)
+    assert got == [["영업이익은 2.1조 원"], ["부채비율은 48.4%"]]
+
+
+def test_no_article_without_the_filing_text(monkeypatch):
+    """원문을 못 받은 채 제목 한 줄로 쓰게 했더니 「자세한 건 공시에」만 되풀이하고 없는 내용을 지어냈다 (22편 읽기 10/10)."""
+    from hanjang import articles, llm
+
+    _, con = _app()
+
+    class Dart:
+        def doc_text(self, rno):
+            raise RuntimeError("없음")
+
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError("AI 를 부르면 안 된다")))
+    ev = {"ref": "r", "ticker": "005930", "date": "2026-10-07", "kind": "MAJOR_CONTRACT", "fact": {"id": "E1", "text": "x", "url": "u", "tone": 0, "slots": {}}}
+    assert articles.write(con, ev, date(2026, 10, 10), Dart()) is None
