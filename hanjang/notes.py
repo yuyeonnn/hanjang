@@ -1363,7 +1363,8 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
     rows = [r for r in rows if not tickers or r[0] in tickers]
     week = week_of(today)
     by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
-    held = {t for (t,) in con.execute("select distinct ticker from holdings")}
+    # 예시 사람(personas.py)이 담은 종목은 「누가 담은 종목」으로 치지 않는다 — 소식 하나 바뀐 것으로 다시 쓰지 않게 (비용, 2026-10-11)
+    held = {t for (t,) in con.execute("select distinct h.ticker from holdings h join users u on u.id = h.user_id where u.email not like '%@persona.hanjang.local'")}
     for t, name in rows:
         fs = facts(con, t, today)
         if not fs:
