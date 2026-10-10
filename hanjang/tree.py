@@ -158,6 +158,23 @@ def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
             f'<p style="margin:8px 0 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
 
 
+def line(mood: str = "calm") -> str:
+    """선으로만 그린 연필 나무 — 줄기가 연필이고 수관은 구름 같은 한 줄. 안내·오류·기다림 화면의 얼굴 (사용자 10/11: 뉴닉 고슴도치처럼, 우리는 나무로).
+    mood: "oops"(걱정스러운 입 + 땀방울 — 오류) · "wait"(웃는 입 + 수관이 살랑 — 기다림) · "calm"(웃는 입 — 그 밖의 안내)."""
+    ink = 'fill="none" stroke="#8f9794" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"'
+    mouth = "M113 74 q7 -5 14 0" if mood == "oops" else "M113 71 q7 6 14 0"
+    drops = ('<path d="M190 34 q-7 10 0 14 q7 -4 0 -14 Z M204 52 q-5 8 0 11 q5 -3 0 -11 Z"/>' if mood == "oops" else "")
+    sway = ('<animateTransform attributeName="transform" type="rotate" values="-2.5 120 86;2.5 120 86;-2.5 120 86" dur="2.4s" repeatCount="indefinite"/>' if mood == "wait" else "")
+    return (f'<svg viewBox="0 0 240 170" width="200" role="img" aria-label="연필 나무" xmlns="http://www.w3.org/2000/svg"><g {ink}>'
+            '<path d="M28 152 H212"/>'  # 땅
+            '<path d="M111 84 V136 L120 151 L129 136 V84"/><path d="M111 136 H129 M120 96 V136"/>'  # 연필 줄기 — 깎은 끝이 땅에 닿는다
+            '<path d="M117 146 L120 151 L123 146 Z" fill="#8f9794"/>'  # 연필심
+            f'<g>{sway}<path d="M80 86 C60 86 54 64 70 55 C65 37 88 24 102 35 C110 17 138 17 145 36 C164 28 182 45 172 61 C188 69 181 88 162 86 Z" fill="#fcf8fb"/>'
+            '<path d="M92 52 q6 -8 14 -4 M148 50 q8 -2 10 6" />'  # 잎 결 두 줄
+            f'<circle cx="108" cy="62" r="2.1" fill="#8f9794" stroke="none"/><circle cx="132" cy="62" r="2.1" fill="#8f9794" stroke="none"/><path d="{mouth}"/></g>'
+            f'{drops}</g></svg>')  # fmt: skip
+
+
 if __name__ == "__main__":
     from pathlib import Path
 

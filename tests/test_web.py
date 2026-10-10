@@ -1431,3 +1431,19 @@ def test_others_see_my_tree_unless_private():
     call(app, "/follow", "POST", "u=1", b)
     call(app, "/follow/answer", "POST", "u=2&yes=1", a)
     assert "가가의 나무" in call(app, "/u/1", cookie=b)[2]
+
+
+def test_pencil_tree_on_notice_error_and_offline_pages():
+    from hanjang import tree
+
+    assert "animateTransform" in tree.line("wait") and "animateTransform" not in tree.line("oops")
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    a = f"s={web.sign('1', SECRET)}"
+    s404, _, body = call(app, "/nope", cookie=a)
+    assert s404.startswith("404") and "연필 나무" in body and "없는 화면이에요" in body
+    assert "연필 나무" in call(app, "/offline")[2]
+    app.cards = lambda *x, **k: 1 / 0  # 화면을 그리다 터져도
+    s500, _, body = call(app, "/", cookie=a)
+    assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body

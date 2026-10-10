@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import sys
 import threading
+import traceback
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -198,7 +199,7 @@ OFFLINE = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta nam
            '<title>연결이 끊겼어요 · 한장</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
            'background:#fcf8fb;color:#1b1b1d;font-family:system-ui,sans-serif;word-break:keep-all;text-align:center}main{padding:24px;max-width:360px}'
            'h1{font-size:20px;color:#154539}p{color:#404945;line-height:1.7}button{margin-top:12px;padding:12px 20px;border:0;border-radius:8px;background:#154539;color:#fff;font-size:15px}</style></head>'
-           '<body><main><h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
+           '<body><main>' + tree.line("oops") + '<h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
            '<button onclick="location.reload()">다시 열기</button></main></body></html>')  # fmt: skip
 PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#154539">'
             '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png"><link rel="icon" href="/static/icon-192.png" type="image/png">'
@@ -1345,6 +1346,18 @@ class App:
             return [json.dumps({"msg": "지금 사진을 읽는 사람이 많아요. 잠시 뒤에 다시 해 주세요."}, ensure_ascii=False).encode()]
         try:
             return self.respond(environ, start_response, method, path, n, cookie, uid, renew)
+        except Exception:  # 무엇이 잘못됐든 사용자는 「다시 불러오기」를 본다. 까닭은 서버 기록에 (journalctl -u hanjang-web)
+            traceback.print_exc()
+            try:
+                self.con.rollback()
+            except sqlite3.Error:
+                pass
+            body = page("문제가 생겼어요", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
+                        '<main class="w-full max-w-[480px] mx-auto px-margin pt-14 flex flex-col items-center text-center">'
+                        f'<div class="mt-12">{tree.line("oops")}</div><p class="mt-space-md font-body-reading text-body-reading">앗, 뭔가 문제가 있는 것 같아요!</p>'
+                        '<button class="mt-space-lg px-5 py-3 rounded-lg bg-primary text-on-primary font-body-reading-strong text-body-compact" onclick="location.reload()" type="button">다시 불러오기</button></main>')  # fmt: skip
+            start_response("500 Internal Server Error", [("Content-Type", "text/html; charset=utf-8")])
+            return [body.encode()]
         finally:
             if big:
                 self.uploads.release()
@@ -1397,8 +1410,10 @@ class App:
         return me
 
     def simple(self, title: str, msg: str) -> str:
+        art = tree.line("oops" if title == "없음" else "calm")  # 없는 화면엔 걱정스러운 얼굴, 그 밖의 안내엔 웃는 얼굴
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen",
-                    f'<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto px-margin pt-14"><p class="font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
+                    f'<main class="w-full max-w-[480px] lg:max-w-[760px] mx-auto px-margin pt-14 flex flex-col items-center text-center">'
+                    f'<div class="mt-12">{art}</div><p class="mt-space-md font-body-reading text-body-reading">{msg}</p></main>')  # fmt: skip
 
     def route(self, method, path, form, query, uid):
         if path == "/login" and method == "POST":
@@ -1847,7 +1862,7 @@ class App:
                  '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기 (사진을 AI 에 보내 종목 이름을 읽어요)" title="보유 종목 캡처로 담기 — 사진을 AI(OpenAI)에 보내 종목 이름을 읽어요. 저장하지 않아요">'
                  '<span class="material-symbols-outlined text-[20px]">photo_camera</span><input accept="image/*" class="hidden" id="scan-input" type="file"></label></form>'
                  '<div class="hidden fixed inset-0 z-[60] bg-surface/90 backdrop-blur-sm flex-col items-center justify-center gap-3 px-margin text-center" id="scan-wait" role="status">'
-                 '<span class="material-symbols-outlined text-primary text-[40px] animate-pulse">document_scanner</span>'
+                 + tree.line("wait") +
                  '<p class="font-headline-sm text-headline-sm text-on-surface">분석 중…</p>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant">캡처에서 종목 이름만 읽고 있어요. 사진은 저장하지 않아요.</p></div>'
                  '<div class="hidden absolute left-0 right-0 top-12 mt-1 bg-surface-container-lowest rounded-xl shadow-sm border border-surface-container-high/70 overflow-hidden z-40" id="search-flyout"><div class="p-1.5 flex flex-col gap-0.5" id="search-results"></div></div>'
