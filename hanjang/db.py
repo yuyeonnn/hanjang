@@ -101,6 +101,12 @@ create table if not exists saves (
 create table if not exists highlights (
   id integer primary key, user_id integer not null references users, page text not null,
   s integer not null, e integer not null, text text not null, color text not null, at text not null);
+create table if not exists blocks (
+  user_id integer not null references users, blocked_id integer not null references users, at text not null,
+  primary key (user_id, blocked_id));
+create table if not exists reports (
+  id integer primary key, user_id integer not null references users, target_id integer not null,
+  why text not null, at text not null, done_at text);
 create table if not exists feedback (
   id integer primary key, user_id integer not null references users, ticker text, week text,
   helpful integer, would_pay integer, comment text, at text not null);
@@ -123,6 +129,8 @@ def connect(path=PATH) -> sqlite3.Connection:
                             ("users", "mail_on", "integer not null default 1"),
                             ("users", "private", "integer not null default 0"), ("follows", "ok", "integer not null default 1"),  # 비공개 계정 — 팔로우는 요청(ok 0) → 수락하면 1 (사용자 10/10)  # 주간 안내 메일 켜짐(1)/꺼짐(0)
                             ("users", "nickname", "text"), ("users", "bio", "text"),
+                            ("users", "rules_at", "text"),  # 이용 규칙에 동의한 때 — 남에게 보이는 프로필(닉네임·소개·사진)을 만들기 전에 (앱 마켓의 사용자 콘텐츠 요구, 10/11)
+                            ("users", "banned", "integer not null default 0"),  # 운영자가 막은 계정 (python -m hanjang.moderate ban)
                             ("users", "photo", "blob"), ("users", "photo_at", "text"),
                             ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"), ("guru_holdings", "sic", "text"),
                             ("news", "summary", "text"),

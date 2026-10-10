@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import sys
@@ -37,6 +38,11 @@ MAX_STOCKS = 20  # PRD F2
 COHORT = re.compile(r"[a-z0-9-]{1,20}")  # 시험 묶음 이름 — 초대 링크 /?c=trial-1 (python -m hanjang.trial 이 센다)
 NICK = re.compile(r"[가-힣A-Za-z0-9_]{2,20}")  # 남에게 보이는 이름 — 이메일은 절대 보이지 않는다
 BIO_MAX = 150
+CODE_TRIES = 5  # 로그인 코드를 틀릴 수 있는 횟수 — 넘으면 그 코드는 버린다
+REPORT_WHY = ("욕설·혐오·성적인 표현", "사칭·남의 사진", "종목 추천·리딩방·광고", "기타")
+# 닉네임·자기소개에 쓸 수 없는 말 (이용 규칙 /rules) — 욕설 · 리딩방·광고 유도 · 연락처와 바깥 링크. 다 막지는 못한다: 빠져나간 것은 신고 → 운영자가 지운다
+BAD = re.compile(r"씨발|시발|ㅅㅂ|ㅆㅂ|병신|ㅂㅅ|좆|존나|개새|새끼|fuck|shit|bitch|섹스|야동"
+                 r"|리딩|수익 ?보장|원금 ?보장|무료 ?추천|종목 ?추천|단톡|오픈 ?채팅|open\.kakao|카톡|텔레그램|t\.me|https?://|www\.|\d{2,3}[- .]\d{3,4}[- .]\d{4}", re.I)
 BODY_MAX = 6_000_000  # 요청 본문 상한 — 캡처 사진(브라우저에서 줄여 보낸다)도 이 안에
 PHOTO_MAX = 300_000  # 프로필 사진 — 브라우저가 256px JPEG 로 줄여 보낸다. 이보다 크면 받지 않는다
 SCAN_HOURLY = 10
@@ -1247,6 +1253,7 @@ class App:
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
+        self.codes: dict[str, list] = {}  # 이메일 → [코드, 만료 시각, 틀린 횟수]
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
 
     @contextmanager
@@ -1341,7 +1348,9 @@ class App:
             return "200 OK", [], OFFLINE
         if path == "/.well-known/assetlinks.json":  # 안드로이드 앱(TWA)이 이 사이트 것임을 증명 — 서명 키 지문을 .env 에 넣으면 열린다
             return self.assetlinks()
-        if path in ("/privacy", "/method", "/help/login"):  # 로그인 없이 열린다
+        if path == "/login/code" and method == "POST":
+            return self.login_code(form.get("email", "").strip().lower(), form.get("code", ""), form.get("c", ""))
+        if path in ("/privacy", "/method", "/help/login", "/rules"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
             email = check_login(query.get("t", ""), self.secret, self.clock())
@@ -1358,10 +1367,16 @@ class App:
         if path == "/logout":
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)
-        if not self.con.execute("select nickname from users where id = ?", (uid,)).fetchone()[0]:
+        # 이용 규칙 동의도 여기서 — 남에게 보이는 프로필을 만들기 전에 (이미 닉네임이 있는 사람도 한 번 동의를 받는다)
+        nick, agreed, banned = self.con.execute("select nickname, rules_at, banned from users where id = ?", (uid,)).fetchone()
+        if banned:  # 운영자가 막은 계정 — 쿠키를 지우고 알린다
+            contact = env().get("PRIVACY_CONTACT", "")
+            return "403 Forbidden", [("Set-Cookie", "s=; Path=/; Max-Age=0")], self.simple(
+                "이용 제한", "이용 규칙을 어겨 이 계정은 쓸 수 없게 됐어요." + (f" 문의: {e(contact)}" if contact else "") + " <a class='text-primary underline' href='/rules'>이용 규칙</a>")
+        if not nick or not agreed:
             if path == "/welcome" and method == "POST":
-                return self.welcome(uid, form.get("nickname", "").strip())
-            return "200 OK", [], self.welcome_page()
+                return self.welcome(uid, form.get("nickname", "").strip(), form.get("rules") == "1")
+            return "200 OK", [], self.welcome_page(nick or "")
         if path == "/welcome":
             return self.see("/")
         if path == "/add" and method == "POST":
@@ -1401,9 +1416,14 @@ class App:
                 return self.see("/me")
             self.log(uid, "user")
             return self.user_page(uid, int(path[3:]))
+        if path in ("/block", "/report") and method == "POST":
+            other = int(form["u"]) if form.get("u", "").isdigit() else 0
+            if other == uid or not self.con.execute("select 1 from users where id = ?", (other,)).fetchone():
+                return self.see("/feed")
+            return self.block(uid, other) if path == "/block" else self.report_user(uid, other, form.get("why", ""))
         if path == "/follow" and method == "POST":  # 한 번 더 누르면 언팔로우
             other = int(form["u"]) if form.get("u", "").isdigit() else 0
-            if other != uid and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
+            if other != uid and other not in self.blocked(uid) and self.con.execute("select 1 from users where id = ? and nickname is not null", (other,)).fetchone():
                 if not self.con.execute("delete from follows where follower_id = ? and followee_id = ?", (uid, other)).rowcount:
                     shut = self.con.execute("select private from users where id = ?", (other,)).fetchone()[0]
                     self.con.execute("insert into follows (follower_id, followee_id, at, ok) values (?, ?, ?, ?)", (uid, other, datetime.now().isoformat(), 0 if shut else 1))
@@ -1453,7 +1473,8 @@ class App:
         if path == "/me/delete" and method == "POST":
             # 탈퇴 — 이 사용자의 모든 행을 지운다 (되돌릴 수 없음, 화면에서 한 번 더 확인)
             for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("likes", "user_id"),
-                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"), ("users", "id")):  # fmt: skip
+                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
+                               ("blocks", "user_id"), ("blocks", "blocked_id"), ("reports", "user_id"), ("reports", "target_id"), ("users", "id")):  # fmt: skip
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
@@ -1482,7 +1503,13 @@ class App:
         box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
             '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
             f'<span class="font-body-reading-strong text-body-compact text-on-surface truncate" id="target-email-preview">{e(sent)}</span></div>'
-            '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크를 보냈어요. 15분 안에 메일함 속 링크를 눌러 주세요.</p><div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
+            '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크와 6자리 코드를 보냈어요. 15분 안에 메일 속 링크를 누르거나, 코드를 아래에 넣어 주세요.</p>'
+            # 코드 넣기 — 앱(웹뷰)이나 홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열려 로그인이 안 이어진다. 코드는 어디서든 된다 (앱 출시 준비 10/11)
+            f'<form method="post" action="/login/code" class="mt-2.5 flex items-center gap-2"><input type="hidden" name="email" value="{e(sent)}">{hidden}'
+            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
+            'class="flex-1 min-w-0 font-body-reading text-body-reading bg-surface-container-lowest text-on-surface placeholder:text-outline rounded-lg px-4 py-2.5 focus:outline-none tracking-widest">'
+            '<button class="shrink-0 px-4 py-2.5 bg-primary text-on-primary font-label-regular text-label-regular font-semibold rounded-lg" type="submit">확인</button></form>'
+            '<div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
             f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
@@ -1541,6 +1568,7 @@ class App:
             return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
         self.con.execute("insert or ignore into users (email, created_at, nickname, mail_on) values (?, ?, '둘러보기', 0)",
                          (DEMO_EMAIL, datetime.now().isoformat()))  # fmt: skip
+        self.con.execute("update users set rules_at = coalesce(rules_at, created_at) where email = ?", (DEMO_EMAIL,))  # 공용 계정 — 닉네임이 정해져 있어 규칙 동의 관문을 지나게
         (u,) = self.con.execute("select id from users where email = ?", (DEMO_EMAIL,)).fetchone()
         for t in DEMO_STOCKS:
             if self.con.execute("select 1 from stocks where ticker = ?", (t,)).fetchone():
@@ -1579,9 +1607,27 @@ class App:
             return "429 Too Many Requests", [], self.login_page(error="로그인 요청이 너무 많아요. 한 시간쯤 뒤에 다시 해 주세요.", cohort=cohort)
         self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
+        code = f"{secrets.randbelow(10**6):06d}"
+        self.codes[email] = [code, now + LINK_TTL, 0]  # ponytail: 메모리에 — 서버를 다시 켜면 코드는 사라지고 링크만 남는다(링크는 서명이라 그대로 된다)
         with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
-            mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+            mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
+
+    def login_code(self, email: str, code: str, cohort: str = ""):
+        """메일로 받은 6자리 코드로 들어온다. 틀리면 CODE_TRIES 번까지 — 넘으면 그 코드는 버리고 새로 받아야 한다
+        (6자리는 100만 가지라 마구 넣어 볼 수 있다. 코드 하나에 5번, 새 코드는 한 시간에 5통 → 한 시간에 많아야 25번)."""
+        row = self.codes.get(email)
+        if not row or self.clock() > row[1]:
+            self.codes.pop(email, None)
+            return "200 OK", [], self.login_page(error="코드가 만료됐어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
+        if not hmac.compare_digest(row[0], code.strip()):
+            row[2] += 1
+            if row[2] >= CODE_TRIES:
+                del self.codes[email]
+                return "200 OK", [], self.login_page(error="코드를 여러 번 틀렸어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
+            return "200 OK", [], self.login_page(email, error=f"코드가 맞지 않아요. 메일의 숫자 6자리를 다시 봐 주세요. ({CODE_TRIES - row[2]}번 남음)", cohort=cohort)
+        del self.codes[email]  # 한 번만 쓴다
+        return self.start(email, cohort)
 
     def src(self, rno: str | None) -> str:
         """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽."""
@@ -1719,7 +1765,7 @@ class App:
                  '<form method="post" action="/add" class="h-11 w-full bg-surface-container-low/60 rounded-xl flex items-center px-3 border border-surface-container-high/60 focus-within:border-primary-container focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline text-[20px] mr-2">search</span>'
                  '<input autocomplete="off" class="w-full bg-transparent text-on-surface font-body-compact text-body-compact placeholder:text-outline focus:outline-none" id="stock-search-input" name="q" placeholder="종목 이름 또는 코드로 담기" type="text">'
                  '<button class="shrink-0 ml-1.5 px-3 py-1 bg-primary text-on-primary rounded-lg font-label-micro text-label-micro font-semibold shadow-sm active:scale-95 transition-transform" id="btn-quick-add" type="submit">담기</button>'
-                 '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기" title="보유 종목 캡처로 담기">'
+                 '<label class="shrink-0 ml-1 w-8 h-8 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer" aria-label="보유 종목 캡처로 담기 (사진을 AI 에 보내 종목 이름을 읽어요)" title="보유 종목 캡처로 담기 — 사진을 AI(OpenAI)에 보내 종목 이름을 읽어요. 저장하지 않아요">'
                  '<span class="material-symbols-outlined text-[20px]">photo_camera</span><input accept="image/*" class="hidden" id="scan-input" type="file"></label></form>'
                  '<div class="hidden fixed inset-0 z-[60] bg-surface/90 backdrop-blur-sm flex-col items-center justify-center gap-3 px-margin text-center" id="scan-wait" role="status">'
                  '<span class="material-symbols-outlined text-primary text-[40px] animate-pulse">document_scanner</span>'
@@ -1757,7 +1803,9 @@ class App:
                  "document.addEventListener('click',ev=>{if(!inp.contains(ev.target)&&!fly.contains(ev.target))fly.classList.add('hidden');});"
                  # 캡처 → 브라우저에서 1600px 로 줄여 JPEG 로 → /scan. 끝나면 결과 문장과 함께 새로 그린다
                  "const sc=document.getElementById('scan-input'),wait=document.getElementById('scan-wait');"
-                 "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;wait.classList.remove('hidden');wait.classList.add('flex');"
+                 "sc.addEventListener('change',async()=>{const f=sc.files[0];if(!f)return;"
+                 "if(!confirm('캡처에서 종목 이름을 읽으려고 이 사진을 AI(OpenAI, 미국)에 보내요.\n한장은 사진을 저장하지 않고, 읽어 낸 종목 이름만 담아요.\n계좌번호·금액이 보이면 가리고 올려도 돼요.\n\n보낼까요?')){sc.value='';return;}"
+                 "wait.classList.remove('hidden');wait.classList.add('flex');"
                  "try{const bmp=await createImageBitmap(f);const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');"
                  "c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);"
                  "const r=await fetch('/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:c.toDataURL('image/jpeg',0.85)})});"
@@ -2184,7 +2232,7 @@ class App:
                  + go("bookmark", "내 저장 목록", "/me/saved") + go("favorite", "내 좋아요 목록", "/me/liked")
                  + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
                  + row("inventory_2", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
-                 + switch + lock + "</section>"
+                 + switch + lock + go("description", "이용 규칙", "/rules") + "</section>" + self.blocked_list(uid) +
                  '<button class="mt-space-xl w-full py-3 rounded-lg border border-outline-variant/60 text-on-surface-variant font-body-reading-strong text-body-compact hover:bg-surface-container-low transition-colors" '
                  'onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button>'
                  '<form method="post" action="/me/delete" onsubmit="return confirm(\'탈퇴하면 이메일과 담은 종목, 기록이 모두 지워지고 되돌릴 수 없어요. 탈퇴할까요?\')">'
@@ -2348,7 +2396,7 @@ class App:
         """닉네임 검사 — 문제가 없으면 빈 글. 겹침은 대소문자를 무시하고 본다(DB 유일 색인과 같게)."""
         if not NICK.fullmatch(nick):
             return "닉네임은 한글·영문·숫자·_ 2~20자로 정해 주세요."
-        if notes.FORBIDDEN.search(nick):
+        if notes.FORBIDDEN.search(nick) or BAD.search(nick):
             return "닉네임에 쓸 수 없는 말이 들어 있어요."
         if self.con.execute("select 1 from users where nickname = ? collate nocase and id != ?", (nick, uid)).fetchone():
             return f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요."
@@ -2361,16 +2409,21 @@ class App:
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">다른 사람에게는 이메일 대신 이 이름이 보여요. 한글·영문·숫자 2~20자, 다른 사람과 겹칠 수 없어요.</p>'
                  '<form method="post" action="/welcome" class="mt-space-lg flex flex-col gap-space-sm">'
                  f'<input autofocus class="w-full font-body-reading text-body-reading bg-surface-container-low rounded-lg px-4 py-3.5 focus:outline-none" maxlength="20" name="nickname" required value="{e(nick)}">'
+                 # 이용 규칙 동의 — 닉네임·소개·사진이 남에게 보이기 전에 (앱 마켓이 사용자 콘텐츠가 있는 앱에 요구한다)
+                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1">'
+                 '<span>[필수] <a class="text-primary underline" href="/rules" target="_blank">이용 규칙</a>에 동의해요 — 욕설·사칭·종목 추천·광고는 올리지 않아요</span></label>'
                  + (f'<p class="font-body-compact text-body-compact text-tertiary" role="alert">{e(error)}</p>' if error else "")
                  + '<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">시작하기</button></form>'
                  '</div></main>')  # fmt: skip
         return page("닉네임", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
-    def welcome(self, uid: int, nick: str):
+    def welcome(self, uid: int, nick: str, agreed: bool = False):
         if err := self.nick_error(uid, nick):
             return "200 OK", [], self.welcome_page(nick, err)
+        if not agreed:
+            return "200 OK", [], self.welcome_page(nick, "이용 규칙에 동의해야 시작할 수 있어요.")
         try:
-            self.con.execute("update users set nickname = ? where id = ?", (nick, uid))
+            self.con.execute("update users set nickname = ?, rules_at = ? where id = ?", (nick, datetime.now().isoformat(), uid))
             self.con.commit()
         except sqlite3.IntegrityError:  # 거의 같은 때 누가 먼저 가져간 경우
             return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.")
@@ -2381,6 +2434,8 @@ class App:
             return self.see("/me/settings?msg=" + quote(err))
         if len(bio) > BIO_MAX or notes.FORBIDDEN.search(bio):
             return self.see("/me/settings?msg=" + quote("자기소개에 종목을 사라·팔라는 말이나 추천은 쓸 수 없어요."))
+        if BAD.search(bio):
+            return self.see("/me/settings?msg=" + quote("자기소개에 욕설·광고·연락처·바깥 링크는 쓸 수 없어요."))
         try:
             self.con.execute("update users set nickname = ?, bio = ? where id = ?", (nick, bio or None, uid))
             self.con.commit()
@@ -2537,7 +2592,9 @@ class App:
         if not q:
             return ""
         rows = self.con.execute("select id, nickname, bio, photo_at from users where nickname is not null and id != ? and nickname like ?"
-                                " limit 20", (uid, f"%{q}%")).fetchall()  # fmt: skip
+                                " limit 40", (uid, f"%{q}%")).fetchall()  # fmt: skip
+        gone = self.blocked(uid)  # 차단한·차단당한 사람은 찾기에도 안 나온다
+        rows = [r for r in rows if r[0] not in gone][:20]
         items = "".join(f'<a href="/u/{i}" class="py-space-sm flex items-center gap-space-sm">{self.face(n, photo=photo_url(i, p))}<span class="flex flex-col min-w-0">'
                         f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">{e(n)}</span>'
                         f'<span class="font-label-micro text-label-micro text-on-surface-variant truncate">{e(b or "")}</span></span></a>' for i, n, b, p in rows)  # fmt: skip
@@ -2635,7 +2692,8 @@ class App:
             " (select count(*) from follows f where f.followee_id = u.id and f.ok = 1) fer"
             " from users u where u.nickname is not null and u.id != ? and u.id not in (select followee_id from follows where follower_id = ?)",
             (since, since, uid, uid)).fetchall()  # fmt: skip
-        rows = sorted(rows, key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
+        gone = self.blocked(uid)
+        rows = sorted((r for r in rows if r[0] not in gone), key=lambda r: (-(r[3] * 2 + r[4] + r[5]), r[1]))[:10]
         if not rows:
             return ""
 
@@ -2700,11 +2758,60 @@ class App:
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return page("피드", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
+    def blocked(self, uid: int) -> set[int]:
+        """내가 차단했거나 나를 차단한 사람 — 서로 보이지 않는다."""
+        return {a if a != uid else b for a, b in self.con.execute("select user_id, blocked_id from blocks where user_id = ? or blocked_id = ?", (uid, uid))}
+
+    def blocked_list(self, uid: int) -> str:
+        """설정 화면 — 차단한 사람. 찾기에 안 나오니 푸는 길은 여기(이름을 누르면 「차단 풀기」가 있는 화면)."""
+        rows = self.con.execute("select u.id, u.nickname from blocks b join users u on u.id = b.blocked_id where b.user_id = ? order by b.at desc", (uid,)).fetchall()
+        if not rows:
+            return ""
+        return ('<section class="mt-space-lg"><h2 class="font-label-regular text-label-regular text-on-surface font-semibold">차단한 사람</h2><div class="mt-1 flex flex-col">'
+                + "".join(f'<a class="py-2 font-body-compact text-body-compact text-primary underline" href="/u/{i}">{e(n or "(이름 없음)")}</a>' for i, n in rows) + "</div></section>")
+
+    def block(self, uid: int, other: int):
+        """차단(한 번 더 누르면 풀기) — 서로의 팔로우·요청을 지운다. 그래서 피드에도 저절로 안 나온다."""
+        if not self.con.execute("delete from blocks where user_id = ? and blocked_id = ?", (uid, other)).rowcount:
+            self.con.execute("insert into blocks values (?, ?, ?)", (uid, other, datetime.now().isoformat()))
+            self.con.execute("delete from follows where (follower_id = ? and followee_id = ?) or (follower_id = ? and followee_id = ?)", (uid, other, other, uid))
+        self.con.commit()
+        return self.see(f"/u/{other}")
+
+    def report_user(self, uid: int, other: int, why: str):
+        """신고 — 적어 두고 운영자에게 바로 메일. 같은 사람을 여러 번 눌러도 처리 전에는 한 건. 처리는 `python -m hanjang.moderate`."""
+        why = why if why in REPORT_WHY else "기타"
+        if not self.con.execute("select 1 from reports where user_id = ? and target_id = ? and done_at is null", (uid, other)).fetchone():
+            self.con.execute("insert into reports (user_id, target_id, why, at) values (?, ?, ?, ?)", (uid, other, why, datetime.now().isoformat()))
+            self.con.commit()
+            nick, bio, has_photo = self.con.execute("select nickname, bio, photo is not null from users where id = ?", (other,)).fetchone()
+            if to := env().get("SMTP_USER"):
+                with self.outside():
+                    mail.send(to, f"[한장] 신고 — {why}", f"신고된 사람: #{other} {nick or '(닉네임 없음)'}\n자기소개: {bio or '(없음)'}\n프로필 사진: {'있음' if has_photo else '없음'}\n"
+                              f"프로필: {mail.base_url()}/u/{other}\n신고한 사람: #{uid}\n\n24시간 안에 확인해요(이용 규칙). 서버에서:\n"
+                              f"  프로필 지우기  python -m hanjang.moderate wipe {other}\n  계정 막기      python -m hanjang.moderate ban {other}\n  문제없음       python -m hanjang.moderate ok {other}")  # fmt: skip
+        return "200 OK", [], self.simple("신고", f"신고를 받았어요. 운영자가 24시간 안에 확인해요. <a class='text-primary underline' href='/u/{other}'>돌아가기</a>")
+
     def user_page(self, uid: int, other: int):
         row = self.con.execute("select nickname, bio, photo_at from users where id = ? and nickname is not null", (other,)).fetchone()
-        if not row:  # 닉네임이 없는 사람은 남에게 보이지 않는다
+        mine = self.con.execute("select 1 from blocks where user_id = ? and blocked_id = ?", (uid, other)).fetchone()
+        if not row or (other in self.blocked(uid) and not mine):  # 닉네임이 없는 사람 · 나를 차단한 사람은 보이지 않는다
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요. <a class='text-primary underline' href='/feed'>피드</a>")
         nick, bio, pat = row
+        if mine:  # 내가 차단한 사람 — 이름과 풀기 단추만
+            return "200 OK", [], self.simple(nick, f"<b>{e(nick)}</b> 님을 차단했어요. 서로의 프로필과 리그램이 보이지 않아요."
+                                             f"<form method='post' action='/block' class='mt-4'><input type='hidden' name='u' value='{other}'>"
+                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>")
+        # 신고·차단 — 눈에 띄지 않게 접어 둔다 (앱 마켓의 사용자 콘텐츠 요구: 신고 · 차단 · 빠른 처리)
+        more = ('<details class="mt-space-lg"><summary class="font-label-micro text-label-micro text-outline cursor-pointer">신고 · 차단</summary>'
+                '<div class="mt-2 flex flex-col gap-3 rounded-xl border border-outline-variant/50 px-space-md py-3">'
+                f'<form method="post" action="/report" class="flex flex-col gap-2"><input type="hidden" name="u" value="{other}">'
+                '<span class="font-label-regular text-label-regular text-on-surface font-semibold">이 프로필 신고하기</span>'
+                + "".join(f'<label class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant"><input class="accent-primary" name="why" required type="radio" value="{w}">{w}</label>' for w in REPORT_WHY)
+                + '<button class="self-start font-label-regular text-label-regular text-tertiary underline" type="submit">신고 보내기</button></form>'
+                f'<form method="post" action="/block" onsubmit="return confirm(\'차단하면 서로 팔로우가 풀리고, 서로의 프로필과 리그램이 보이지 않아요. 차단할까요?\')"><input type="hidden" name="u" value="{other}">'
+                '<button class="font-label-regular text-label-regular text-tertiary underline" type="submit">이 사람 차단하기</button></form>'
+                '<a class="font-label-micro text-label-micro text-outline underline" href="/rules">이용 규칙</a></div></details>')  # fmt: skip
         label, on = self.follow_state(uid, other)
         btn = "border border-outline-variant/60 text-on-surface-variant" if on else "bg-primary text-on-primary"
         shut = ('<div class="mt-space-xl py-10 flex flex-col items-center gap-2 border-t border-surface-container-high text-center">'
@@ -2718,6 +2825,7 @@ class App:
                  f'<form method="post" action="/follow"><input type="hidden" name="u" value="{other}"><button class="px-4 py-2 rounded-lg font-label-regular text-label-regular font-semibold {btn}" type="submit">{label}</button></form></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
                  + (self.regram_list("where r.user_id = ?", (other,), f"{nick}의 리그램", mine=True) if see else shut)
+                 + (more if other != uid else "")
                  + "</div></main>" + bottom_nav("feed"))  # fmt: skip
         return "200 OK", [], page(nick, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2913,7 +3021,7 @@ class App:
     def doc(self, path: str, uid: int | None) -> str:
         contact = env().get("PRIVACY_CONTACT", "")
         title, parts = {"/privacy": ("개인정보 처리방침", policy.privacy(contact)), "/method": ("계산 방법", policy.method()),
-                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact))}[path]  # fmt: skip
+                        "/help/login": ("로그인 링크가 안 와요", policy.login_help(contact)), "/rules": ("이용 규칙", policy.rules(contact))}[path]  # fmt: skip
         body = "".join(
             f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-primary mb-space-xs">{e(h)}</h2>'
             + "".join(f'<p class="font-body-compact text-body-compact text-on-surface leading-relaxed mb-space-sm">{self.marked(x)}</p>' for x in ps)

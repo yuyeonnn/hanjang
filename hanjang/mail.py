@@ -42,10 +42,12 @@ def send(to: str, subject: str, text: str, html: str = "") -> bool:
     return True
 
 
-def login_mail(link: str) -> tuple[str, str]:
-    return ("[한장] 로그인 링크예요",
-            f"아래 링크를 누르면 한장에 들어가요. 15분 동안만 쓸 수 있어요.\n\n{link}\n\n"
-            "직접 요청하지 않았다면 이 메일은 지우셔도 돼요.")  # fmt: skip
+def login_mail(link: str, code: str) -> tuple[str, str]:
+    """링크와 6자리 코드 둘 다 — 앱에서는 메일의 링크가 다른 브라우저로 열려 로그인이 안 이어질 수 있어, 그때는 코드를 앱 화면에 넣는다."""
+    return (f"[한장] 로그인 코드 {code}",
+            f"한장에 들어가는 두 가지 길이에요. 둘 다 15분 동안만 쓸 수 있어요.\n\n"
+            f"① 아래 링크 누르기\n{link}\n\n② 한장 화면에 이 코드 넣기\n{code}\n\n"
+            "직접 요청하지 않았다면 이 메일은 지우셔도 돼요. 코드를 남에게 알려 주지 마세요.")  # fmt: skip
 
 
 # 화면과 같은 색 (docs/design.md 「Warm Editorial Finance」) — 메일 앱은 CSS 파일·클래스·웹 글꼴을 못 읽어
