@@ -2167,9 +2167,9 @@ class App:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
+                 + self.my_tree(uid)  # 내 나무는 맨 위, 위아래로 넉넉히 띄워서 (사용자 10/11)
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
                  + self.suggest(uid)
-                 + self.my_tree(uid)  # 내 나무는 맨 밑 (사용자 10/11)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
@@ -2182,7 +2182,7 @@ class App:
         name, left = tree.stage(n)
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
-        return ('<section class="mt-space-lg"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
+        return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
                 '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
                 f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                 f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
