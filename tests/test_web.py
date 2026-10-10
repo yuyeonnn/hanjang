@@ -13,6 +13,8 @@ SECRET = "test-secret"
 
 def _app(now=1_000_000.0):
     con = db.connect(":memory:")
+    # 테스트가 표에 바로 넣는 사람(닉네임 있음)은 이용 규칙에 동의한 것으로 — 동의 관문 자체는 닉네임 테스트가 본다
+    con.execute("create trigger agreed after insert on users when new.nickname is not null begin update users set rules_at = 'x' where id = new.id; end")
     collect.save_universe(con, [("005930", "삼성전자")], {})
     body = {"headline": "<script>x</script> 매출이 늘었어요.", "summary": [],
             "sections": [{"title": "회사 사정은 어떤가요?",
@@ -46,7 +48,7 @@ def _login(app, nick="나"):
     link = "/auth?t=" + quote(web.login_token("me@x.kr", SECRET, 1_000_000.0))
     _, h, _ = call(app, link)
     ck = h["Set-Cookie"].split(";")[0]
-    call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉"), ck)  # 가입할 때 닉네임
+    call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉") + "&rules=1", ck)  # 가입할 때 닉네임 + 이용 규칙 동의
     return ck
 
 
@@ -374,7 +376,8 @@ def test_nickname_is_asked_at_signup_and_unique():
     assert "닉네임을 정해 주세요" in call(app, "/feed", cookie=ck)[2]
     assert "이미 누가 쓰고 있어요" in call(app, "/welcome", "POST", "nickname=hanjang", ck)[2]  # 대소문자만 달라도 겹침
     assert "2~20자" in call(app, "/welcome", "POST", "nickname=a", ck)[2]
-    assert call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[1]["Location"] == "/"
+    assert "이용 규칙에 동의해야" in call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[2]  # 동의 없이는 안 된다
+    assert call(app, "/welcome", "POST", "nickname=" + quote("새사람") + "&rules=1", ck)[1]["Location"] == "/"
     assert "닉네임을 정해 주세요" not in call(app, "/", cookie=ck)[2]
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=", ck)[1]["Location"]  # 비울 수 없다
 
@@ -952,8 +955,8 @@ def test_save_lists_and_highlighter():
     app, con = _app()
     con.execute("insert into users (id, email, created_at) values (1, 'me@b.c', '2026-10-01'), (2, 'you@b.c', '2026-10-01')")
     me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
-    con.execute("update users set nickname = '나닉' where id = 1")
-    con.execute("update users set nickname = '너닉' where id = 2")
+    con.execute("update users set nickname = '나닉', rules_at = 'x' where id = 1")
+    con.execute("update users set nickname = '너닉', rules_at = 'x' where id = 2")
     assert 'action="/save"' in call(app, "/n/005930", cookie=me)[2]
     call(app, "/save", "POST", "k=note&r=005930&w=2026-10-05", me)
     call(app, "/save", "POST", "k=learn&r=start&w=", me)
@@ -1187,3 +1190,82 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
     assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
     h = ask(1000, "5.5.5.5")["headers"]
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+
+
+def test_login_with_six_digit_code_from_the_mail(monkeypatch):
+    """앱(웹뷰)·홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열린다 — 메일의 6자리 코드를 화면에 넣어 들어온다 (앱 출시 준비 10/11)."""
+    app, _ = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((to, subject, text)))
+    body = call(app, "/login", "POST", "email=a%40b.c&agree=1")[2]
+    assert 'action="/login/code"' in body and 'name="code"' in body
+    code = mails[0][1].split()[-1]
+    assert re.fullmatch(r"\d{6}", code) and code in mails[0][2] and "/auth?t=" in mails[0][2]  # 링크와 코드 둘 다
+    wrong = "000000" if code != "000000" else "111111"
+    s, h, body = call(app, "/login/code", "POST", f"email=a%40b.c&code={wrong}")
+    assert s.startswith("200") and "Set-Cookie" not in h and "맞지 않아요" in body and "4번 남음" in body
+    s, h, _ = call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")
+    assert s.startswith("303") and "s=" in h["Set-Cookie"]
+    assert "만료" in call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")[2]  # 한 번만 쓴다
+    assert "만료" in call(app, "/login/code", "POST", "email=x%40b.c&code=123456")[2]  # 받은 적 없는 주소
+
+    app, _ = _app()  # 다섯 번 틀리면 그 코드는 버린다 — 맞는 코드도 더는 안 된다
+    mails.clear()
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    code = mails[0][1].split()[-1]
+    wrong = "000000" if code != "000000" else "111111"
+    for _ in range(web.CODE_TRIES):
+        last = call(app, "/login/code", "POST", f"email=a%40b.c&code={wrong}")[2]
+    assert "여러 번 틀렸어요" in last and "Set-Cookie" not in call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")[1]
+
+    app, _ = _app(now=1_000_000.0)  # 15분이 지나면 만료
+    mails.clear()
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    app.clock = lambda: 1_000_000.0 + web.LINK_TTL + 1
+    assert "만료" in call(app, "/login/code", "POST", f"email=a%40b.c&code={mails[0][1].split()[-1]}")[2]
+
+
+def test_report_block_rules_and_ban(monkeypatch):
+    """앱 마켓이 남에게 보이는 프로필(사용자 콘텐츠)이 있는 앱에 요구하는 것 — 이용 규칙 동의 · 금지 말 거르기 · 신고 · 차단 · 계정 막기 (10/11)."""
+    from hanjang import moderate
+
+    app, con = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((subject, text)))
+    monkeypatch.setattr(web, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
+    con.execute("insert into users (id, email, created_at, nickname, bio) values (1, 'a@b.c', '2026-10-01', '가가', '소개'), (2, 'b@b.c', '2026-10-01', '나나', null), (3, 'c@b.c', '2026-10-01', '다다', null)")
+    con.commit()
+    a, b, c = (f"s={web.sign(str(i), SECRET)}" for i in (1, 2, 3))
+    assert "올리면 안 되는 것" in call(app, "/rules")[2] and "help@x.kr" in call(app, "/rules")[2]  # 로그인 없이 · 연락처
+    # 금지 말 — 닉네임·자기소개
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("리딩방장") + "&bio=", a)[1]["Location"]
+    assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가가") + "&bio=" + quote("문의 open.kakao.com/o/x"), a)[1]["Location"]
+    # 신고 — 한 건으로 적히고 운영자에게 메일
+    p = call(app, "/u/1", cookie=b)[2]
+    assert 'action="/report"' in p and 'action="/block"' in p and 'action="/report"' not in call(app, "/u/1", cookie=a)[2]  # 내 프로필엔 없다
+    assert "24시간" in call(app, "/report", "POST", "u=1&why=" + quote("사칭·남의 사진"), b)[2]
+    call(app, "/report", "POST", "u=1&why=x", b)
+    assert con.execute("select user_id, target_id, why from reports").fetchall() == [(2, 1, "사칭·남의 사진")] and len(mails) == 1
+    assert "사칭" in mails[0][0] and "moderate wipe 1" in mails[0][1] and "가가" in mails[0][1]
+    # 차단 — 서로 팔로우가 풀리고, 서로 안 보이고, 다시 팔로우도 안 된다. 풀면 돌아온다
+    call(app, "/follow", "POST", "u=1", b), call(app, "/follow", "POST", "u=2", a)
+    call(app, "/block", "POST", "u=1", b)
+    assert con.execute("select count(*) from follows").fetchone() == (0,)
+    assert call(app, "/u/2", cookie=a)[0].startswith("404") and "차단 풀기" in call(app, "/u/1", cookie=b)[2]  # 당한 쪽엔 없는 사람, 한 쪽엔 풀기
+    call(app, "/follow", "POST", "u=2", a)
+    assert con.execute("select count(*) from follows").fetchone() == (0,)
+    assert "가가" not in call(app, "/feed?q=" + quote("가"), cookie=b)[2] and "가가" in call(app, "/feed?q=" + quote("가"), cookie=c)[2]  # 사람 찾기
+    assert "차단한 사람" in call(app, "/me/settings", cookie=b)[2] and "차단한 사람" not in call(app, "/me/settings", cookie=a)[2]
+    call(app, "/block", "POST", "u=1", b)
+    assert call(app, "/u/2", cookie=a)[0].startswith("200")
+    # 운영자 처리 — 프로필 지우기: 닉네임부터 다시(규칙 동의도), 신고는 닫힌다. 막기: 쿠키가 있어도 못 쓴다
+    assert [r[0] for r in moderate.pending(con)] == [1]
+    moderate.act(con, "wipe", 1)
+    assert moderate.pending(con) == [] and "닉네임을 정해 주세요" in call(app, "/", cookie=a)[2] and call(app, "/u/1", cookie=c)[0].startswith("404")
+    moderate.act(con, "ban", 1)
+    s, h, body = call(app, "/", cookie=a)
+    assert s.startswith("403") and "Max-Age=0" in h["Set-Cookie"] and "help@x.kr" in body
+    # 탈퇴하면 차단·신고 기록도 지운다
+    call(app, "/block", "POST", "u=3", b), call(app, "/report", "POST", "u=3&why=" + quote("기타"), b)
+    call(app, "/me/delete", "POST", "", b)
+    assert con.execute("select (select count(*) from blocks) + (select count(*) from reports)").fetchone() == (0,)
