@@ -157,7 +157,7 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
     for t, items in list(by.items())[:4]:
         nm = name.get(t, t)
         body = " ".join(("" if i == 0 else "이와 함께 ") + happened(title, ai) for i, (_, title, _, _, ai) in enumerate(items[:2]))
-        news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}"})
+        news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}", "body": body, "tag": KIND.get(items[0][3], "공시")})
         codes += [("EARNINGS_US" if c == "EARNINGS" and not t.isdigit() else c, t) for _, _, _, c, _ in items]
     follows = []
     if uid:
@@ -207,56 +207,78 @@ def text(m: dict) -> str:
     return "\n".join(out)
 
 
+KIND = {"RIGHTS_ISSUE": "유상증자", "CB_BW": "전환사채", "BONUS_ISSUE": "무상증자", "EARNINGS": "실적", "MAJOR_CONTRACT": "큰 계약", "BUYBACK": "자사주",
+        "DIVIDEND": "배당", "MA": "지분·합병", "CLINICAL": "신약", "TRADING_HALT": "거래 정지", "EXEC": "경영진", "DEBT": "빚", "LAWSUIT": "소송",
+        "WRITE_DOWN": "손상", "HOLDER_CHANGE": "최대주주"}  # fmt: skip
+
+
 def html(m: dict) -> str:
-    """홈 맨 위에 놓을 카드 한 장 — 회사마다 한 문단(이름에 원문 링크) · 이번 주는 날짜 타임라인 · 꿀팁."""
-    # 소제목 — 노트의 「무엇으로 돈을 버나요?」처럼 초록 점 + 굵은 글씨, 크기는 본문과 비슷하게 (사용자 10/10)
-    h3 = '<div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span><h3 class="text-[16px] font-bold text-on-surface">{}</h3></div>'
-    link = 'class="text-on-surface font-semibold underline underline-offset-2"'
-    paras = "".join(f'<p class="mt-2 font-body-reading text-body-reading text-on-surface leading-relaxed">'
-                    + e(x["text"]).replace(e(x["name"]), f'<a {link} href="{e(x["url"])}">{e(x["name"])}</a>', 1) + "</p>" for x in m["news"])  # fmt: skip
+    """홈 맨 위 접힌 카드 + 누르면 위에 뜨는 카드(<dialog>). 펼친 카드는 Stitch 시안(2026-10-10 「아침 한 장」) 그대로 —
+    진한 초록 머리 · 초록 점 소제목 · 점선으로 나눈 회사별 글 · 두 줄(실선+점선) 칸막이. 시안의 「동결 유력 전망」(쓸 데이터 없음)·보관·공유 단추는 뺐다."""
+    def h3(title: str, right: str = "") -> str:
+        return (f'<div class="flex items-center justify-between mb-3"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 shrink-0 rounded-full bg-primary"></span>'
+                f'<h3 class="text-[17px] font-bold text-primary tracking-tight">{title}</h3></div>'
+                + (f'<span class="text-[11px] font-medium text-on-surface-variant">{right}</span>' if right else "") + "</div>")  # fmt: skip
+
+    rule = '<div class="py-2" role="separator"><div class="w-full h-[2px] bg-primary"></div><div class="w-full mt-[3px] border-b-[2.5px] border-dotted border-primary"></div></div>'
+    dot = "border-b border-dotted border-primary/20"
+    arts = "".join(
+        f'<article class="flex flex-col gap-1.5 pb-3 {dot} last:border-b-0"><div class="flex items-center gap-2">'
+        f'<span class="text-[16px] font-bold text-on-surface">{e(x["name"])}</span><span class="text-[11px] font-bold text-primary">{e(x["tag"])}</span></div>'
+        f'<p class="text-[14px] leading-[23px] text-on-surface">{e(x["body"])}</p>'
+        f'<a class="pt-1 text-[11px] font-bold text-primary hover:underline inline-flex items-center gap-0.5" href="{e(x["url"])}">공시 원문 보기'
+        '<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a></article>' for x in m["news"])  # fmt: skip
     if not m["news"]:
-        paras = '<p class="mt-2 font-body-reading text-body-reading text-on-surface-variant">새로 나온 내 종목 공시는 없어요.</p>'
+        arts = '<p class="text-[14px] leading-[23px] text-on-surface-variant">새로 나온 내 종목 공시는 없어요.</p>'
     if m["more"]:
-        paras += f'<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">그 밖에 {m["more"]}곳 소식은 각 노트에서 볼 수 있어요.</p>'
-    paras += "".join(f'<p class="mt-2 font-body-compact text-body-compact text-on-surface-variant">{e(f)}</p>' for f in m["follows"])
-    rows, last = [], None
+        arts += f'<p class="text-[13px] text-on-surface-variant">그 밖에 {m["more"]}곳 소식은 각 노트에서 볼 수 있어요.</p>'
+    arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m["follows"])
+    count = f"{len(m['news']) + m['more']}곳" if m["news"] else ""
+    news = f'<section class="flex flex-col">{h3("내 종목 소식 · " + e(m["when"]), count)}<div class="flex flex-col gap-4">{arts}</div></section>'
+
+    rows = []
     for x in m["week"]:
         d = date.fromisoformat(x["date"])
-        day = ("" if x["date"] == last else
-               f'<span class="font-semibold text-on-surface">{"오늘" if x["date"] == m["today"] else f"{d.month}/{d.day}"}</span>'
-               f'<span class="text-[12px] text-outline">{WEEK[d.weekday()]}</span>')  # fmt: skip
-        last = x["date"]
+        when = "오늘" if x["date"] == m["today"] else f"{d.month}/{d.day} ({WEEK[d.weekday()]})"
         label = f'<a class="hover:underline" href="{e(x["url"])}">{e(x["label"])}</a>' if x["url"] else e(x["label"])
-        rows.append(f'<li class="flex gap-3 py-2"><span class="w-12 shrink-0 flex flex-col items-center text-[14px] leading-tight">{day}</span>'
-                    f'<span class="flex-1 min-w-0 border-l-2 border-outline-variant pl-3 flex flex-col">'
-                    f'<span class="font-body-compact text-body-compact text-on-surface">{label}</span>'
-                    + (f'<span class="text-[12px] text-on-surface-variant">{e(x["note"])}</span>' if x.get("note") else "")
-                    + f'</span><span class="shrink-0 self-start px-2 py-0.5 rounded-full bg-primary-fixed/60 text-primary text-[12px] font-semibold">{e(x["tag"])}</span></li>')  # fmt: skip
-    ipo = f'<a class="mt-1 block font-body-compact text-body-compact text-on-surface-variant hover:underline" href="/calendar">{e(m["ipo"])} →</a>' if m["ipo"] else ""
-    week = (f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("이번 주")}<ul class="mt-1">{"".join(rows)}</ul>{ipo}</div>') if rows or ipo else ""
+        rows.append(f'<div class="flex flex-col gap-1 pb-2.5 {dot}"><div class="flex items-baseline justify-between gap-2"><div class="flex items-baseline gap-2.5 min-w-0">'
+                    f'<span class="shrink-0 text-[13px] font-bold text-primary">{when}</span><span class="text-[14px] font-semibold text-on-surface">{label}</span></div>'
+                    f'<span class="shrink-0 text-[11px] font-bold text-secondary">{e(x["tag"])}</span></div>'
+                    + (f'<div class="text-[12px] text-on-surface-variant">{e(x["note"])}</div>' if x.get("note") else "") + "</div>")  # fmt: skip
+    if m["ipo"]:
+        rows.append('<a class="pt-1 flex items-center justify-between gap-2" href="/calendar"><span class="flex items-center gap-2 min-w-0">'
+                    '<span class="material-symbols-outlined text-primary text-[17px]">campaign</span>'
+                    f'<span class="text-[13px] font-bold text-primary truncate">{e(m["ipo"])}</span></span>'
+                    '<span class="shrink-0 text-[11px] font-bold text-primary inline-flex items-center gap-0.5">캘린더<span class="material-symbols-outlined text-[13px]">arrow_forward</span></span></a>')  # fmt: skip
+    week = (rule + f'<section class="flex flex-col">{h3("이번 주 일정")}<div class="flex flex-col gap-3">{"".join(rows)}</div></section>') if rows else ""
+
     head, body, more = m["tip"]
-    news = f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("내 종목 소식 · " + e(m["when"]))}{paras}</div>'
-    tip = (f'<div class="py-4 border-t border-surface-container-high first:border-t-0">{h3.format("알아 두면 좋아요")}'
-           f'<p class="mt-2 text-[15px] font-semibold text-on-surface">{e(head)}</p>'
-           f'<p class="mt-1 font-body-reading text-body-reading text-on-surface leading-relaxed">{e(body)}</p>'
-           + (f'<a class="mt-1 inline-block font-label-regular text-label-regular text-primary" href="{e(more[1])}">{e(more[0])} →</a>' if more else "") + "</div>")  # fmt: skip
+    tip = (rule + f'<section class="flex flex-col">{h3("알아 두면 좋아요")}<h4 class="text-[15px] font-bold text-primary leading-tight">{e(head)}</h4>'
+           f'<p class="mt-2 text-[14px] leading-[23px] text-on-surface">{e(body)}</p>'
+           + (f'<a class="mt-3 pt-2.5 border-t border-dotted border-primary/20 text-[12px] font-bold text-primary hover:underline inline-flex items-center gap-1" href="{e(more[1])}">'
+              f'<span class="material-symbols-outlined text-[14px]">help_outline</span>{e(more[0])}<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a>' if more else "")
+           + "</section>")  # fmt: skip
+
     lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요."
-    # 접힌 카드 한 장(눌러서 펼침) → 위에 뜨는 카드(<dialog>, ✕·바깥 누르면 닫힘). 접힌 카드는 해 아이콘·날짜 한 줄 + 이야기 한 줄만 (사용자 10/10)
-    card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" '
-            'class="group mt-space-md w-full text-left rounded-2xl border border-surface-container-high bg-surface-container-lowest '
-            'shadow-[0_10px_24px_-12px_rgba(21,69,57,0.45)] hover:shadow-[0_14px_30px_-12px_rgba(21,69,57,0.55)] hover:-translate-y-0.5 transition-all px-4 py-3.5 flex items-center gap-3">'
-            f'<span class="flex-1 min-w-0 flex flex-col gap-1"><span class="flex items-center gap-1 text-[12px] font-semibold text-primary">'
+    # 접힌 카드 — 흰 상자 대신 위아래 두 줄(실선+점선) 사이에 글만, 읽기 팁 머리글과 같은 모양 (사용자 10/10). 누르면 펼침
+    top = '<span class="block border-t-2 border-primary"></span><span class="block mt-[3px] border-t-2 border-dotted border-primary"></span>'
+    bottom = '<span class="block border-t-2 border-dotted border-primary"></span><span class="block mt-[3px] border-t-2 border-primary"></span>'
+    card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" class="group block w-full mt-space-lg mb-space-xl text-center">'
+            + top + '<span class="block py-4 px-2"><span class="flex items-center justify-center gap-1 text-[12px] font-semibold text-primary">'
             f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
-            f'<span class="text-[15px] font-semibold text-on-surface truncate">{e(lead)}</span></span>'
-            '<span class="material-symbols-outlined shrink-0 text-primary transition-transform group-hover:translate-x-0.5">chevron_right</span></button>')  # fmt: skip
+            f'<span class="mt-1.5 flex items-center justify-center gap-0.5 text-[17px] font-bold text-primary"><span class="truncate">{e(lead)}</span>'
+            '<span class="material-symbols-outlined shrink-0 text-[20px] transition-transform group-hover:translate-x-0.5">chevron_right</span></span></span>' + bottom + '</button>')  # fmt: skip
+    # 위에 뜨는 카드 — 뒤 화면은 가리지 않고(사용자 10/10) 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
-             'class="w-[calc(100%-32px)] max-w-[460px] max-h-[85vh] p-0 rounded-2xl bg-surface-container-lowest shadow-2xl backdrop:bg-transparent overflow-y-auto">'
-             '<div class="sticky top-0 z-10 px-5 pt-4 pb-4 bg-surface-container-lowest border-b border-surface-container-high">'
-             '<p class="text-[12px] font-semibold flex items-center gap-1 text-primary"><span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장</p>'
-             f'<h2 class="mt-1 text-[20px] font-bold text-on-surface">{e(m["title"])}</h2>'
-             '<form method="dialog" class="absolute top-3 right-3"><button aria-label="닫기" class="w-9 h-9 rounded-full text-on-surface-variant hover:bg-surface-container flex items-center justify-center">'
-             '<span class="material-symbols-outlined">close</span></button></form></div>'
-             f'<div class="px-5 pb-2">{news}{week}{tip}</div></dialog>')  # fmt: skip
+             'class="w-[calc(100%-32px)] max-w-[448px] max-h-[82vh] p-0 rounded-3xl bg-surface-container-lowest border border-primary/10 backdrop:bg-transparent overflow-hidden '
+             'shadow-[0_24px_50px_-10px_rgba(21,69,57,0.18),0_4px_16px_rgba(0,0,0,0.05)]"><div class="flex flex-col max-h-[82vh]">'
+             '<header class="shrink-0 bg-primary text-on-primary px-6 pt-5 pb-5 flex items-start justify-between">'
+             '<div class="flex flex-col gap-1"><div class="flex items-center gap-1.5 text-primary-fixed-dim text-[11px] font-semibold tracking-wider">'
+             '<span class="material-symbols-outlined text-[15px]">wb_sunny</span>아침 한 장</div>'
+             f'<h2 class="font-headline-lg text-[22px] font-bold tracking-tight mt-0.5">{e(m["title"])}</h2></div>'
+             '<form method="dialog"><button aria-label="닫기" class="text-on-primary/80 hover:text-on-primary p-1 rounded-full hover:bg-on-primary/10 transition-colors">'
+             '<span class="material-symbols-outlined text-[20px]">close</span></button></form></header>'
+             f'<div class="overflow-y-auto px-6 pt-5 pb-7 flex flex-col gap-4">{news}{week}{tip}</div></div></dialog>')  # fmt: skip
     return card + sheet
 
 

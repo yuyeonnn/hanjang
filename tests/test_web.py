@@ -920,7 +920,7 @@ def test_morning_card_on_home(monkeypatch):
     assert morning.prepare(con, today) == 1 and len(asked) == 1  # 코드 풀이가 있는 유상증자는 AI 를 부르지 않는다
     assert morning.prepare(con, today) == 0 and len(asked) == 1  # 공시마다 한 번
     body = call(app, "/", cookie=f"s={web.sign('1', SECRET)}")[2]
-    assert "아침 한 장" in body and "한화오션</a>은 새 주식을 찍어 팔아" in body and "품목허가를 받았다고 알렸어요" in body
+    assert "아침 한 장" in body and ">한화오션</span>" in body and "새 주식을 찍어 팔아" in body and "공시 원문 보기" in body and "품목허가를 받았다고 알렸어요" in body
     assert "실적 발표" in body and "유상증자 공시는 이렇게 읽어요" in body
     try:
         morning.check({"sentence": "매출이 30% 늘 거예요."}, "단일판매공급계약")
@@ -995,3 +995,49 @@ def test_share_quote_to_profile():
     assert said("p=/n/005930&t=" + quote("매출이 늘었어요.")) == "내 프로필에 올렸어요"  # 같은 글에서 다시 — 바뀐다
     rows = con.execute("select kind, ref, comment from regrams where user_id = 1 order by kind").fetchall()
     assert rows == [("learn", "start", first), ("note", "005930", "매출이 늘었어요.")]
+
+
+def test_month_list_sorts_and_drops_minor():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000001', '가회사', 'x', 1)")
+    con.execute("insert into holdings values (1, '000001', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '000001', '2026-10-02', '유상증자결정', 'RIGHTS_ISSUE', 3, -1), ('2', '000001', '2026-10-20', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1),"
+                " ('3', '000001', '2026-10-07', '판매·인도 대수 알림 (8-K 2.02)', 'EARNINGS', 2, 0)")
+    con.execute("insert into ipos (corp_code, rcept_no, name, sub_start, sub_end) values ('c', '9', '새회사', '2026-10-12', '2026-10-13')")
+    con.commit()
+    a = f"s={web.sign('1', SECRET)}"
+    page = call(app, "/calendar?m=2026-10", cookie=a)[2]
+    month = page[page.index('id="month-list"'):]
+    assert "유상증자" in month and "판매·인도" not in month  # 보통 공시는 목록에서 빠지고
+    assert "이 달 공모주 청약 1곳" in month and "새회사 공모주 청약" not in month  # 공모주는 한 줄로
+    assert "판매·인도" in page  # 달력의 그날 일정에는 그대로
+    new = call(app, "/calendar?m=2026-10&s=new", cookie=a)[2]
+    new = new[new.index('id="month-list"'):]
+    assert new.index("단일판매") < new.index("유상증자")  # 최신순
+    old = call(app, "/calendar?m=2026-10&s=old", cookie=a)[2]
+    old = old[old.index('id="month-list"'):]
+    assert old.index("유상증자") < old.index("단일판매")  # 날짜순
+
+
+def test_article_key_phrases_are_emphasized_without_touching_the_text(monkeypatch):
+    from hanjang import articles, llm
+
+    app, con = _app()
+    paras = [{"text": "계약금액은 935억 원이에요. <b>장기 계약</b>입니다.", "refs": []}, {"text": "위탁생산(CMO) 계약이에요.", "refs": []}]
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r1', '005930', '2026-10-01', 'CONTRACT', ?, 'x')",
+                (json.dumps({"title": "계약", "paragraphs": paras, "links": {}}, ensure_ascii=False),))
+    con.commit()
+    # AI 답: 본문에 없는 말·너무 짧은 말·셋째 것은 버리고, 그대로 있는 말만 받는다
+    monkeypatch.setattr(llm, "ask", lambda *a, **k: a[3]({"marks": [["935억 원", "없는 말이에요", "계약", "계약금액은 935억", "장기 계약"], ["위탁생산(CMO)"]]}))
+    assert articles.emphasize(con) == 1 and articles.emphasize(con) == 0  # 한 번 붙이면 다시 묻지 않는다
+    (body,) = con.execute("select body from articles").fetchone()
+    b = json.loads(body)
+    assert [p["text"] for p in b["paragraphs"]] == [p["text"] for p in paras]  # 글은 한 글자도 안 바뀐다
+    assert [p["marks"] for p in b["paragraphs"]] == [["935억 원", "계약금액은 935억"], ["위탁생산(CMO)"]]
+    ck = _login(app)
+    page_ = call(app, "/a/1", cookie=ck)[2]
+    assert '<strong class="font-semibold text-primary">935억 원</strong>' in page_ and "계약금액은 <strong" in page_  # 겹치면 먼저 고른 것만
+    assert '<strong class="font-semibold text-primary">위탁생산(CMO)</strong>' in page_ and "&lt;b&gt;장기 계약&lt;/b&gt;" in page_  # 나머지는 그대로 탈출
+    assert "**" not in call(app, "/feed", cookie=ck)[2]
