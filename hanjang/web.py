@@ -2177,15 +2177,15 @@ class App:
         counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
         n = len(counts)
         name, left = tree.stage(n)
-        this = sum(1 for d in counts if d[:7] == today.isoformat()[:7])
+        grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
         return ('<section class="mt-space-lg"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
                 '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
                 f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                 f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
                 f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
-                f'<p class="mt-space-md mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">{today.month}월 · {this}일 들어왔어요</p>'
-                f'{tree.month(counts, today)}</section>')  # fmt: skip
+                f'<p class="mt-space-xl mb-2 font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
+                f'{grass}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:
         email, created, mail_on, nick, bio, private = self.con.execute(

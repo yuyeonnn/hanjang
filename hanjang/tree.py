@@ -6,9 +6,8 @@
     uv run python -m hanjang.tree   # 시안 보기 → data/tree-sample.html (자라는 단계)
 """
 
-import calendar
 import math
-from datetime import date
+from datetime import date, timedelta
 from html import escape as e
 
 STAGES = ((0, "씨앗"), (1, "새싹"), (4, "어린 나무"), (15, "자라는 나무"), (40, "잎이 풍성한 나무"), (90, "꽃이 핀 나무"))
@@ -78,24 +77,29 @@ def svg(n: int) -> str:
     return f'<svg viewBox="0 -18 320 310" width="100%" role="img" aria-label="내 나무 — {e(name)}" xmlns="http://www.w3.org/2000/svg">{"".join(out)}</svg>'
 
 
-def month(counts: dict[str, int], today: date) -> str:
-    """이번 달 잔디 — 깃허브처럼 요일이 왼쪽에 세로로, 한 주가 한 줄(세로). 맨 윗줄이 가지런하게 1일의 요일부터 시작한다(사용자 10/11).
-    그날 본 화면 수에 따라 네 단계 초록. 아직 오지 않은 날은 칸이 없다."""
-    first = date(today.year, today.month, 1)
-    last = calendar.monthrange(today.year, today.month)[1]
-    names = "월화수목금토일"
-    cells = "".join(f'<span style="font-size:11px;line-height:18px;color:#68706c;padding-right:4px">{names[(first.weekday() + i) % 7]}</span>' for i in range(7))
-    for day in range(1, last + 1):
-        d = date(today.year, today.month, day)
+WEEKS = 13  # 잔디 — 최근 석 달쯤. 한 달은 초순에 두 줄뿐이라 허전하고, 여섯 달(26주)은 휴대폰 너비를 넘는다 (10/11)
+
+
+def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
+    """최근 13주 잔디(깃허브 모양) — 요일이 왼쪽에 세로로(일~토), 한 주가 세로 한 줄, 위에 달 이름. 이번 주는 오늘까지만 그린다.
+    그날 본 화면 수에 따라 네 단계 초록. (그림, 그 기간에 들어온 날 수)"""
+    start = today - timedelta(days=(today.weekday() + 1) % 7 + 7 * (WEEKS - 1))  # 13주 전 일요일
+    cells = '<span></span>' + "".join(f'<span style="font-size:11px;line-height:18px;color:#68706c;padding-right:4px">{d if d in "월수금" else ""}</span>' for d in "일월화수목금토")
+    came, d = 0, start
+    while d <= today:
+        if d.weekday() == 6:  # 줄 맨 위 — 이 주에 1일이 들어 있으면 달 이름
+            week = [d + timedelta(days=i) for i in range(7)]
+            first = next((x for x in week if x.day == 1), None)
+            cells += f'<span style="font-size:11px;line-height:14px;color:#68706c;white-space:nowrap;width:18px;overflow:visible">{f"{first.month}월" if first else ""}</span>'
         c = counts.get(d.isoformat(), 0)
+        came += c > 0
         lv = 0 if c == 0 else 1 if c <= 2 else 2 if c <= 5 else 3 if c <= 10 else 4
-        if d > today:  # 아직 오지 않은 날은 그리지 않는다 — 깃허브처럼 (사용자 10/11)
-            break
         look = f"background:{LEVEL[lv]}" + (";outline:2px solid #154539;outline-offset:1px" if d == today else "")
         cells += f'<span title="{d.month}월 {d.day}일" style="width:18px;height:18px;border-radius:4px;{look}"></span>'
+        d += timedelta(days=1)
     legend = "".join(f'<span style="width:11px;height:11px;border-radius:3px;background:{c};display:inline-block"></span>' for c in LEVEL)
-    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;margin:0 auto">{cells}</div>'
-            f'<p style="margin:8px auto 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>')  # fmt: skip
+    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%">{cells}</div>'
+            f'<p style="margin:8px 0 0;display:flex;align-items:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
 
 
 if __name__ == "__main__":
