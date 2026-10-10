@@ -214,7 +214,7 @@ class Dart:
                     raise RuntimeError(f"DART corpCode: zip 이 아닌 응답 — {body[:200].decode('utf-8', 'replace')}")
                 else:  # 회사 목록은 하루 사이 거의 안 바뀐다 — 어제 것으로 계속 (10/10 아침 실행이 여기서 멈췄다)
                     print(f"DART 회사 목록을 못 받아 어제 것을 씀 — {body[:120].decode('utf-8', 'replace')}")
-            self._corps = parse_corps(f.read_text(encoding="utf-8"))
+            self._corps = parse_corps(f.read_bytes())
         return self._corps
 
     def _pages(self, start: date, end: date, **params) -> list[dict]:
@@ -530,14 +530,17 @@ def parse_insider(kind: str, r: dict, ticker: str) -> Insider:
                    None if chg is None else int(chg), rate, rchg)  # fmt: skip
 
 
-def parse_corps(xml: str) -> dict[str, str]:
-    """`<list>` 한 덩어리씩 — 태그를 건너뛰는 정규식은 비상장사 뒤에서 다음 회사 코드를 가로챈다."""
+def parse_corps(xml: "str | bytes") -> dict[str, str]:
+    """`<list>` 한 덩어리씩 — 태그를 건너뛰는 정규식은 비상장사 뒤에서 다음 회사 코드를 가로챈다.
+    파일(30MB)은 바이트 그대로, 덩어리 목록을 만들지 않고 하나씩 본다 — 글자로 바꾸고 목록까지 만들면 메모리를 몇 배 쓴다 (메모리 점검 10/11)."""
+    data = xml.encode() if isinstance(xml, str) else xml
     out = {}
-    for block in re.findall(r"<list>(.*?)</list>", xml, re.S):
-        code = re.search(r"<corp_code>(\d+)</corp_code>", block)
-        stock = re.search(r"<stock_code>(\d{6})</stock_code>", block)
+    for m in re.finditer(rb"<list>(.*?)</list>", data, re.S):
+        block = m.group(1)
+        code = re.search(rb"<corp_code>(\d+)</corp_code>", block)
+        stock = re.search(rb"<stock_code>(\d{6})</stock_code>", block)
         if code and stock:
-            out[stock.group(1)] = code.group(1)
+            out[stock.group(1).decode()] = code.group(1).decode()
     return out
 
 

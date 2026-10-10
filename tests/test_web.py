@@ -1139,10 +1139,11 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     monkeypatch.setattr(daily.mail, "send", lambda to, subject, *a, **k: mails.append(subject))
     monkeypatch.setattr(daily.backup, "backup", lambda today: ran.append("백업") or tmp_path)
     monkeypatch.setattr(daily.backup, "offsite", lambda p: None)
-    monkeypatch.setattr(daily.collect, "main", lambda today, dart_up: ran.append(f"받기:{dart_up}"))
+    # 국내 받기·미국 받기는 따로 띄운 파이썬에서 돈다(메모리) — 여기선 무엇을 띄우려 했는지만 본다
+    monkeypatch.setattr(daily, "apart", lambda code: ran.append(f"받기:{'True' in code}" if "collect.main" in code else "미국"))
     monkeypatch.setattr(daily.notes, "main", lambda t, today, only_changed, read, carry=False: ran.append(f"노트:전부={not only_changed}:읽기={read}"))
     monkeypatch.setattr(daily.us, "read", lambda today: (_ for _ in ()).throw(RuntimeError("SEC 오류")))  # 한 단계가 실패해도
-    for mod, name in ((daily.us, "미국"), (daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
+    for mod, name in ((daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
     monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
     monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
@@ -1345,3 +1346,36 @@ def test_cached_fragments_refresh_when_another_connection_writes(tmp_path):
     second = app.stocks_js()
     assert second is not first and "SK하이닉스" in second
     assert db.connect(":memory:").execute("pragma synchronous").fetchone()[0] == 1  # normal — 커밋마다 디스크 확인을 기다리지 않는다
+
+
+def test_big_bodies_only_for_logged_in_photo_uploads_and_few_at_once():
+    """로그인하지 않은 누구든 어느 주소로든 6MB 를 보낼 수 있었다 — 여럿이 한꺼번에 보내면 1GB 서버의 메모리가 찬다 (메모리 점검 10/11)."""
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    me = web.session_cookie(1, SECRET, 1_000_000.0).split(";")[0]
+
+    def post(path, size, cookie=""):
+        read = []
+
+        class Body(io.BytesIO):
+            def read(self, n=-1):
+                read.append(n)
+                return super().read(n)
+
+        env = {"REQUEST_METHOD": "POST", "PATH_INFO": path, "QUERY_STRING": "", "HTTP_COOKIE": cookie, "CONTENT_TYPE": "application/json",
+               "CONTENT_LENGTH": str(size), "wsgi.input": Body(b'{"img": "' + b"x" * (size - 11) + b'"}')}
+        got = {}
+        b"".join(app(env, lambda s, h: got.update(status=s)))
+        return got["status"][:3], bool(read)
+
+    assert post("/scan", web.FORM_MAX + 1) == ("413", False)  # 로그인 안 함 — 읽지도 않는다
+    assert post("/login", web.FORM_MAX + 1, me) == ("413", False)  # 사진 받는 곳이 아니면 로그인해도
+    assert post("/scan", web.BODY_MAX + 1, me) == ("413", False)
+    assert post("/scan", web.FORM_MAX + 1, me)[1]  # 로그인한 사람의 캡처는 받는다
+    for _ in range(web.BIG_AT_ONCE):  # 큰 본문 자리가 다 찼으면 기다리게 하지 않고 돌려보낸다
+        app.uploads.acquire()
+    assert post("/scan", web.FORM_MAX + 1, me) == ("503", False)
+    for _ in range(web.BIG_AT_ONCE):
+        app.uploads.release()
+    assert post("/scan", web.FORM_MAX + 1, me)[0] != "503" and app.uploads._value == web.BIG_AT_ONCE  # 끝나면 자리를 돌려준다

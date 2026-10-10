@@ -889,6 +889,7 @@ def main(today: date, con: sqlite3.Connection | None = None, sec: Edgar | None =
     tk = sec.tickers()
     got = {"회사": 0, "연간": 0, "분기": 0, "흐름": 0, "공시": 0, "임원": 0}
     for ticker, name in [(t, n) for t, n in universe() if not only or t in only]:
+        facts = sub = None  # 앞 회사 자료를 놓고 나서 다음 것을 읽는다 — 큰 회사는 재무 자료 하나가 수십 MB 라 둘이 겹치면 메모리가 두 배 (메모리 점검 10/11)
         try:  # 한 회사가 실패해도(SEC 시간 초과 등) 나머지는 받는다 — 내일 다시
             if ticker not in tk:
                 print(f"  {ticker} {name}: SEC 티커 표에 없음 — universe_us.txt 를 고친다", file=sys.stderr)

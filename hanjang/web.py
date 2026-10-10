@@ -44,6 +44,9 @@ REPORT_WHY = ("욕설·혐오·성적인 표현", "사칭·남의 사진", "종�
 BAD = re.compile(r"씨발|시발|ㅅㅂ|ㅆㅂ|병신|ㅂㅅ|좆|존나|개새|새끼|fuck|shit|bitch|섹스|야동"
                  r"|리딩|수익 ?보장|원금 ?보장|무료 ?추천|종목 ?추천|단톡|오픈 ?채팅|open\.kakao|카톡|텔레그램|t\.me|https?://|www\.|\d{2,3}[- .]\d{3,4}[- .]\d{4}", re.I)
 BODY_MAX = 6_000_000  # 요청 본문 상한 — 캡처 사진(브라우저에서 줄여 보낸다)도 이 안에
+FORM_MAX = 64_000  # 사진이 아닌 요청(폼) 본문 상한. 큰 본문은 로그인한 사람의 사진 두 곳(BIG_POSTS)만 받는다
+BIG_POSTS = ("/scan", "/me/photo")
+BIG_AT_ONCE = 3  # 큰 본문을 동시에 받는 수 — 한 건이 메모리에서 본문의 서너 배(6MB → 20MB 남짓)를 쓴다. 1GB 서버를 채우지 못하게 (메모리 점검 10/11)
 PHOTO_MAX = 300_000  # 프로필 사진 — 브라우저가 256px JPEG 로 줄여 보낸다. 이보다 크면 받지 않는다
 SCAN_HOURLY = 10
 DEMO_EMAIL = "demo@hanjang.local"  # 둘러보기 계정 — .env DEMO=1 일 때만. 보기만 된다
@@ -1278,6 +1281,7 @@ class App:
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
         self.codes: dict[str, list] = {}  # 이메일 → [코드, 만료 시각, 틀린 횟수]
+        self.uploads = threading.Semaphore(BIG_AT_ONCE)
         self.memo: dict = {}  # cached() — 매일 실행 뒤에만 바뀌는 큰 조각(종목 목록 186KB · 국민연금·유명 투자자 페이지)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
 
@@ -1306,20 +1310,33 @@ class App:
 
     def __call__(self, environ, start_response):
         method, path = environ["REQUEST_METHOD"], environ.get("PATH_INFO", "/")
+        cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
+        uid, renew = read_session(cookie.get("s", ""), self.secret, self.clock())
+        n = int(environ.get("CONTENT_LENGTH") or 0) if method == "POST" else 0
+        # 본문을 읽기 전에 거른다 — 전에는 로그인하지 않은 누구든 어느 주소로든 6MB 를 보낼 수 있었고, 여럿이 한꺼번에 보내면 메모리가 찼다
+        if n > (BODY_MAX if uid and path in BIG_POSTS else FORM_MAX):
+            start_response("413 Payload Too Large", [("Content-Type", "text/plain; charset=utf-8")])
+            return ["사진이 너무 커요".encode()]
+        big = n > FORM_MAX
+        if big and not self.uploads.acquire(blocking=False):
+            start_response("503 Service Unavailable", [("Content-Type", "application/json; charset=utf-8"), ("Retry-After", "5")])
+            return [json.dumps({"msg": "지금 사진을 읽는 사람이 많아요. 잠시 뒤에 다시 해 주세요."}, ensure_ascii=False).encode()]
+        try:
+            return self.respond(environ, start_response, method, path, n, cookie, uid, renew)
+        finally:
+            if big:
+                self.uploads.release()
+
+    def respond(self, environ, start_response, method, path, n, cookie, uid, renew):
         form = {}
         if method == "POST":
-            n = int(environ.get("CONTENT_LENGTH") or 0)
-            if n > BODY_MAX:
-                start_response("413 Payload Too Large", [("Content-Type", "text/plain; charset=utf-8")])
-                return ["사진이 너무 커요".encode()]
             raw = environ["wsgi.input"].read(n).decode()
             if environ.get("CONTENT_TYPE", "").startswith("application/json"):
                 form = {"_json": json.loads(raw or "{}")}
             else:
                 form = {k: v[0] for k, v in parse_qs(raw).items()}
+            del raw
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
-        cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
-        uid, renew = read_session(cookie.get("s", ""), self.secret, self.clock())
         self.local.ip = (environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR") or "").split(",")[-1].strip()  # 앞의 Caddy 가 붙여 준 마지막 값이 실제 접속 주소
         with self.turn:
             self.local.held = True

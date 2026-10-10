@@ -7,7 +7,11 @@ After=network-online.target
 User=hanjang
 WorkingDirectory=/srv/hanjang
 Environment=TZ=Asia/Seoul PYTHONUNBUFFERED=1
-ExecStart=/home/hanjang/.local/bin/uv run --frozen python -m hanjang.web
+# 파이썬을 바로 부른다 — `uv run` 으로 띄우면 uv 가 옆에서 36MB 를 들고 있다(1GB 서버). 패키지는 올릴 때 `uv sync --frozen` 이 맞춘다
+ExecStart=/srv/hanjang/.venv/bin/python -m hanjang.web
+# 메모리가 모자랄 때 운영체제가 화면 서버를 먼저 죽이지 않게 · 혹시 새더라도 서버 전체를 끌고 가지 않게(평소 40MB, 최대 70MB 실측)
+OOMScoreAdjust=-300
+MemoryMax=300M
 Restart=always
 RestartSec=5
 
