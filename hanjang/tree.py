@@ -80,7 +80,7 @@ def svg(n: int) -> str:
 
 def month(counts: dict[str, int], today: date) -> str:
     """이번 달 잔디 — 깃허브처럼 요일이 왼쪽에 세로로, 한 주가 한 줄(세로). 맨 윗줄이 가지런하게 1일의 요일부터 시작한다(사용자 10/11).
-    그날 본 화면 수에 따라 네 단계 초록. 아직 오지 않은 날은 점선 칸."""
+    그날 본 화면 수에 따라 네 단계 초록. 아직 오지 않은 날은 칸이 없다."""
     first = date(today.year, today.month, 1)
     last = calendar.monthrange(today.year, today.month)[1]
     names = "월화수목금토일"
@@ -89,7 +89,9 @@ def month(counts: dict[str, int], today: date) -> str:
         d = date(today.year, today.month, day)
         c = counts.get(d.isoformat(), 0)
         lv = 0 if c == 0 else 1 if c <= 2 else 2 if c <= 5 else 3 if c <= 10 else 4
-        look = (f"background:{LEVEL[lv]}" if d <= today else "border:1px dashed #c0c8c4;box-sizing:border-box") + (";outline:2px solid #154539;outline-offset:1px" if d == today else "")
+        if d > today:  # 아직 오지 않은 날은 그리지 않는다 — 깃허브처럼 (사용자 10/11)
+            break
+        look = f"background:{LEVEL[lv]}" + (";outline:2px solid #154539;outline-offset:1px" if d == today else "")
         cells += f'<span title="{d.month}월 {d.day}일" style="width:18px;height:18px;border-radius:4px;{look}"></span>'
     legend = "".join(f'<span style="width:11px;height:11px;border-radius:3px;background:{c};display:inline-block"></span>' for c in LEVEL)
     return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;margin:0 auto">{cells}</div>'
