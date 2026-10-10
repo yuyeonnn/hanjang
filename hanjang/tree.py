@@ -7,6 +7,7 @@
 """
 
 import math
+import random
 from datetime import date, timedelta
 from html import escape as e
 
@@ -51,11 +52,20 @@ def svg(n: int) -> str:
     """들어온 날 n → 나무 그림 한 장(같은 n 이면 늘 같은 그림). 하루에 잎 세 장, 120일이면 360장. 90일부터 꽃."""
     name, _ = stage(n)
     gx, gy = 160, 270
-    out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#b99a6b" opacity="0.35"/><ellipse cx="{gx}" cy="{gy + 2}" rx="34" ry="7" fill="#8a6a48"/>']
-    # 발밑 — 풀 포기와 작은 꽃. 나무와 함께 조금씩 늘어난다(풀은 첫날부터, 꽃은 보름쯤부터) (사용자 10/11)
-    for i, x in enumerate((70, 250, 104, 216, 52, 268, 128, 196, 86, 234)[: min(10, 2 + n // 6) if n else 0]):
-        y, c = 275 + (i % 3), GREENS[1 + i % 3]
-        out.append(f'<path d="M{x} {y} q-3 -8 -7 -10 M{x} {y} q0 -10 1 -14 M{x} {y} q3 -7 7 -9" stroke="{c}" stroke-width="1.8" fill="none" stroke-linecap="round"/>')
+    out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#b99a6b" opacity="0.35"/>']
+    # 발밑 — 잔디가 나무 둘레에서부터 번져 한 달쯤이면 땅을 다 덮는다. 그 위에 작은 꽃(보름쯤부터) (사용자 10/11: 잔디로 뒤덮이게)
+    cover = min(1.0, (n + 3) / 30) if n else 0
+    if cover:
+        rx = 40 + 80 * cover
+        out.append(f'<ellipse cx="{gx}" cy="{gy + 6}" rx="{rx:.0f}" ry="{6 + 4 * cover:.1f}" fill="#7fae7a"/>')
+        rng, blades = random.Random(3), []
+        for _ in range(int(170 * cover)):
+            ux = rng.uniform(-1, 1)
+            x, y = gx + ux * rx, gy + 6 + (6 + 4 * cover) * math.sqrt(1 - ux * ux) * rng.uniform(-0.9, 1)
+            lean, tall = rng.uniform(-3, 3), rng.uniform(5, 10)
+            blades.append((y, f'<path d="M{x:.1f} {y:.1f} q{lean / 2:.1f} -{tall / 2:.1f} {lean:.1f} -{tall:.1f}" stroke="{rng.choice(("#3f7d5c", "#5c9a72", "#86b98f", "#4f8f63"))}"/>'))
+        out.append('<g fill="none" stroke-width="1.5" stroke-linecap="round">' + "".join(b for _, b in sorted(blades)) + "</g>")
+    out.append(f'<ellipse cx="{gx}" cy="{gy + 2}" rx="{34 - 12 * cover:.0f}" ry="{7 - 2 * cover:.1f}" fill="#8a6a48"/>')
     for i, x in enumerate((92, 232, 60, 262, 120, 204)[: min(6, n // 15)]):
         y, c = 262 + (i % 2) * 2, ("#f4c6cf", "#f6dc8a", "#ffffff")[i % 3]
         out.append(f'<path d="M{x} {y + 12} q-1 -6 0 -11" stroke="{GREENS[2]}" stroke-width="1.4" fill="none" stroke-linecap="round"/>'
