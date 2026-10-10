@@ -142,4 +142,25 @@ def connect(path=PATH) -> sqlite3.Connection:
         if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
             con.execute(f"alter table {table} add column {col} {typ}")
     con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")
+    # 화면이 자주 묻는 조회 — 색인이 없으면 표 전체를 훑는다. 요청을 한 번에 하나씩 처리하니 훑는 시간이 곧 모두의 기다림이다 (DB 점검 10/11)
+    for name, on in (("views_note", "views (page, ticker, at)"), ("views_user", "views (user_id, at)"),  # 이 주 노트를 연 횟수 · 시험 판정
+                     ("follows_to", "follows (followee_id, ok)"), ("highlights_page", "highlights (user_id, page)"),
+                     ("news_stock", "news (ticker, date)"), ("disclosures_stock", "disclosures (ticker, date)"),
+                     ("regrams_ref", "regrams (kind, ref, week)"), ("likes_note", "likes (ticker, week)")):
+        con.execute(f"create index if not exists {name} on {on}")
     return con
+
+
+VIEWS_DAYS, NEWS_DAYS = 180, 60  # 열어본 기록 · 뉴스룸 소식을 두는 날 수 (개인정보 처리방침 3항과 같게)
+
+
+def tidy(con: sqlite3.Connection, today) -> dict[str, int]:
+    """오래돼 더 쓰지 않는 줄을 지운다 — 매일 실행이 부른다. 지운 줄 수를 돌려준다.
+    열어본 기록: 시험 판정(6주)과 「이 주에 몇 번 읽혔나」에만 쓰니 반년이면 넉넉하다. 소식: 노트는 최근 10일 것만 쓴다.
+    노트·공시·재무는 지우지 않는다 — 한 해에 수십 MB 로 작고, 지난 노트는 리그램·좋아요가 가리킨다."""
+    from datetime import timedelta
+
+    out = {"views": con.execute("delete from views where at < ?", ((today - timedelta(days=VIEWS_DAYS)).isoformat(),)).rowcount,
+           "news": con.execute("delete from news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount}
+    con.commit()
+    return out

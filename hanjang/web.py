@@ -71,6 +71,30 @@ def unsign(token: str, secret: str) -> str | None:
     return value if value and hmac.compare_digest(sign(value, secret), token) else None
 
 
+SESSION_TTL = 90 * 86400  # 로그인 쿠키는 발급 뒤 90일 — 서버가 센다(브라우저의 Max-Age 는 정직한 브라우저만 지킨다)
+# 날짜 없는 옛 쿠키(「사용자 번호」만 서명)는 이날까지만 받고, 그 사이 들어오면 날짜가 든 새 쿠키로 바꿔 준다 — 아무도 갑자기 로그아웃되지 않게.
+# 이날이 지나면 옛 쿠키는 통하지 않는다(새 나간 쿠키가 영영 쓰이던 구멍, 보안 점검 10/11). ponytail: 2026-11-15 뒤엔 이 줄과 legacy 갈래를 지운다
+LEGACY_UNTIL = datetime(2026, 11, 15).timestamp()
+
+
+def session_cookie(uid: int, secret: str, now: float, age: int = SESSION_TTL) -> str:
+    ck = f"s={sign(f'{uid}|{int(now)}', secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age={age}"
+    return ck + ("; Secure" if mail.base_url().startswith("https://") else "")
+
+
+def read_session(token: str, secret: str, now: float) -> tuple[int | None, bool]:
+    """쿠키 → (사용자 번호, 옛 쿠키라 새로 구워 줘야 하나). 서명이 틀리거나 90일이 지났으면 (None, False)."""
+    v = unsign(token, secret)
+    if not v:
+        return None, False
+    uid, _, at = v.partition("|")
+    if not uid.isdigit():
+        return None, False
+    if at:
+        return (int(uid), False) if at.isdigit() and now - int(at) <= SESSION_TTL else (None, False)
+    return (int(uid), True) if now < LEGACY_UNTIL else (None, False)
+
+
 def login_token(email: str, secret: str, now: float) -> str:
     return sign(f"{email}|{int(now) + LINK_TTL}", secret)
 
@@ -1284,14 +1308,16 @@ class App:
                 form = {k: v[0] for k, v in parse_qs(raw).items()}
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
-        uid = unsign(cookie.get("s", ""), self.secret)
+        uid, renew = read_session(cookie.get("s", ""), self.secret, self.clock())
         self.local.ip = (environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR") or "").split(",")[-1].strip()  # 앞의 Caddy 가 붙여 준 마지막 값이 실제 접속 주소
         with self.turn:
             self.local.held = True
             try:
-                status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
+                status, headers, body = self.route(method, path, form, query, uid)
             finally:
                 self.local.held = False
+        if renew and not any(k == "Set-Cookie" for k, _ in headers):  # 옛 쿠키 → 날짜가 든 새 쿠키로 (로그아웃·탈퇴처럼 쿠키를 지우는 응답은 그대로)
+            headers = [*headers, ("Set-Cookie", session_cookie(uid, self.secret, self.clock()))]
         kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8"), ("Content-Security-Policy", CSP)]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
@@ -1574,10 +1600,7 @@ class App:
             if self.con.execute("select 1 from stocks where ticker = ?", (t,)).fetchone():
                 self.con.execute("insert or ignore into holdings values (?, ?, ?)", (u, t, datetime.now().isoformat()))
         self.con.commit()
-        ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400"
-        if mail.base_url().startswith("https://"):
-            ck += "; Secure"
-        return self.see("/", ("Set-Cookie", ck))
+        return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock(), 86400)))
 
     def start(self, email: str, cohort: str = ""):
         """이 이메일로 로그인 — 계정이 없으면 만든다. 초대 링크 묶음은 처음 한 번만 붙는다."""
@@ -1586,10 +1609,7 @@ class App:
             self.con.execute("update users set cohort = ? where email = ? and cohort is null", (cohort, email))
         self.con.commit()
         (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
-        ck = f"s={sign(str(u), self.secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=7776000"
-        if mail.base_url().startswith("https://"):
-            ck += "; Secure"
-        return self.see("/", ("Set-Cookie", ck))
+        return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock())))
 
     def login(self, email: str, agreed: bool = False, cohort: str = ""):
         if "@" not in email or len(email) > 200:
@@ -1605,6 +1625,9 @@ class App:
         by_ip, by_all = ([t for t in self.sent.get(k, []) if now - t < 3600] for k in (ip, "*"))
         if len(by_ip) >= LOGIN_IP_HOURLY or len(by_all) >= LOGIN_ALL_HOURLY:
             return "429 Too Many Requests", [], self.login_page(error="로그인 요청이 너무 많아요. 한 시간쯤 뒤에 다시 해 주세요.", cohort=cohort)
+        if len(self.sent) > 2000:  # 한 시간 지난 요청 기록·만료된 코드를 비운다 — 주소·IP 마다 한 칸씩 끝없이 늘지 않게
+            self.sent = {k: v for k, v in self.sent.items() if v and now - v[-1] < 3600}
+            self.codes = {k: v for k, v in self.codes.items() if now <= v[1]}
         self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
         code = f"{secrets.randbelow(10**6):06d}"

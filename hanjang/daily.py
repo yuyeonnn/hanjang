@@ -106,6 +106,7 @@ def main(today: date) -> None:
     if dart_up:
         step("큰손", holders.main, today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
     step("유명 투자자", gurus.main, today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
+    step("정리", lambda: print(f"정리 — 지운 줄 {db.tidy(db.connect(), today)}"))  # 반년 지난 열어본 기록 · 두 달 지난 소식
     step("국민연금", nps.main, today)  # 국민연금 한국+미국 — 1년에 한 번 새 공시(공공데이터포털), 같은 날 13F
     if sources.env().get("DEMO") == "1":  # 둘러보기 예시 사람들 — 활동 시각을 다시 「최근」으로
         step("예시 사람", lambda: print(f"예시 사람 {personas.seed(db.connect())}명"))

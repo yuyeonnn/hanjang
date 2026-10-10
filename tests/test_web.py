@@ -1146,6 +1146,8 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
     monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
     monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
+    monkeypatch.setattr(daily.db, "connect", lambda: None)  # 진짜 DB 를 열지 않는다
+    monkeypatch.setattr(daily.db, "tidy", lambda con, today: {})
     monday = date(2026, 10, 12)
 
     with pytest.raises(SystemExit, match="미국 읽기"):  # 실패한 단계가 있으면 끝에 실패로 — 그래도 뒤 단계는 다 돌았다
@@ -1283,3 +1285,41 @@ def test_my_tree_grows_with_days_and_shows_this_month():
     con.commit()
     body = call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
     assert "내 나무" in body and "지금까지 21일 들어왔어요" in body and "자라는 나무" in body and "잎이 풍성한 나무까지 19일" in body
+
+
+def test_login_cookie_expires_on_the_server_and_old_cookies_are_upgraded():
+    """쿠키에 날짜가 없어, 한 번 새 나간 쿠키가 영영 통했다 (보안 점검 10/11). 옛 쿠키는 정한 날까지만 받고 그 사이 새 쿠키로 바꿔 준다."""
+    now = [1_000_000.0]
+    app, con = _app()
+    app.clock = lambda: now[0]
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.commit()
+    new = web.session_cookie(1, SECRET, now[0]).split(";")[0]
+    assert "내 종목" in call(app, "/", cookie=new)[2] and "Set-Cookie" not in call(app, "/", cookie=new)[1]
+    now[0] += web.SESSION_TTL + 1
+    assert "시작하기" in call(app, "/", cookie=new)[2]  # 90일이 지나면 서버가 받지 않는다 — 다시 로그인
+    assert "시작하기" in call(app, "/", cookie="s=" + web.sign("1|9999999999999", SECRET).replace("1|", "2|"))[2]  # 번호 바꿔치기
+
+    old = f"s={web.sign('1', SECRET)}"  # 날짜 없는 옛 쿠키
+    now[0] = web.LEGACY_UNTIL - 10
+    s, h, body = call(app, "/", cookie=old)
+    assert "내 종목" in body and web.read_session(h["Set-Cookie"].split(";")[0][2:], SECRET, now[0]) == (1, False)  # 받아 주고, 새 쿠키로 바꿔 준다
+    assert "Max-Age=0" in call(app, "/logout", cookie=old)[1]["Set-Cookie"]  # 로그아웃은 그대로 지운다
+    now[0] = web.LEGACY_UNTIL + 10
+    assert "시작하기" in call(app, "/", cookie=old)[2]  # 정한 날이 지나면 옛 쿠키는 끝
+
+
+def test_tidy_drops_old_views_and_news_and_hot_queries_use_indexes():
+    """DB 점검(10/11) — 지우는 규칙이 백업뿐이었고, 화면이 자주 묻는 조회가 표 전체를 훑었다."""
+    _, con = _app()
+    con.execute("insert into users (id, email, created_at) values (1, 'a@b.c', '2026-01-01')")
+    con.executemany("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', ?)", [("2026-03-01T10:00",), ("2026-10-01T10:00",)])
+    con.executemany("insert into news (url, ticker, date, press, title) values (?, '005930', ?, '삼성전자 뉴스룸', 't')", [("u1", "2026-07-01"), ("u2", "2026-10-01")])
+    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1}
+    assert con.execute("select at from views").fetchall() == [("2026-10-01T10:00",)] and con.execute("select url from news").fetchall() == [("u2",)]
+    for q in ("select count(*) from views where page = 'note' and ticker = '005930' and at >= '2026-10-05'", "select count(*) from follows where followee_id = 1 and ok = 1",
+              "select * from highlights where user_id = 1 and page = '/n/005930'", "select * from news where ticker = '005930' and date >= '2026-10-01'",
+              "select * from disclosures where ticker = '005930' and date >= '2026-07-01'", "select count(*) from regrams where kind = 'note' and ref = '005930' and week = '2026-10-05'",
+              "select count(*) from likes where ticker = '005930' and week = '2026-10-05'"):
+        plan = " ".join(r[3] for r in con.execute("explain query plan " + q))
+        assert "SEARCH" in plan and "SCAN" not in plan, (q, plan)
