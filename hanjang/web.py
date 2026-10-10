@@ -1278,7 +1278,18 @@ class App:
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
         self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
         self.codes: dict[str, list] = {}  # 이메일 → [코드, 만료 시각, 틀린 횟수]
+        self.memo: dict = {}  # cached() — 매일 실행 뒤에만 바뀌는 큰 조각(종목 목록 186KB · 국민연금·유명 투자자 페이지)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
+
+    def cached(self, name: str, build):
+        """매일 실행(다른 연결)이 쓰기 전까지는 한 번 만든 것을 돌려준다 — `pragma data_version` 은 다른 연결이 커밋할 때마다 바뀐다.
+        이 연결이 직접 쓰는 표(열어본 기록·좋아요·팔로우…)는 여기 넣는 조각과 상관없다. 버전이 바뀌면 통째로 비운다 (DB 점검 10/11)."""
+        v = self.con.execute("pragma data_version").fetchone()[0]
+        if self.memo.get("v") != v:
+            self.memo = {"v": v}
+        if name not in self.memo:
+            self.memo[name] = build()
+        return self.memo[name]
 
     @contextmanager
     def outside(self):
@@ -1665,7 +1676,10 @@ class App:
         return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
 
     def stocks_js(self) -> str:
-        """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만)."""
+        """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만). 186KB 를 매번 만들지 않게 cached."""
+        return self.cached("stocks_js", self._stocks_js)
+
+    def _stocks_js(self) -> str:
         rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
                 self.con.execute("select ticker, name, induty_code, market from stocks order by active desc, market, name")]  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
@@ -2966,77 +2980,87 @@ class App:
         if key not in gurus.GURUS:
             return "404 Not Found", [], self.simple("없음", "없는 투자자예요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, cik, intro, home = gurus.GURUS[key]
-        rows = self.con.execute(
-            "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
-            " exists(select 1 from notes n where n.ticker = g.ticker), g.sic from guru_holdings g left join stocks s on s.ticker = g.ticker"
-            " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
-        if not rows:
+        def build():
+            rows = self.con.execute(
+                "select g.issuer, g.ticker, g.value, g.weight, g.period, g.filed, g.accn, s.name, s.homepage,"
+                " exists(select 1 from notes n where n.ticker = g.ticker), g.sic from guru_holdings g left join stocks s on s.ticker = g.ticker"
+                " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
+            if not rows:
+                return None
+            period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
+            total = sum(r[2] for r in rows)
+            sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
+            top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows])
+            pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
+                        "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
+
+            def row(i, r):
+                issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
+                label = issuer_name(issuer, kname)
+                inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
+                         f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
+                         f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
+                if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
+                    return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
+                return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
+
+            top = rows[:TOP_LIST]
+            body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
+                    f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                    f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
+                    f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + top_pie + pie_
+                    + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                    + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
+                    + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
+                    + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
+                    + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
+                    + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a>'
+                    + (f' · 사진: <a class="underline" href="{e(PEOPLE[key][2])}" target="_blank" rel="noopener">{e(PEOPLE[key][0])}</a>, {e(PEOPLE[key][1])}, 위키미디어 공용'
+                       if key in PEOPLE else "") + '</p>')  # fmt: skip
+            return body
+
+        body = self.cached(f"guru:{key}", build)
+        if body is None:
             return "404 Not Found", [], self.simple("없음", "아직 받은 신고가 없어요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
-        period, filed, accn = rows[0][4], rows[0][5], rows[0][6]
-        total = sum(r[2] for r in rows)
-        sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/"
-        top_pie = pie([(issuer_name(r[0], r[7]), r[2]) for r in rows])
-        pie_ = bars([gurus.sector(r[10], r[0]) for r in rows], [r[2] for r in rows], "종목",
-                    "가진 종목을 금액으로 큰 업종(SEC 산업분류)에 나눈 비율이에요. 업종을 못 찾은 회사는 기타에 넣었어요.")
-
-        def row(i, r):
-            issuer, t, value, weight, _, _, _, kname, khome, has_note, sic = r
-            label = issuer_name(issuer, kname)
-            inner = (f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(label, khome, "w-9 h-9")}'
-                     f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-baseline gap-1.5 min-w-0"><span class="text-[15px] font-semibold text-on-surface truncate">{e(label)}</span>{ind_tag(sic=sic, issuer=issuer)}</span>'
-                     f'<span class="text-[12px] text-on-surface-variant">비중 {weight:.1f}% · {e(notes.usd(value))}</span></span>')  # fmt: skip
-            if has_note:  # 우리 노트가 있는 종목만 누르면 노트로
-                return f'<a href="/n/{e(t)}" class="py-3 flex items-center gap-3">{inner}<span class="material-symbols-outlined text-outline text-[18px]">chevron_right</span></a>'
-            return f'<div class="py-3 flex items-center gap-3">{inner}</div>'
-
-        top = rows[:TOP_LIST]
-        body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{guru_face(key, "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(period)} 기준</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + top_pie + pie_
-                + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">많이 가진 순서</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                + "".join(row(i, r) for i, r in enumerate(top, 1)) + "</div>"
-                + (f'<p class="pt-2 text-[12px] text-outline">외 {len(rows) - len(top):,}종목</p>' if len(rows) > len(top) else "") + "</section>"
-                + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">미국은 운용 자산이 1억 달러가 넘는 투자자가 분기마다 미국 주식 보유를 신고해요(13F). '
-                + f'{kdate(period)} 기준, {kdate(filed)}에 낸 신고예요. 분기가 끝나고 45일 안에 나와서 지금은 다를 수 있고, 미국 밖 주식·현금·공매도는 들어 있지 않아요. '
-                + f'따라 사고팔라는 뜻이 아니에요. 자료: <a class="underline" href="{e(sec_url)}" target="_blank" rel="noopener">SEC 13F 원문</a>'
-                + (f' · 사진: <a class="underline" href="{e(PEOPLE[key][2])}" target="_blank" rel="noopener">{e(PEOPLE[key][0])}</a>, {e(PEOPLE[key][1])}, 위키미디어 공용'
-                   if key in PEOPLE else "") + '</p>')  # fmt: skip
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     def big(self, uid: int, key: str, wrap: str, end: str):
         if key not in holders.BIG:
             return "404 Not Found", [], self.simple("없음", "없는 기관이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         name, _, intro = holders.BIG[key]
-        (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
-        (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
-        us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
-        rows = self.con.execute(
-            "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
-            " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
-        inds = [x for (x,) in self.con.execute("select induty_code from big_holdings where inst = ?", (key,))]
-        industry = bars([sector(x) for x in inds], [1] * len(inds), "곳", "한국에서 5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요. 위 그림과 기준이 달라요.")
-        # 파이 → 업종 → 많이 가진 순서. 「최근 늘리고 줄인 회사」·「지분이 큰 순서」는 뺐다(너무 자세하다, 사용자 10/10 — 5% 보고는 종목 노트 맨 밑에 남아 있다)
-        port = self.nps_portfolio(industry) if key == "nps" else ""
-        port = port or self.us_portfolio(key, industry)
+        def build():
+            (n_us,) = self.con.execute("select count(*) from guru_holdings where guru = ?", (key,)).fetchone()
+            (n_all,) = self.con.execute("select count(*) from nps_port").fetchone() if key == "nps" else (0,)
+            us_n = f" · 한국·미국 주식 {n_all:,}종목" if n_all else f" · 미국 주식 {n_us:,}종목" if n_us else ""
+            rows = self.con.execute(
+                "select b.stock_code, b.corp_name, b.rate, b.rate_chg, b.date, b.rcept_no, s.ticker is not null, s.homepage"
+                " from big_holdings b left join stocks s on s.ticker = b.stock_code where b.inst = ? order by b.rate desc", (key,)).fetchall()  # fmt: skip
+            inds = [x for (x,) in self.con.execute("select induty_code from big_holdings where inst = ?", (key,))]
+            industry = bars([sector(x) for x in inds], [1] * len(inds), "곳", "한국에서 5% 넘게 가진 회사들을 큰 업종(통계청 산업분류)으로 나눠 센 비율이에요. 위 그림과 기준이 달라요.")
+            # 파이 → 업종 → 많이 가진 순서. 「최근 늘리고 줄인 회사」·「지분이 큰 순서」는 뺐다(너무 자세하다, 사용자 10/10 — 5% 보고는 종목 노트 맨 밑에 남아 있다)
+            port = self.nps_portfolio(industry) if key == "nps" else ""
+            port = port or self.us_portfolio(key, industry)
 
-        def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
-            code, corp, rate, _, d, rno, ours, home = r
-            href = f"/n/{code}" if ours else DART_VIEW.format(rno)
-            return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
-                    f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
-                    f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'
-                    f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}%</span></span></a>')  # fmt: skip
+            def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
+                code, corp, rate, _, d, rno, ours, home = r
+                href = f"/n/{code}" if ours else DART_VIEW.format(rno)
+                return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
+                        f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
+                        f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'
+                        f'<span class="text-[12px] text-on-surface-variant">지분 {rate:.2f}%</span></span></a>')  # fmt: skip
 
-        kr_only = ("" if port else industry
-                   + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">5% 넘게 가진 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
-                   + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
-                   + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
-                   "따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
-        body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
-                f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
-                f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
-                f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + port + kr_only)  # fmt: skip
+            kr_only = ("" if port else industry
+                       + '<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">5% 넘게 가진 회사</h2><div class="flex flex-col divide-y divide-surface-container-high/70">'
+                       + "".join(row(i, r) for i, r in enumerate(rows, 1)) + "</div></section>"
+                       + '<p class="mt-space-md text-[11px] text-outline leading-relaxed">한국엔 기관의 보유 종목 전체를 알리는 제도가 없어서, 5% 넘게 가진 회사만 보여요(대량보유 보고). '
+                       "따라 사고팔라는 뜻이 아니에요. 자료: DART</p>")  # fmt: skip
+            body = (f'<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span><span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a></div>'
+                    f'<header class="flex items-center gap-space-md">{logo(name, self.BIG_HOME.get(key), "w-14 h-14")}<div class="flex flex-col"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">{e(name)}</h1>'
+                    f'<span class="text-[12px] text-outline">5% 넘게 가진 회사 {len(rows):,}곳{us_n}</span></div></header>'
+                    f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface">{e(intro)}</p>' + port + kr_only)  # fmt: skip
+            return body
+
+        body = self.cached(f"big:{key}", build)
         return "200 OK", [], page(name, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", wrap + body + end)
 
     # ---- 공개 페이지: 개인정보 처리방침 · 계산 방법 (로그인 없이) ----
@@ -3124,7 +3148,7 @@ class App:
                       f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
                       for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + groups + self.guru_list() + self.big_list() + end)  # fmt: skip
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
@@ -3150,7 +3174,7 @@ if __name__ == "__main__":
     if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
-    app = App(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False), cfg["SECRET"])
+    app = App(db.tune(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False)), cfg["SECRET"])
     host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
     make_server(host, port, app, server_class=Server).serve_forever()

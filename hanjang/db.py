@@ -113,11 +113,24 @@ create table if not exists feedback (
 """
 
 
+def tune(con: sqlite3.Connection) -> sqlite3.Connection:
+    """연결마다 — 파일에 남지 않는 설정 (DB 점검 10/11, 서버 디스크 실측).
+    synchronous=normal: WAL 에서는 커밋마다 디스크 확인(fsync)을 기다리지 않는다 — 서버에서 커밋 한 번 2.4ms → 0.04ms.
+      화면을 열 때마다 열어본 기록을 쓰는데, 요청을 한 번에 하나씩 처리하니 그 2.4ms 가 모두의 기다림이었다.
+      앱이 죽어도 안전하고, 운영체제가 통째로 죽거나 정전일 때만 마지막 몇 건을 잃는다(하루 백업이 있다).
+    cache_size 16MB: DB(6.5MB) 전체가 메모리에 올라간다. temp_store: 정렬·그룹 작업을 디스크가 아니라 메모리에서."""
+    con.execute("pragma synchronous = normal")
+    con.execute("pragma cache_size = -16000")
+    con.execute("pragma temp_store = memory")
+    return con
+
+
 def connect(path=PATH) -> sqlite3.Connection:
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30)  # 매일 실행이 쓰는 동안 화면이 읽고 써도 잠깐 기다린다
     con.execute("pragma journal_mode = wal")  # 읽기와 쓰기가 서로 막지 않게 (파일에 남는다)
+    tune(con)
     con.execute("pragma foreign_keys = on")
     con.executescript(SCHEMA)
     # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로

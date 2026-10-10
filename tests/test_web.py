@@ -1323,3 +1323,25 @@ def test_tidy_drops_old_views_and_news_and_hot_queries_use_indexes():
               "select count(*) from likes where ticker = '005930' and week = '2026-10-05'"):
         plan = " ".join(r[3] for r in con.execute("explain query plan " + q))
         assert "SEARCH" in plan and "SCAN" not in plan, (q, plan)
+
+
+def test_cached_fragments_refresh_when_another_connection_writes(tmp_path):
+    """종목 목록(186KB)·국민연금·유명 투자자 페이지는 매일 실행 뒤에만 바뀐다 — 그때까지 한 번 만든 것을 돌려주고, 다른 연결이 쓰면 새로 만든다 (DB 점검 10/11)."""
+    import sqlite3
+
+    path = tmp_path / "h.db"
+    con = db.connect(path)
+    con.execute("insert into stocks (ticker, name) values ('005930', '삼성전자')")
+    con.commit()
+    app = web.App(con, SECRET)
+    first = app.stocks_js()
+    assert "삼성전자" in first and app.stocks_js() is first  # 같은 것을 그대로
+    con.execute("insert into views (user_id, page, at) select 1, 'x', 'now' where 0")  # 이 연결의 쓰기(열어본 기록 같은 것)는 캐시와 상관없다
+    con.commit()
+    assert app.stocks_js() is first
+    other = sqlite3.connect(path)  # 매일 실행 — 다른 연결
+    other.execute("insert into stocks (ticker, name) values ('000660', 'SK하이닉스')")
+    other.commit()
+    second = app.stocks_js()
+    assert second is not first and "SK하이닉스" in second
+    assert db.connect(":memory:").execute("pragma synchronous").fetchone()[0] == 1  # normal — 커밋마다 디스크 확인을 기다리지 않는다
