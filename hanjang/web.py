@@ -2184,7 +2184,7 @@ class App:
                 f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                 f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
                 f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
-                f'<p class="mt-space-xl mb-2 font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
+                f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {came}일 들어왔어요</p>'
                 f'{grass}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:

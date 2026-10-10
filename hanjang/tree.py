@@ -98,8 +98,8 @@ def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
         cells += f'<span title="{d.month}월 {d.day}일" style="width:18px;height:18px;border-radius:4px;{look}"></span>'
         d += timedelta(days=1)
     legend = "".join(f'<span style="width:11px;height:11px;border-radius:3px;background:{c};display:inline-block"></span>' for c in LEVEL)
-    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%">{cells}</div>'
-            f'<p style="margin:8px 0 0;display:flex;align-items:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
+    return (f'<div style="display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,18px);grid-auto-columns:max-content;gap:4px;width:max-content;max-width:100%;margin:0 auto">{cells}</div>'
+            f'<p style="margin:8px 0 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
 
 
 if __name__ == "__main__":
