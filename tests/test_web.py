@@ -1060,3 +1060,24 @@ def test_no_article_without_the_filing_text(monkeypatch):
     monkeypatch.setattr(llm, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError("AI 를 부르면 안 된다")))
     ev = {"ref": "r", "ticker": "005930", "date": "2026-10-07", "kind": "MAJOR_CONTRACT", "fact": {"id": "E1", "text": "x", "url": "u", "tone": 0, "slots": {}}}
     assert articles.write(con, ev, date(2026, 10, 10), Dart()) is None
+
+
+def test_old_articles_are_rewritten_in_place_when_the_filing_text_is_back(monkeypatch):
+    """옛 규칙으로 쓴 기사는 매일 실행이 같은 번호로 다시 쓴다 — 원문을 못 받는 날(DART 점검)엔 그대로 두고 다음 날 다시 (10/10)."""
+    from hanjang import articles
+
+    _, con = _app()
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r1', '005930', '2026-09-01', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    old = {"title": "옛 글", "paragraphs": [{"text": "자세한 건 공시에 적혀 있어요.", "refs": ["E1"], "marks": []}], "links": {}}
+    con.execute("insert into articles (id, ref, ticker, date, kind, body, made_at, photo) values (7, 'r1', '005930', '2026-09-01', 'MAJOR_CONTRACT', ?, 'x', 'p.jpg')",
+                (json.dumps(old, ensure_ascii=False),))
+    con.commit()
+    today = date(2026, 10, 12)  # 사건은 14일보다 오래됐어도 다시 쓴다
+    monkeypatch.setattr(articles, "write", lambda *a, **k: None)  # 점검 중 — 원문 없음
+    assert articles.rewrite(con, today, None) == 0 and json.loads(con.execute("select body from articles").fetchone()[0])["title"] == "옛 글"
+    new = {"title": "새 글", "paragraphs": [{"text": "계약금액은 935억 원이에요.", "refs": ["E1"]}], "links": {}, "v": articles.VERSION}
+    seen = []
+    monkeypatch.setattr(articles, "write", lambda con, ev, *a, **k: seen.append(ev["fact"]["text"]) or new)
+    assert articles.rewrite(con, today, None) == 1 and "단일판매" in seen[0]
+    assert con.execute("select id, photo, json_extract(body, '$.title') from articles").fetchall() == [(7, "p.jpg", "새 글")]  # 번호·사진 그대로
+    assert articles.rewrite(con, today, None) == 0 and len(seen) == 1  # 한 번 다시 쓰면 끝

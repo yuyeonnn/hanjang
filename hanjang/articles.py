@@ -19,19 +19,22 @@ GUESS = re.compile(r"려는 (걸|것)|(걸|것)으로 볼 수|걸로 볼 수|걸
 DULL = re.compile(r"^(\d{4}년 ?)?(\d{1,2}월 ?)?(\d{1,2}일)?$|^(\d{4}년 ?)?(상반기 ?)?(누적 ?)?(매출|영업이익|순이익|부채비율|영업이익률|ROE(\(자기자본이익률\))?|업종 평균|결산 실적)$"
                   r"|^(계약|공급) ?(기간|상대방?|금액)$|하락|상승|급등|급락|주가")
 PRESS = re.compile(r"언론|보도(가|도|했|에 따르면)|기사(가|에)")  # 남의 보도를 말하려면 소식(N) 근거가 있어야 한다
+VERSION = 2  # 기사 쓰는 규칙이 크게 바뀌면 올린다 — 그 전 규칙으로 쓴 기사는 매일 실행이 같은 번호로 다시 쓴다(rewrite). 2 = 원문 없이는 안 씀 · 평가·근거 없는 언론 이야기 탈락 (10/10)
 MAX_PER_RUN = 30  # 한 번에 쓰는 기사 수 상한 (비용) — 담은 종목의 사건부터
 MIN_CHARS = 900  # 본문이 이보다 짧으면 다시 쓰게 한다 (뉴닉 분량 — 사용자 10/8)
 
 
-def events(con: sqlite3.Connection, today: date) -> list[dict]:
-    """아직 기사가 없는 최근 사건 — 담은 종목 먼저, 최신 먼저. 사실 하나(E1)로 만든다."""
+def events(con: sqlite3.Connection, today: date, ref: str | None = None) -> list[dict]:
+    """아직 기사가 없는 최근 사건 — 담은 종목 먼저, 최신 먼저. 사실 하나(E1)로 만든다.
+    ref 를 주면 그 공시 하나만(날짜·이미 쓴 기사와 상관없이) — 옛 기사를 다시 쓸 때(rewrite)."""
     since = (today - timedelta(days=DAYS)).isoformat()
+    which, arg = ("rcept_no = ?", ref) if ref else ("date >= ? and rcept_no not in (select ref from articles)", since)
     held = {t for (t,) in con.execute("select distinct ticker from holdings")}
     out = []
     for rno, t, d, raw, code, dr in con.execute(
-            "select rcept_no, ticker, date, title, code, direction from disclosures where date >= ? and importance >= 2"
-            " and code is not null and code != 'OTHER' and rcept_no not in (select ref from articles)"
-            " and ticker in (select ticker from stocks where market = 'KR')", (since,)):  # 미국 기사는 아직 (원문이 영어) # fmt: skip
+            f"select rcept_no, ticker, date, title, code, direction from disclosures where {which} and importance >= 2"
+            " and code is not null and code != 'OTHER'"
+            " and ticker in (select ticker from stocks where market = 'KR')", (arg,)):  # 미국 기사는 아직 (원문이 영어) # fmt: skip
         day = date.fromisoformat(d)
         dd = f"{day.month}월 {day.day}일"
         title = re.sub(r"\s+", " ", re.sub(r"^\[[^\]]*\]\s*", "", raw)).strip()  # 「[기재정정]」 같은 머리표는 뺀다
@@ -40,8 +43,7 @@ def events(con: sqlite3.Connection, today: date) -> list[dict]:
             "id": "E1", "text": f"{dd} {notes.EVENT_KO[code]} 공시 「{title}」{what}", "url": notes.DART.format(rno), "tone": dr or 0,
             "slots": {"날짜": dd, "종류": notes.EVENT_KO[code], "제목": f"「{title}」"}}})  # fmt: skip
     for rno, t, d, who, chg, rate in con.execute(
-            "select rcept_no, ticker, date, who, change, rate from insiders where kind = '5%' and date >= ?"
-            " and rcept_no not in (select ref from articles)", (since,)):  # fmt: skip
+            f"select rcept_no, ticker, date, who, change, rate from insiders where kind = '5%' and {which}", (arg,)):  # fmt: skip
         day = date.fromisoformat(d)
         dd = f"{day.month}월 {day.day}일"
         way = f", 직전 보고보다 보유 주식 {abs(chg):,}주 {'늘림' if chg > 0 else '줄임'}" if chg else ""
@@ -50,6 +52,8 @@ def events(con: sqlite3.Connection, today: date) -> list[dict]:
         out.append({"ref": rno, "ticker": t, "date": d, "kind": "HOLDER_CHANGE", "fact": {
             "id": "E1", "text": f"{dd} {who}의 5% 이상 대량보유 보고" + (f" — 보유 비율 {rate:.2f}%" if rate is not None else "") + way,
             "url": notes.DART.format(rno), "tone": 0, "slots": slots}})  # fmt: skip
+    if ref:
+        return out
     out.sort(key=lambda x: x["date"], reverse=True)  # 최신 먼저
     # 한 회사의 같은 종류 사건은 기사 한 편 — 이미 이 기간에 쓴 종류도 건너뛴다 (제목이 겹치는 기사 줄줄이 방지)
     done = set(con.execute("select ticker, kind from articles where date >= ?", (since,)).fetchall())
@@ -155,7 +159,7 @@ def write(con: sqlite3.Connection, ev: dict, today: date, dart: "sources.Dart | 
     payload = {"today": today.isoformat(), "name": name,
                "facts": [{"id": f["id"], "text": f["text"]} | ({"doc": f["doc"]} if f.get("doc") else {}) for f in fs]}  # fmt: skip
     got = llm.ask("writer", "article", payload, lambda j: check(j, fs), schema(fs), prompt_file="article")
-    return got and got | {"links": {f["id"]: f["url"] for f in fs if f.get("url")}}
+    return got and got | {"links": {f["id"]: f["url"] for f in fs if f.get("url")}, "v": VERSION}
 
 
 def pick_marks(j: dict, texts: list[str]) -> list[list[str]]:
@@ -192,9 +196,23 @@ def emphasize(con: sqlite3.Connection, limit: int = 20) -> int:
     return n
 
 
+def rewrite(con: sqlite3.Connection, today: date, dart: "sources.Dart", limit: int = 20) -> int:
+    """옛 규칙으로 쓴 기사를 지금 규칙으로 다시 — 같은 번호 그대로(리그램·좋아요·사진이 남는다).
+    원문을 못 받거나(DART 점검) 검사에 떨어지면 옛 글을 그대로 두고 내일 다시 해 본다."""
+    n = 0
+    for aid, ref in con.execute(f"select id, ref from articles where body not like '%\"v\": {VERSION}%' order by id desc limit ?", (limit,)).fetchall():
+        a = (ev := events(con, today, ref)) and write(con, ev[0], today, dart)
+        if a:
+            con.execute("update articles set body = ?, made_at = ? where id = ?", (json.dumps(a, ensure_ascii=False), datetime.now().isoformat(), aid))
+            con.commit()
+            n += 1
+    return n
+
+
 def main(today: date, limit: int = MAX_PER_RUN) -> None:
     con = db.connect()
     made, dart = 0, sources.Dart()
+    again = rewrite(con, today, dart)
     for ev in events(con, today)[:limit]:
         a = write(con, ev, today, dart)
         if a:
@@ -202,7 +220,7 @@ def main(today: date, limit: int = MAX_PER_RUN) -> None:
                         (ev["ref"], ev["ticker"], ev["date"], ev["kind"], json.dumps(a, ensure_ascii=False), datetime.now().isoformat()))  # fmt: skip
             con.commit()
             made += 1
-    print(f"기사 {made}편 · 강조 {emphasize(con)}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
+    print(f"기사 {made}편 · 다시 쓴 기사 {again}편 · 강조 {emphasize(con)}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 if __name__ == "__main__":
