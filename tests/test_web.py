@@ -1164,3 +1164,26 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     ran.clear()
     daily.main(monday)  # 끝까지 돈 날은 다시 불러도 아무것도 안 한다 (메일도 한 번만)
     assert ran == []
+
+
+def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
+    """이메일을 바꿔 가며 요청하면 주소별 제한을 피해 남의 메일함에 뿌리고 발송 한도를 다 쓸 수 있었다 (보안 점검 10/11)."""
+    app, _ = _app()
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, *a, **k: sent.append(to))
+
+    def ask(i, ip):
+        env = {"REQUEST_METHOD": "POST", "PATH_INFO": "/login", "QUERY_STRING": "", "HTTP_COOKIE": "", "CONTENT_TYPE": "application/x-www-form-urlencoded",
+               "HTTP_X_FORWARDED_FOR": f"9.9.9.9, {ip}"}  # 앞의 것은 보낸 쪽이 지어낼 수 있다 — 마지막 값만 믿는다
+        body = f"email=u{i}%40x.kr&agree=1".encode()
+        got = {}
+        b"".join(app(env | {"CONTENT_LENGTH": str(len(body)), "wsgi.input": io.BytesIO(body)}, lambda s, h: got.update(status=s, headers=dict(h))))
+        return got
+
+    assert [ask(i, "1.1.1.1")["status"][:3] for i in range(web.LOGIN_IP_HOURLY + 2)] == ["200"] * web.LOGIN_IP_HOURLY + ["429"] * 2
+    assert len(sent) == web.LOGIN_IP_HOURLY and ask(99, "2.2.2.2")["status"].startswith("200")  # 다른 곳에서는 된다
+    for i in range(200, 200 + web.LOGIN_ALL_HOURLY):
+        ask(i, f"3.3.{i // 250}.{i % 250}")
+    assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
+    h = ask(1000, "5.5.5.5")["headers"]
+    assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]

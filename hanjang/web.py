@@ -44,6 +44,12 @@ DEMO_EMAIL = "demo@hanjang.local"  # 둘러보기 계정 — .env DEMO=1 일 때
 DEMO_STOCKS = ("005930", "000660", "105560", "010140")  # 한 사람이 한 시간에 캡처를 읽힐 수 있는 횟수 (AI 비용)
 LINK_TTL = 15 * 60  # 로그인 링크 15분
 LOGIN_GAP, LOGIN_HOURLY = 60, 5  # 같은 주소로 링크는 1분에 한 번, 한 시간에 다섯 번까지 (메일 폭탄·발송 계정 정지 막기)
+# 주소를 바꿔 가며 요청하면 위 제한을 피해 남의 메일함에 뿌리고 Gmail 하루 한도(약 500통)를 다 쓸 수 있다 — 한 곳(IP)·전체에도 한도 (보안 점검 10/11)
+LOGIN_IP_HOURLY, LOGIN_ALL_HOURLY = 10, 60
+# 이 사이트의 스크립트·글꼴·그림만 — 남의 스크립트가 끼어들거나 폼이 밖으로 나가지 못하게. 화면에 인라인 스크립트가 많아 'unsafe-inline' 은 둔다
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://cdn.brandfetch.io; connect-src 'self'; "
+       "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
 e = html.escape
 
 
@@ -1269,13 +1275,14 @@ class App:
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         cookie = dict(c.strip().split("=", 1) for c in environ.get("HTTP_COOKIE", "").split(";") if "=" in c)
         uid = unsign(cookie.get("s", ""), self.secret)
+        self.local.ip = (environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR") or "").split(",")[-1].strip()  # 앞의 Caddy 가 붙여 준 마지막 값이 실제 접속 주소
         with self.turn:
             self.local.held = True
             try:
                 status, headers, body = self.route(method, path, form, query, int(uid) if uid else None)
             finally:
                 self.local.held = False
-        kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8")]
+        kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8"), ("Content-Security-Policy", CSP)]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
         return [body if isinstance(body, bytes) else body.encode()]
@@ -1563,7 +1570,11 @@ class App:
         times = [t for t in self.sent.get(email, []) if now - t < 3600]
         if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
             return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
-        self.sent[email] = times + [now]
+        ip = "ip:" + getattr(self.local, "ip", "")
+        by_ip, by_all = ([t for t in self.sent.get(k, []) if now - t < 3600] for k in (ip, "*"))
+        if len(by_ip) >= LOGIN_IP_HOURLY or len(by_all) >= LOGIN_ALL_HOURLY:
+            return "429 Too Many Requests", [], self.login_page(error="로그인 요청이 너무 많아요. 한 시간쯤 뒤에 다시 해 주세요.", cohort=cohort)
+        self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
         with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
             mail.send(email, *mail.login_mail(link))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
@@ -2970,7 +2981,10 @@ if __name__ == "__main__":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     import threading
     from socketserver import ThreadingMixIn
+    import wsgiref.simple_server
     from wsgiref.simple_server import WSGIServer, make_server
+
+    wsgiref.simple_server.ServerHandler.server_software = "hanjang"  # 서버 종류·파이썬 판 번호를 응답 머리에 드러내지 않는다
 
     class Server(ThreadingMixIn, WSGIServer):
         """연결마다 스레드 — 브라우저가 미리 열어 둔 빈 연결 하나에 서버 전체가 멈추지 않게.
