@@ -28,6 +28,7 @@ mkdir -p /srv/hanjang && chown hanjang /srv/hanjang
 sudo -u hanjang git -C /srv/hanjang pull --ff-only
 [ -x "$UV" ] || sudo -u hanjang sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 cd /srv/hanjang && sudo -u hanjang "$UV" sync --frozen
+install -d -o hanjang -g hanjang -m 700 /srv/hanjang/data  # DB(이메일)·백업·열쇠 — 서버의 다른 계정이 읽지 못하게 (보안 점검 10/11)
 
 if [ -f /tmp/hanjang.env ]; then
 	install -o hanjang -m 600 /tmp/hanjang.env /srv/hanjang/.env && rm /tmp/hanjang.env
