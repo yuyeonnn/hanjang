@@ -159,20 +159,38 @@ def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
 
 
 def line(mood: str = "calm") -> str:
-    """선으로만 그린 연필 나무 — 줄기가 연필이고 수관은 구름 같은 한 줄. 안내·오류·기다림 화면의 얼굴 (사용자 10/11: 뉴닉 고슴도치처럼, 우리는 나무로).
-    mood: "oops"(걱정스러운 입 + 땀방울 — 오류) · "wait"(웃는 입 + 수관이 살랑 — 기다림) · "calm"(웃는 입 — 그 밖의 안내)."""
-    ink = 'fill="none" stroke="#8f9794" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"'
-    mouth = "M113 74 q7 -5 14 0" if mood == "oops" else "M113 71 q7 6 14 0"
-    drops = ('<path d="M190 34 q-7 10 0 14 q7 -4 0 -14 Z M204 52 q-5 8 0 11 q5 -3 0 -11 Z"/>' if mood == "oops" else "")
-    sway = ('<animateTransform attributeName="transform" type="rotate" values="-2.5 120 86;2.5 120 86;-2.5 120 86" dur="2.4s" repeatCount="indefinite"/>' if mood == "wait" else "")
-    return (f'<svg viewBox="0 0 240 170" width="200" role="img" aria-label="연필 나무" xmlns="http://www.w3.org/2000/svg"><g {ink}>'
-            '<path d="M28 152 H212"/>'  # 땅
-            '<path d="M111 84 V136 L120 151 L129 136 V84"/><path d="M111 136 H129 M120 96 V136"/>'  # 연필 줄기 — 깎은 끝이 땅에 닿는다
-            '<path d="M117 146 L120 151 L123 146 Z" fill="#8f9794"/>'  # 연필심
-            f'<g>{sway}<path d="M80 86 C60 86 54 64 70 55 C65 37 88 24 102 35 C110 17 138 17 145 36 C164 28 182 45 172 61 C188 69 181 88 162 86 Z" fill="#fcf8fb"/>'
-            '<path d="M92 52 q6 -8 14 -4 M148 50 q8 -2 10 6" />'  # 잎 결 두 줄
-            f'<circle cx="108" cy="62" r="2.1" fill="#8f9794" stroke="none"/><circle cx="132" cy="62" r="2.1" fill="#8f9794" stroke="none"/><path d="{mouth}"/></g>'
-            f'{drops}</g></svg>')  # fmt: skip
+    """가는 선으로만 그린 나무 한 그루 — 가지가 갈라지고 끝마다 잎 윤곽. 안내·오류·기다림 화면에 (사용자 10/11: 캐릭터·표정 없이, 감성적인 나무).
+    mood: "oops"(잎 몇 장이 떨어진다 — 오류) · "wait"(가지가 살랑 — 기다림) · "calm"(가만히 — 그 밖의 안내)."""
+    rng = random.Random(21)
+    leaf = "M0 0C3.6 -2.6 3.8 -8.6 0 -12.5C-3.8 -8.6 -3.6 -2.6 0 0M0 -1.5V-9.5"
+    twigs, leaves = [], []
+
+    def put(x, y, ang):
+        leaves.append(f'<path transform="translate({x:.1f} {y:.1f}) rotate({math.degrees(ang) + 90 + rng.uniform(-28, 28):.0f}) scale({rng.uniform(0.8, 1.15):.2f})" d="{leaf}"/>')
+
+    def grow(x, y, ang, length, d):
+        bend = rng.uniform(-0.16, 0.16)
+        x2, y2 = x + math.cos(ang) * length, y + math.sin(ang) * length
+        mx, my = (x + x2) / 2 + math.cos(ang + 1.57) * length * bend, (y + y2) / 2 + math.sin(ang + 1.57) * length * bend
+        twigs.append(f"M{x:.1f} {y:.1f}Q{mx:.1f} {my:.1f} {x2:.1f} {y2:.1f}")
+        if d <= 2:  # 잔가지 — 가운데쯤에 잎 하나
+            put(mx, my, ang + (0.9 if rng.random() < 0.5 else -0.9))
+        if d == 0:
+            put(x2, y2, ang)
+            put(x2, y2, ang - 0.8)
+            put(x2, y2, ang + 0.8)
+            return
+        spread = 0.46 + rng.uniform(-0.05, 0.1)
+        grow(x2, y2, ang - spread, length * 0.74, d - 1)
+        grow(x2, y2, ang + spread * rng.uniform(0.85, 1.1), length * 0.72, d - 1)
+
+    grow(120, 152, -1.57, 40, 4)
+    sway = ('<animateTransform attributeName="transform" type="rotate" values="-1.6 120 152;1.6 120 152;-1.6 120 152" dur="3s" repeatCount="indefinite"/>' if mood == "wait" else "")
+    fallen = ("".join(f'<path transform="translate({x} {y}) rotate({r})" d="{leaf}"/>' for x, y, r in ((186, 104, 70), (200, 132, 130), (172, 150, 95))) if mood == "oops" else "")
+    return ('<svg viewBox="0 0 240 170" width="210" role="img" aria-label="나무" xmlns="http://www.w3.org/2000/svg">'
+            '<g fill="none" stroke="#7d8f88" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M52 152H188M70 152q-2 -7 -5 -9M72 152q1 -7 3 -10M166 152q2 -6 5 -8M163 152q-1 -7 -3 -9"/>'  # 땅과 풀 몇 가닥
+            f'<g>{sway}<path d="{"".join(twigs)}"/><g stroke-width="1.1">{"".join(leaves)}</g></g><g stroke-width="1.1">{fallen}</g></g></svg>')  # fmt: skip
 
 
 if __name__ == "__main__":
