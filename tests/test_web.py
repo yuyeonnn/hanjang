@@ -1140,7 +1140,7 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     monkeypatch.setattr(daily.backup, "backup", lambda today: ran.append("백업") or tmp_path)
     monkeypatch.setattr(daily.backup, "offsite", lambda p: None)
     monkeypatch.setattr(daily.collect, "main", lambda today, dart_up: ran.append(f"받기:{dart_up}"))
-    monkeypatch.setattr(daily.notes, "main", lambda t, today, only_changed, read: ran.append(f"노트:전부={not only_changed}:읽기={read}"))
+    monkeypatch.setattr(daily.notes, "main", lambda t, today, only_changed, read, carry=False: ran.append(f"노트:전부={not only_changed}:읽기={read}"))
     monkeypatch.setattr(daily.us, "read", lambda today: (_ for _ in ()).throw(RuntimeError("SEC 오류")))  # 한 단계가 실패해도
     for mod, name in ((daily.us, "미국"), (daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))

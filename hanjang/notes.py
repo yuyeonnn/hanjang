@@ -1349,8 +1349,10 @@ def changed(fs: list[dict], old: list[dict] | None, held: bool) -> bool:
     return sig(fs) != sig(old)
 
 
-def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True) -> None:
-    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행). 월요일은 전부 새로.
+def main(tickers: list[str], today: date, only_changed: bool = False, read: bool = True, carry: bool = False) -> None:
+    """only_changed: 이번 주 노트가 이미 있고 사실이 그대로인 종목은 건너뛴다 (화~일 매일 실행).
+    carry: 월요일 — 사실이 지난 노트와 한 글자도 다르지 않으면 그 글을 이번 주로 옮겨 적는다(AI 를 부르지 않는다).
+    서버 실측(2026-10-11) 103곳 중 95곳이 그대로였다 — 월요일마다 전부 다시 쓰던 비용의 대부분. 손으로 다시 쓸 땐(--rewrite) 끈다.
     read=False: 사업보고서 읽기(DART)를 건너뛴다 — DART 점검 중에 노트만 다시 쓸 때 (python -m hanjang.notes --rewrite)."""
     con = db.connect()
     ruled, ai = read_disclosures(con)
@@ -1361,7 +1363,8 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
     rows = [r for r in rows if not tickers or r[0] in tickers]
     week = week_of(today)
     by = {"code": 0}  # 「same」= 바뀐 게 없어 건너뛴 종목
-    held = {t for (t,) in con.execute("select distinct ticker from holdings")}
+    # 예시 사람(personas.py)이 담은 종목은 「누가 담은 종목」으로 치지 않는다 — 소식 하나 바뀐 것으로 다시 쓰지 않게 (비용, 2026-10-11)
+    held = {t for (t,) in con.execute("select distinct h.ticker from holdings h join users u on u.id = h.user_id where u.email not like '%@persona.hanjang.local'")}
     for t, name in rows:
         fs = facts(con, t, today)
         if not fs:
@@ -1371,6 +1374,13 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
             if not changed(fs, old and json.loads(old[0]), t in held):
                 by["same"] = by.get("same", 0) + 1
                 continue
+        if carry and not con.execute("select 1 from notes where ticker = ? and week = ?", (t, week)).fetchone():
+            last = con.execute("select facts, body, writer from notes where ticker = ? and week < ? order by week desc limit 1", (t, week)).fetchone()
+            if last and last[2] != "code" and json.loads(last[0]) == json.loads(json.dumps(fs, ensure_ascii=False)):  # 코드 대체 글은 옮기지 않고 다시 써 본다
+                con.execute("insert into notes values (?, ?, ?, ?, ?, ?)", (t, week, last[0], last[1], last[2], datetime.now().isoformat()))
+                con.commit()
+                by["carried"] = by.get("carried", 0) + 1
+                continue
         note, writer = write(name, fs, today)
         note["links"] = {f["id"]: f["url"] for f in fs}
         con.execute("insert or replace into notes values (?, ?, ?, ?, ?, ?)",
@@ -1378,7 +1388,7 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
                      writer, datetime.now().isoformat()))  # fmt: skip
         con.commit()
         by[writer] = by.get(writer, 0) + 1
-    print(f"노트 {sum(v for k, v in by.items() if k != 'same')}장 {by} · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
+    print(f"노트 {sum(v for k, v in by.items() if k not in ('same', 'carried'))}장 {by} · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 if __name__ == "__main__":

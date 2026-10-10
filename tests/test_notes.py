@@ -1,5 +1,6 @@
 """2주차 — 사실 묶음 계산과 숫자 대조 검사. AI 는 부르지 않는다."""
 
+import json
 from datetime import date
 
 import pytest
@@ -622,3 +623,26 @@ def test_reword_other_shapes():
 def test_date_move_keeps_decimal_numbers():
     assert notes.mend("10월 1일에는 매출 1.3조원을 기록했어요.") == "매출 1.3조원을 기록했어요(10월 1일)."
     assert notes.mend("10월 2일 국민연금이 9.34%로 늘렸어요. 다음 문장.") == "국민연금이 9.34%로 늘렸어요(10월 2일). 다음 문장."
+
+
+def test_monday_carries_unchanged_notes(monkeypatch, tmp_path):
+    """월요일 — 사실이 지난 노트와 그대로면 AI 를 부르지 않고 글을 이번 주로 옮긴다. 달라졌거나 코드 대체 글이면 다시 쓴다 (비용, 2026-10-11)."""
+    real = db.connect
+    con = real(tmp_path / "x.db")
+    con.execute("insert into stocks (ticker, name) values ('005930', '삼성전자'), ('000660', 'SK하이닉스'), ('035420', 'NAVER')")
+    fs = lambda text: [{"id": "F1", "text": text, "url": "u", "tone": 0, "slots": {}}]  # noqa: E731
+    for t, text, writer in (("005930", "그대로", "llm:x"), ("000660", "옛 사실", "llm:x"), ("035420", "그대로", "code")):
+        con.execute("insert into notes values (?, '2026-10-05', ?, ?, ?, 'then')", (t, json.dumps(fs(text), ensure_ascii=False), json.dumps({"headline": "지난 글"}), writer))
+    con.commit()
+    monkeypatch.setattr(notes.db, "connect", lambda: real(tmp_path / "x.db"))
+    monkeypatch.setattr(notes, "read_disclosures", lambda con: (0, 0))
+    monkeypatch.setattr(notes, "facts", lambda con, t, today: fs("새 사실" if t == "000660" else "그대로"))
+    wrote = []
+    monkeypatch.setattr(notes, "write", lambda name, f, today: (wrote.append(name), ({"headline": "새 글"}, "llm:x"))[1])
+    notes.main([], date(2026, 10, 12), read=False, carry=True)
+    assert wrote == ["SK하이닉스", "NAVER"]  # 삼성전자만 옮겨 적었다
+    got = dict(real(tmp_path / "x.db").execute("select ticker, body from notes where week = '2026-10-12'").fetchall())
+    assert json.loads(got["005930"])["headline"] == "지난 글" and json.loads(got["000660"])["headline"] == "새 글"
+    wrote.clear()
+    notes.main(["005930"], date(2026, 10, 19), read=False)  # 손으로 다시 쓸 땐 옮기지 않는다
+    assert wrote == ["삼성전자"]

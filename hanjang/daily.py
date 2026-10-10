@@ -98,7 +98,7 @@ def main(today: date) -> None:
     got = step("국내 받기", collect.main, today, dart_up)
     step("미국 받기", us.main, today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     step("미국 읽기", us.read, today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
-    wrote = step("노트", notes.main, [], today, only_changed=not monday, read=dart_up)
+    wrote = step("노트", notes.main, [], today, only_changed=not monday, read=dart_up, carry=monday)  # 월요일 — 사실이 그대로인 노트는 옮겨 적는다
     if dart_up:
         step("ETF", etf.main, today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
     step("기사", articles.main, today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편 (원문을 못 받으면 쓰지 않는다)
