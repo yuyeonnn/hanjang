@@ -1121,3 +1121,46 @@ def test_parent_buying_its_subsidiarys_new_shares_is_one_article():
     assert sorted(x["ref"] for x in articles.events(con, date(2026, 10, 10))) == ["m", "own"]
     con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('m', '005930', '2026-10-07', 'MA', '{}', 'x')")
     assert [x["ref"] for x in articles.events(con, date(2026, 10, 10))] == ["own"]  # 취득 기사를 이미 썼어도 자회사 증자 쪽을 또 쓰지 않는다
+
+
+def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkeypatch):
+    """DART 주말 점검(10/10·10/11)에 매일 실행이 통째로 멈췄다 — 쉬는 날엔 DART 가 필요한 일만 건너뛰고, 오후에 돌아오면 마저 한다."""
+    import pytest
+
+    from hanjang import daily
+
+    ran, up, mails = [], [False], []
+    monkeypatch.setattr(daily, "STATE", tmp_path / "daily.json")
+    monkeypatch.setattr(daily.sources.Dart, "up", lambda self: up[0])
+    monkeypatch.setattr(daily.sources, "env", lambda: {"SMTP_USER": "op@x.kr", "OPEN_DART_API_KEY": "k", "OPEN_DART_BASE_URL": "https://x"})
+    monkeypatch.setattr(daily.mail, "send", lambda to, subject, *a, **k: mails.append(subject))
+    monkeypatch.setattr(daily.backup, "backup", lambda today: ran.append("백업") or tmp_path)
+    monkeypatch.setattr(daily.backup, "offsite", lambda p: None)
+    monkeypatch.setattr(daily.collect, "main", lambda today, dart_up: ran.append(f"받기:{dart_up}"))
+    monkeypatch.setattr(daily.notes, "main", lambda t, today, only_changed, read: ran.append(f"노트:전부={not only_changed}:읽기={read}"))
+    monkeypatch.setattr(daily.us, "read", lambda today: (_ for _ in ()).throw(RuntimeError("SEC 오류")))  # 한 단계가 실패해도
+    for mod, name in ((daily.us, "미국"), (daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
+        monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
+    monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
+    monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
+    monday = date(2026, 10, 12)
+
+    with pytest.raises(SystemExit, match="미국 읽기"):  # 실패한 단계가 있으면 끝에 실패로 — 그래도 뒤 단계는 다 돌았다
+        daily.main(monday)
+    assert ran == ["백업", "받기:False", "미국", "노트:전부=False:읽기=False", "기사", "아침", "유명", "국민연금"]  # ETF·큰손·안내 메일은 없다
+    assert any("DART 점검" in m for m in mails) and any("미국 읽기 실패" in m for m in mails)
+
+    monkeypatch.setattr(daily.us, "read", lambda today: ran.append("미국 읽기"))
+    ran.clear(), mails.clear()
+    daily.main(monday)  # 13시 — 아침에 실패한 단계가 있었으니 DART 가 아직 쉬어도 다시 돈다
+    assert "미국 읽기" in ran and "ETF" not in ran and not any("DART 점검" in m for m in mails)  # 점검 메일은 하루 한 번
+    ran.clear()
+    daily.main(monday)  # 다시 — 더 할 일이 없다
+    assert ran == []
+
+    up[0] = True
+    daily.main(monday)  # 19시 — DART 가 돌아왔다: 받기·ETF·큰손까지, 월요일이라 노트 전부와 안내 메일도
+    assert ran == ["백업", "받기:True", "미국", "미국 읽기", "노트:전부=True:읽기=True", "ETF", "기사", "아침", "큰손", "유명", "국민연금", "안내 메일"]
+    ran.clear()
+    daily.main(monday)  # 끝까지 돈 날은 다시 불러도 아무것도 안 한다 (메일도 한 번만)
+    assert ran == []

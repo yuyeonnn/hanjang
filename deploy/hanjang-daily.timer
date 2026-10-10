@@ -1,9 +1,12 @@
 # 매일 아침 7시(한국 시간). 서버가 꺼져 있어 놓쳤으면 켜지자마자 한 번 돈다(Persistent).
+# 13시·19시는 다시 돌기 — 아침에 끝까지 돌았으면 바로 끝나고, DART 가 쉬었거나 단계가 실패했으면 마저 한다 (hanjang/daily.py)
 [Unit]
 Description=hanjang daily 07:00 KST
 
 [Timer]
 OnCalendar=*-*-* 07:00:00 Asia/Seoul
+OnCalendar=*-*-* 13:00:00 Asia/Seoul
+OnCalendar=*-*-* 19:00:00 Asia/Seoul
 Persistent=true
 
 [Install]

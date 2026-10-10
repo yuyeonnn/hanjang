@@ -174,24 +174,28 @@ def first(ticker: str, today: date | None = None) -> bool:
         con.close()
 
 
-def main(today: date) -> None:
+def main(today: date, dart_up: bool = True) -> None:
+    """dart_up=False (DART 점검) — 국내 공시·재무 받기는 건너뛰고 환율·금리·공휴일·소식만 받는다. 종목은 어제까지 DB 에 있는 것으로."""
     con = db.connect()
     # 문장마다 바로 저장 — 받기는 몇 분 걸려서, 끝에 한 번 저장하면 그동안 화면이 DB 에 못 써서 오류가 난다 (2026-10-08 사이트 500)
     con.isolation_level = None
     dart = sources.Dart()
     # 노트를 쓰는 종목 = universe.txt(코스피 큰 회사 100곳) + 누군가 담은 종목(코스닥 포함). 나머지 상장사는 검색에만
-    listed = dart.listed(today)
+    listed = dart.listed(today) if dart_up else []
     picked = sources.kospi_universe()
     held = {t for (t,) in con.execute("select distinct ticker from holdings")} - {t for t, _ in picked}
     names = dict(con.execute("select ticker, name from stocks")) | dict(listed)  # 막 상장해 정기보고서가 아직 없는 회사도 담겼으면 쓴다
     extra = [(t, names[t]) for t in sorted(held) if t in names and not t.startswith("ETF")]  # ETF 는 etf.py 가 따로
     picked += extra
     tickers = [t for t, _ in picked]
-    save_universe(con, picked, dart.corps(), listed)
-    print(f"종목 {len(tickers)}개 (universe.txt + 담은 종목 {len(extra)}개) · 상장사 {len(listed)}곳")
+    if dart_up:
+        save_universe(con, picked, dart.corps(), listed)
+        print(f"종목 {len(tickers)}개 (universe.txt + 담은 종목 {len(extra)}개) · 상장사 {len(listed)}곳")
 
-    per_stock(con, dart, tickers, today)
-    print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
+        per_stock(con, dart, tickers, today)
+        print(f"공모주 {save_ipos(con, dart, today)}건 (증권신고서 · 지난 {DISCLOSURE_DAYS}일)")
+    else:
+        print("DART 점검 — 국내 공시·재무·공모주 받기는 건너뜀 (다음 실행이 지난 90일을 다시 받는다)")
 
     con.execute("delete from macro where series_id = 'ECOS:731Y001:0000001'")  # 서울외국환중개 작성 — 예전에 받은 것 지움
     for sid, name in sources.MACRO.items():

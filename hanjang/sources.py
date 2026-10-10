@@ -183,6 +183,14 @@ class Dart:
         self.calls += 1
         return _get(f"{self.base}/{path}", self.key, crtfc_key=self.key, **params)
 
+    def up(self) -> bool:
+        """DART 가 대답하나 — 점검 중이면 JSON 대신 안내 페이지(HTML)나 status 800 을 준다 (10/10·10/11 주말 점검에 매일 실행이 멈췄다)."""
+        try:
+            d = date.today().strftime("%Y%m%d")
+            return self._call("list.json", bgn_de=d, end_de=d, page_count=1).json().get("status") in ("000", "013")
+        except Exception:  # noqa: BLE001
+            return False
+
     def _list(self, path: str, **params) -> dict:
         """status 000 → 그대로 · 013(없음) → 빈 목록 · 그 밖은 예외."""
         j = self._call(path, **params).json()

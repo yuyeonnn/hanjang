@@ -1,6 +1,7 @@
 """매일 아침 한 번에 — 받기 → 노트 → (월요일만) 안내 메일. `python -m hanjang.daily` (매일 07:00 예약 실행).
 월요일은 그 주 노트를 전부 새로 쓰고, 화~일은 사실이 바뀐 종목만 다시 쓴다(밤비처럼 「자주 받고, 바뀐 것만 쓴다」).
-단계가 하나 실패하면 거기서 멈춘다 — 빈 노트로 안내 메일을 보내지 않게."""
+단계 하나가 실패해도 다음 단계는 돈다(실패한 단계는 운영자에게 메일). DART 가 쉬는 날엔 DART 가 필요한 일만 건너뛰고, 13시·19시에 다시 해 본다.
+안내 메일은 받기와 노트가 다 된 날만 — 빈 노트로 보내지 않게."""
 
 import json
 import sqlite3
@@ -47,34 +48,76 @@ def notify(con: sqlite3.Connection, week: str) -> int:
     return len(by)
 
 
+STATE = db.PATH.parent / "daily.json"  # 오늘 실행이 어디까지 됐나 — 오후 다시 돌기(13시·19시 타이머)가 읽는다
+
+
+def today_state(today: date) -> dict:
+    try:
+        s = json.loads(STATE.read_text(encoding="utf-8"))
+        return s if s.get("date") == today.isoformat() else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def main(today: date) -> None:
-    monday = today.weekday() == 0
+    """하루 세 번 불린다(07·13·19시). 아침에 끝까지 돌았으면 오후엔 바로 끝난다. DART 가 쉬는 날(점검)엔 DART 가 필요한 일만 건너뛰고
+    나머지는 어제까지의 자료로 끝까지 돈다 — 오후에 DART 가 돌아오면 그때 마저 한다(월요일 안내 메일도 그때).
+    단계 하나가 실패해도 다음 단계는 돈다. 실패한 단계는 운영자에게 알리고, 끝에 실패로 끝낸다(journalctl·systemctl 에 보이게)."""
+    before = today_state(today)
+    if before.get("complete"):
+        print("오늘은 이미 끝까지 돌았어요 — 건너뜀")
+        return
+    dart_up = sources.Dart().up()
+    if before and not before.get("failed") and not dart_up:
+        print("DART 가 아직 쉬는 중 — 아침에 한 것 말고 더 할 일이 없어요")
+        return
+    failed: list[str] = []
+
+    def step(name: str, fn, *a, **k) -> bool:
+        try:
+            fn(*a, **k)
+            return True
+        except Exception as err:  # noqa: BLE001
+            failed.append(name)
+            print(f"{name} 실패 — {type(err).__name__}: {err}", file=sys.stderr)
+            alert(err, f"{name} 실패 — 나머지는 계속")
+            return False
+
+    if not dart_up:
+        print("DART 점검 — 국내 받기·사업보고서 읽기·ETF·큰손은 건너뛰고 나머지는 어제까지의 자료로")
+        if "dart" not in before and (to := sources.env().get("SMTP_USER")):  # 하루 한 번만
+            mail.send(to, "[한장] DART 점검 — 국내 받기는 건너뛰고 나머지는 돌았어요",
+                      "DART 가 대답하지 않아(점검) 국내 공시·재무 받기, 사업보고서 읽기, ETF, 큰손은 건너뛰었어요. 13시·19시에 다시 해 봐요. 할 일은 없어요.")
+    monday = today.weekday() == 0 and dart_up and not before.get("mailed")  # 새 자료 없이 그 주 노트를 다 새로 쓰거나 안내 메일을 보내지 않는다
     saved = backup.backup(today)  # 받기 전에 — 오늘 실행이 DB 를 망가뜨려도 어제 것으로 돌아갈 수 있게
     print(f"백업 {saved}")
     try:
         print(f"서버 밖 백업 {backup.offsite(saved)}")
     except Exception as err:  # 서버 밖에 못 올려도 오늘 노트는 쓴다 — 운영자에게만 알린다
         alert(err, "서버 밖 백업 실패")
-    try:
-        collect.main(today)
-    except Exception as err:  # DART 가 쉬어도(점검) 미국·노트·아침 한 장은 어제까지의 자료로 돈다 — 운영자에게만 알린다
-        alert(err, "국내 받기(DART) 실패 — 나머지는 계속")
-        monday = False  # 새 자료 없이 안내 메일은 보내지 않는다
-    us.main(today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
-    us.read(today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
-    notes.main([], today, only_changed=not monday)
-    etf.main(today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
-    articles.main(today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편
-    print(f"아침 한 장 문장 {morning.prepare(db.connect(), today)}건")  # 코드 풀이가 없는 공시만 AI 한 문장 — 공시마다 한 번
-    holders.main(today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
-    gurus.main(today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
-    nps.main(today)  # 국민연금 한국+미국 — 1년에 한 번 새 공시(공공데이터포털), 같은 날 13F
+    got = step("국내 받기", collect.main, today, dart_up)
+    step("미국 받기", us.main, today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
+    step("미국 읽기", us.read, today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
+    wrote = step("노트", notes.main, [], today, only_changed=not monday, read=dart_up)
+    if dart_up:
+        step("ETF", etf.main, today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
+    step("기사", articles.main, today)  # 피드 「최근 소식」 — 새 사건마다 기사 한 편 (원문을 못 받으면 쓰지 않는다)
+    step("아침 한 장", lambda: print(f"아침 한 장 문장 {morning.prepare(db.connect(), today)}건"))  # 코드 풀이가 없는 공시만 AI 한 문장 — 공시마다 한 번
+    if dart_up:
+        step("큰손", holders.main, today)  # 큰손 포트폴리오 — 최근 일주일 대량보유 보고만 더한다
+    step("유명 투자자", gurus.main, today)  # 미국 유명 투자자 13F — 새 신고가 나온 사람만 다시 받는다
+    step("국민연금", nps.main, today)  # 국민연금 한국+미국 — 1년에 한 번 새 공시(공공데이터포털), 같은 날 13F
     if sources.env().get("DEMO") == "1":  # 둘러보기 예시 사람들 — 활동 시각을 다시 「최근」으로
-        print(f"예시 사람 {personas.seed(db.connect())}명")
-    if monday:
-        print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명")
+        step("예시 사람", lambda: print(f"예시 사람 {personas.seed(db.connect())}명"))
+    mailed = bool(before.get("mailed"))
+    if monday and got and wrote:  # 빈 노트로 안내 메일을 보내지 않게 — 받기와 노트가 다 된 날만
+        mailed = step("안내 메일", lambda: print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명"))
     if llm.spent.get("no_credit") and (to := sources.env().get("SMTP_USER")):  # 멈추진 않았지만 운영자는 알아야 한다
         mail.send(to, "[한장] OpenAI 크레딧 소진 — 오늘 노트는 코드 문장으로", "platform.openai.com 결제(Billing)에서 크레딧을 채우면 다음 실행부터 AI 글로 돌아와요.")
+    STATE.write_text(json.dumps({"date": today.isoformat(), "dart": dart_up, "failed": failed, "mailed": mailed,
+                                 "complete": dart_up and not failed}, ensure_ascii=False), encoding="utf-8")  # fmt: skip
+    if failed:
+        raise SystemExit(f"실패한 단계: {', '.join(failed)}")
 
 
 def alert(err: BaseException, what: str = "매일 실행 실패") -> None:
