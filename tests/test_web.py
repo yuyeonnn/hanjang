@@ -945,3 +945,27 @@ def test_personas_seen_by_everyone_with_label():
     assert "반도체일기" in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
     assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
     assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
+
+
+def test_month_list_sorts_and_drops_minor():
+    app, con = _app()
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000001', '가회사', 'x', 1)")
+    con.execute("insert into holdings values (1, '000001', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '000001', '2026-10-02', '유상증자결정', 'RIGHTS_ISSUE', 3, -1), ('2', '000001', '2026-10-20', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1),"
+                " ('3', '000001', '2026-10-07', '판매·인도 대수 알림 (8-K 2.02)', 'EARNINGS', 2, 0)")
+    con.execute("insert into ipos (corp_code, rcept_no, name, sub_start, sub_end) values ('c', '9', '새회사', '2026-10-12', '2026-10-13')")
+    con.commit()
+    a = f"s={web.sign('1', SECRET)}"
+    page = call(app, "/calendar?m=2026-10", cookie=a)[2]
+    month = page[page.index('id="month-list"'):]
+    assert "유상증자" in month and "판매·인도" not in month  # 보통 공시는 목록에서 빠지고
+    assert "이 달 공모주 청약 1곳" in month and "새회사 공모주 청약" not in month  # 공모주는 한 줄로
+    assert "판매·인도" in page  # 달력의 그날 일정에는 그대로
+    new = call(app, "/calendar?m=2026-10&s=new", cookie=a)[2]
+    new = new[new.index('id="month-list"'):]
+    assert new.index("단일판매") < new.index("유상증자")  # 최신순
+    old = call(app, "/calendar?m=2026-10&s=old", cookie=a)[2]
+    old = old[old.index('id="month-list"'):]
+    assert old.index("유상증자") < old.index("단일판매")  # 날짜순

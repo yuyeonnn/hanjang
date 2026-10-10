@@ -1415,7 +1415,7 @@ class App:
             return self.learn(uid, slug)
         if path == "/calendar":
             self.log(uid, "calendar")
-            return "200 OK", [], self.calendar(uid, query.get("m"))
+            return "200 OK", [], self.calendar(uid, query.get("m"), sort=query.get("s"))
         return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
 
     # ---- 로그인 (시안 _2) ----
@@ -1782,7 +1782,7 @@ class App:
 
     # ---- 캘린더 (시안 _4) ----
 
-    def calendar(self, uid: int, month: str | None, today: date | None = None) -> str:
+    def calendar(self, uid: int, month: str | None, today: date | None = None, sort: str | None = None) -> str:
         """④ 캘린더 — 한 달 달력. 주말·공휴일은 빨간 숫자, 칸 안에 내 종목의 공시.
         앞으로의 일정(events — 공시 원문에서 읽은 실적 발표·주총·배당)은 테두리 칩으로 따로 보인다."""
         today = today or date.today()
@@ -1794,7 +1794,7 @@ class App:
         if (end := date(y, 12, 31)).weekday() < 5 and m == 12:
             hol.setdefault(end.isoformat(), "증시 휴장")  # 연말 휴장 — 공휴일 자료엔 없다
         rows = self.con.execute(
-            "select d.date, s.name, d.code, d.title, d.rcept_no, d.direction, s.ticker, d.amount from disclosures d"
+            "select d.date, s.name, d.code, d.title, d.rcept_no, d.direction, s.ticker, d.amount, d.importance from disclosures d"
             " join holdings h on h.ticker = d.ticker and h.user_id = ? join stocks s on s.ticker = d.ticker"
             " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date",
             (uid, lo, hi)).fetchall()  # fmt: skip
@@ -1859,7 +1859,7 @@ class App:
                 # 칸 안 칩은 한 줄 — 넘치면 말줄임(…), 전체 이름은 마우스를 올리면·오른쪽 목록에서. 칸마다 셋까지, 나머지는 「+N」 (사용자 10/9: 줄바꿈이 별로)
                 chips = []
                 for rs in by.get(iso, []) if d.month == m else []:
-                    _, name, code, _, rno, dr, _, _ = rs[0]
+                    _, name, code, _, rno, dr, _, _, _ = rs[0]
                     tint = {1: "bg-secondary-fixed text-on-secondary-fixed-variant", -1: "bg-tertiary-fixed text-on-tertiary-fixed-variant"}.get(dr, "bg-surface-container-high text-on-surface-variant")
                     many = f" {len(rs)}건" if len(rs) > 1 else ""
                     chips.append(f'<span title="{e(name)} {e(EVENT_SHORT.get(code, ""))}{many}" class="{CHIP} {tint}">'
@@ -1880,8 +1880,11 @@ class App:
                 pick = f' data-day="{iso}" onclick="pickDay(this.dataset.day)"' if d.month == m else ""  # 칸 어디를 눌러도(칩 포함) 그날 일정 — 칩은 원문 링크가 아니다(사용자 10/10: 누르면 원문으로 넘어가 힘들다) 일정
                 cells.append(f'<div{pick} class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 rounded-lg flex flex-col justify-start lg:border-t lg:border-surface-container-high {"lg:bg-surface-container-low/60" if d.month != m else "cursor-pointer hover:bg-surface-container-low"}">{cell}</div>')
         items = []
+        minor = set()  # 「이 달의 일정」 목록에서 뺄 것 — 달력 칸·그날 일정에는 그대로 (사용자 10/10: 너무 많다, 덜 중요한 건 빼)
         for rs in mine:
-            d, name, code, title, rno, dr, t, _ = rs[0]
+            d, name, code, title, rno, dr, t, _, imp = rs[0]
+            if not (dr or imp >= 3 or (code == "EARNINGS" and not re.match(r"판매|예비", title) and "예고" not in title)):
+                minor.add(len(items))  # 좋고 나쁨이 없는 보통 공시(판매 대수 알림·실적 발표 예고 등)
             dd = date.fromisoformat(d)
             label, chip = TONE_TAG.get(dr or 0, TONE_TAG[0])
             src = ("SEC 공시: " if "-" in rno else "DART 공시: ") + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
@@ -1914,6 +1917,7 @@ class App:
                 continue
             da, db_ = date.fromisoformat(a), date.fromisoformat(b)
             say = "새로 상장하려는 회사가 주식을 팔아 돈을 모아요."
+            minor.add(len(items))  # 공모주는 한 달 수십 곳 — 목록에선 한 줄로 모은다
             items.append((9, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
                           f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{da.month}월 {da.day}일 ~ {db_.month}월 {db_.day}일 청약 · 시장 전체</span>'
                           '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
@@ -1930,12 +1934,21 @@ class App:
                           f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(what)}</h3>'
                           f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(sources.MACRO_EXPLAIN[(kind, nat)])}</p>'
                           f'<a href="{e(url)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</a></article>'))  # fmt: skip
+        ipo_n = len(minor & {i for i, x in enumerate(items) if x[0] == 9})
+        items = [(*x[:3], x[3] if len(x) > 3 else {x[1]}, i in minor) for i, x in enumerate(items)]
         items.sort(key=lambda x: (x[0], x[1]))  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정
-        days: dict[str, list] = {}  # 달력에서 고른 날의 일정 — 같은 순서로, 공모주는 청약 첫날·상장일 둘 다
+        days: dict[str, list] = {}  # 달력에서 고른 날의 일정 — 같은 순서로, 공모주는 청약 첫날·상장일 둘 다. 덜 중요한 것도 여기엔 다
         for x in items:
-            for dd_ in x[3] if len(x) > 3 else {x[1]}:
+            for dd_ in x[3]:
                 days.setdefault(dd_, []).append(x[2])
-        items = [x[2] for x in items]
+        sort = sort if sort in ("new", "old") else "rel"  # 이 달의 일정 — 관련 높은 순(기본) · 최신순 · 날짜순
+        if sort != "rel":
+            items.sort(key=lambda x: x[1], reverse=sort == "new")
+        items = [x[2] for x in items if not x[4]]
+        if ipo_n:
+            items.append(f'<a href="#calendar-grid" class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2 font-body-compact text-body-compact text-on-surface-variant hover:text-on-surface">'
+                         f'<span class="flex items-center gap-2"><span class="material-symbols-outlined text-secondary text-[18px]">campaign</span>이 달 공모주 청약 {ipo_n}곳 — 달력 칸을 눌러 날마다 볼 수 있어요</span>'
+                         '<span class="material-symbols-outlined text-[16px]">expand_less</span></a>')  # fmt: skip
         pick = today.isoformat() if (today.year, today.month) == (y, m) else f"{y}-{m:02d}-01"  # 처음엔 오늘, 다른 달이면 1일
         day_lists = "".join(f'<div data-list="{d}"{"" if d == pick else " hidden"}>{"".join(h)}</div>' for d, h in days.items() if d[:7] == f"{y}-{m:02d}")
         day_none = f'<p data-list="none" class="py-3.5 font-body-compact text-body-compact text-on-surface-variant"{" hidden" if pick in days else ""}>이 날은 일정이 없어요.</p>'
@@ -1975,15 +1988,19 @@ class App:
                  f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">이번 달 주목할 공시 {len(mine)}건</span><span class="font-label-micro text-label-micro text-on-surface-variant">{e(mix)}</span></div></div>'
                  '</section>'
                  '<div class="flex flex-col gap-space-lg lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10 lg:items-start">'
-                 '<section class="flex flex-col gap-1 py-1 lg:rounded-2xl lg:border lg:border-surface-container-high lg:p-4"><div class="grid grid-cols-7 text-center font-label-micro text-label-micro font-semibold pb-1.5 lg:pb-2.5 lg:text-[13px] border-b border-surface-container-high/60"><span class="text-tertiary">일</span><span class="text-on-surface-variant">월</span><span class="text-on-surface-variant">화</span><span class="text-on-surface-variant">수</span><span class="text-on-surface-variant">목</span><span class="text-on-surface-variant">금</span><span class="text-tertiary">토</span></div>'
+                 '<section id="calendar-grid" class="flex flex-col gap-1 py-1 lg:rounded-2xl lg:border lg:border-surface-container-high lg:p-4"><div class="grid grid-cols-7 text-center font-label-micro text-label-micro font-semibold pb-1.5 lg:pb-2.5 lg:text-[13px] border-b border-surface-container-high/60"><span class="text-tertiary">일</span><span class="text-on-surface-variant">월</span><span class="text-on-surface-variant">화</span><span class="text-on-surface-variant">수</span><span class="text-on-surface-variant">목</span><span class="text-on-surface-variant">금</span><span class="text-tertiary">토</span></div>'
                  f'<div class="grid grid-cols-7 gap-1 lg:gap-0 pt-1 lg:pt-0">{"".join(cells)}</div>'
                  '<nav class="flex justify-center items-center gap-5 pt-2 text-[12px] text-outline">'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={prev}"><span class="material-symbols-outlined text-[14px]">chevron_left</span>이전 달</a>'
                  f'<a class="flex items-center hover:text-on-surface-variant" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[14px]">chevron_right</span></a></nav></section>'
                  '<aside class="flex flex-col gap-space-lg lg:sticky lg:top-20"><section class="flex flex-col mt-2 lg:mt-0"><div class="pb-2 border-b border-surface-container-highest"><h2 id="day-title" class="font-headline-md text-headline-md text-on-surface">오늘 일정</h2></div>'
-                 f'{day_lists}{day_none}</section><section class="flex flex-col"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2><span class="font-label-micro text-label-micro text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">관련 높은 순</span></div>'
+                 f'{day_lists}{day_none}</section><section class="flex flex-col"><div class="flex items-center justify-between pb-2 border-b border-surface-container-highest"><div class="flex items-center gap-space-xs"><h2 class="font-headline-md text-headline-md text-on-surface">이 달의 일정</h2></div>'
                  '<a class="font-label-regular text-label-regular text-primary flex items-center hover:opacity-80 transition-opacity" href="https://dart.fss.or.kr" target="_blank" rel="noopener">전체 공시 원문<span class="material-symbols-outlined text-[15px] ml-0.5">arrow_forward</span></a></div>'
-                 f'<div class="flex flex-col">{"".join(items)}</div></section>'
+                 + '<nav id="month-list" class="scroll-mt-24 pt-2.5 pb-1 flex gap-1.5" aria-label="정렬">' + "".join(
+                     f'<a href="/calendar?m={y}-{m:02d}&s={k}#month-list" class="px-3 py-1 rounded-full text-[12px] font-semibold border '
+                     + ("bg-primary text-on-primary border-primary" if k == sort else "border-outline-variant/60 text-on-surface-variant hover:bg-surface-container") + f'">{label}</a>'
+                     for k, label in (("rel", "관련 높은 순"), ("new", "최신순"), ("old", "날짜순"))) + "</nav>"
+                 + f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
                  f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'
                  '<footer class="mt-2 text-center flex flex-col items-center gap-1"><div class="w-8 h-0.5 bg-surface-container-high rounded-full mb-1"></div><p class="font-citation-ref text-citation-ref text-on-surface-variant leading-relaxed max-w-[340px]">색 칩은 지난 공시, 테두리 칩은 공시에 적힌 앞으로의 일정(실적 발표·주총·배당), 점선 칩은 금리·물가·고용·선거 같은 시장 일정이에요. 공휴일: 한국천문연구원.</p></footer>'

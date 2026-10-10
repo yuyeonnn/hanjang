@@ -108,3 +108,16 @@ def test_news_from_dropped_sources_is_purged(monkeypatch):
     monkeypatch.setattr(sources, "fetch_rss", lambda url, press: [])
     collect.save_news(con, [("005930", "삼성전자")], date(2026, 10, 10))
     assert [r[0] for r in con.execute("select url from news")] == ["u3"]  # 쓸 권리가 확인된 뉴스룸만 남는다
+
+
+def test_corps_keeps_yesterday_list_when_dart_sends_no_zip(tmp_path, monkeypatch):
+    import os
+    from hanjang import sources
+
+    monkeypatch.setattr(sources, "CACHE", tmp_path)
+    (tmp_path / "dart_corp.xml").write_text("<result><list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name><stock_code>005930</stock_code></list></result>", encoding="utf-8")
+    os.utime(tmp_path / "dart_corp.xml", (0, 0))  # 하루 넘은 목록
+    d = sources.Dart.__new__(sources.Dart)
+    d._corps, d.calls, d.LIMIT = None, 0, 10
+    monkeypatch.setattr(d, "_call", lambda path, **k: type("R", (), {"content": b"<result><status>800</status></result>"})())
+    assert d.corps() == {"005930": "00126380"}  # zip 이 아니어도 어제 목록으로 계속

@@ -55,7 +55,11 @@ def main(today: date) -> None:
         print(f"서버 밖 백업 {backup.offsite(saved)}")
     except Exception as err:  # 서버 밖에 못 올려도 오늘 노트는 쓴다 — 운영자에게만 알린다
         alert(err, "서버 밖 백업 실패")
-    collect.main(today)
+    try:
+        collect.main(today)
+    except Exception as err:  # DART 가 쉬어도(점검) 미국·노트·아침 한 장은 어제까지의 자료로 돈다 — 운영자에게만 알린다
+        alert(err, "국내 받기(DART) 실패 — 나머지는 계속")
+        monday = False  # 새 자료 없이 안내 메일은 보내지 않는다
     us.main(today)  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     us.read(today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
     notes.main([], today, only_changed=not monday)

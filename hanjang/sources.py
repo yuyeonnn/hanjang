@@ -197,9 +197,15 @@ class Dart:
         if self._corps is None:
             f = CACHE / "dart_corp.xml"
             if not f.exists() or time.time() - f.stat().st_mtime > 86_400:
-                z = zipfile.ZipFile(io.BytesIO(self._call("corpCode.xml").content))
-                f.parent.mkdir(parents=True, exist_ok=True)
-                f.write_bytes(z.read(z.namelist()[0]))
+                body = self._call("corpCode.xml").content
+                if body[:2] == b"PK":  # zip
+                    z = zipfile.ZipFile(io.BytesIO(body))
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    f.write_bytes(z.read(z.namelist()[0]))
+                elif not f.exists():  # DART 가 zip 대신 오류(점검·한도 등)를 돌려줬고 어제 목록도 없다
+                    raise RuntimeError(f"DART corpCode: zip 이 아닌 응답 — {body[:200].decode('utf-8', 'replace')}")
+                else:  # 회사 목록은 하루 사이 거의 안 바뀐다 — 어제 것으로 계속 (10/10 아침 실행이 여기서 멈췄다)
+                    print(f"DART 회사 목록을 못 받아 어제 것을 씀 — {body[:120].decode('utf-8', 'replace')}")
             self._corps = parse_corps(f.read_text(encoding="utf-8"))
         return self._corps
 
