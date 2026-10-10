@@ -1149,7 +1149,10 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + (('<div class="pt-space-sm pb-1 flex flex-col gap-1.5"><div class="font-label-micro text-label-micro text-outline font-semibold uppercase">언론 키워드 흐름</div><div class="flex flex-wrap gap-2">'
                          + "".join(f'<span class="py-0.5 text-on-surface-variant text-label-micro font-label-micro">{e(k)}</span>' for k in body["keywords"]) + "</div></div>")
                         if body.get("keywords") else "")
-                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸이 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>')  # fmt: skip
+                     + '<p class="font-label-micro text-label-micro text-outline leading-normal">소식은 회사 뉴스룸이 RSS 로 내보낸 제목·요약문만 보고 한장이 새로 쓴 글이에요. 기사 본문은 받지 않아요. 번호를 누르면 원문이 열려요.</p>'
+                     # 언론 기사는 쓸 권리가 없어 싣지 않는다(data-rights §5.2) — 대신 검색 결과로 가는 길만. 데이터를 가져오지 않는 링크는 복제·전송이 아니다
+                     + f'<a class="font-label-regular text-label-regular text-primary underline" target="_blank" rel="noopener" href="https://search.naver.com/search.naver?where=news&amp;sort=1&amp;query={quote(name)}">'
+                     f'{e(name)} 최근 뉴스 찾아보기 (네이버 뉴스 검색으로 이동) →</a>')  # fmt: skip
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
