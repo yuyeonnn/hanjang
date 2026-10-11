@@ -100,13 +100,13 @@ class LearnPages:
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
-        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 도장(다 맞힘) · 옅은 체크(읽음) · 빈 동그라미 (사용자 10/12: 따로 떼지 말고 글 옆에)
+        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 동그라미 하나: 세 문제를 다 맞히면 도장, 아니면 빈 동그라미
+        # (읽기만 한 글의 옅은 체크는 뺐다 — 사용자 10/12: 뜻이 헷갈린다, 다 동그라미로)
         stamps = quiz.done(self.con, uid)
-        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
 
         def mark(sl: str) -> str:
             cls, icon, label = (("bg-primary text-on-primary", "verified", "도장 받음") if sl in stamps else
-                                ("bg-primary-fixed text-primary", "check", "읽음") if sl in read else ("border border-outline-variant text-outline-variant", "circle", "아직 안 읽음"))  # fmt: skip
+                                ("border border-outline-variant text-outline-variant", "circle", "아직 도장 없음"))  # fmt: skip
             return f'<span aria-label="{label}" title="{label}" class="mt-0.5 w-7 h-7 shrink-0 rounded-full flex items-center justify-center {cls}"><span class="material-symbols-outlined text-[16px]">{icon}</span></span>'
 
         groups = "".join(

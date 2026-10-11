@@ -4,6 +4,7 @@ import re
 import io
 from datetime import date, datetime, timedelta
 import json
+from pathlib import Path
 from urllib.parse import quote, unquote
 
 from hanjang import collect, db, learn, mail, notes, sources, web
@@ -1678,7 +1679,7 @@ def test_learn_quiz_daily_question_and_path_stamps():
     (uid,) = con.execute("select id from users").fetchone()
     assert quiz.questions("statements") == quiz.QUIZ["statements"] and quiz.daily(date(2026, 10, 12))[0] == "daily:2026-10-12"
     top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 안 읽음" in top
+    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 도장 없음" in top and "읽음\"" not in top
     art = call(app, "/learn/statements", cookie=ck)[2]
     assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
     call(app, "/learn/done", "POST", "slug=statements", ck)
@@ -1702,3 +1703,32 @@ def test_web_main_block_only_uses_names_that_exist():
     local |= {n.name for n in ast.walk(main) if isinstance(n, ast.ClassDef)}
     used = {x.id for x in ast.walk(main) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load)}
     assert not [n for n in used if n not in local and not hasattr(web, n) and not hasattr(builtins, n)]
+
+
+def test_article_gives_up_after_two_failed_runs(monkeypatch):
+    """검사에 떨어진 사건을 실행 때마다 다시 쓰지 않는다 — AI 를 부른 실행이 두 번이면 그만 (하루 약 $1 이 여기로 샜다, 2026-10-12). 원문을 못 받아 안 부른 날은 세지 않는다."""
+    from hanjang import articles, llm
+
+    _, con = _app()
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r1', '005930', '2026-10-09', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    con.commit()
+    today = date(2026, 10, 12)
+    monkeypatch.setattr(articles.db, "connect", lambda: con)
+    monkeypatch.setattr(articles, "rewrite", lambda con, today, dart: 0)
+    monkeypatch.setattr(articles, "emphasize", lambda con: 0)
+    monkeypatch.setattr(articles.sources, "Dart", lambda: None)
+    called = []
+
+    def write(con, ev, today, dart=None, doc=None):  # 부를 때마다 AI 한 콜, 늘 검사에 떨어짐
+        called.append(ev["ref"])
+        llm.spent["calls"] += 1
+        return None
+
+    monkeypatch.setattr(articles, "write", write)
+    for _ in range(4):
+        articles.main(today)
+    assert called == ["r1", "r1"] and con.execute("select n from article_tries where ref = 'r1'").fetchone()[0] == 2
+    monkeypatch.setattr(articles, "write", lambda con, ev, today, dart=None, doc=None: None)  # 원문이 없어 AI 를 안 부른 날
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r2', '005930', '2026-10-10', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    articles.main(today)
+    assert not con.execute("select 1 from article_tries where ref = 'r2'").fetchone()

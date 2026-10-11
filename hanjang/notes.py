@@ -1406,8 +1406,13 @@ def write(name: str, fs: list[dict], today: date, draft: str | None = None) -> t
             got = fill_note(json.loads(draft), fs)
         except (ValueError, KeyError, TypeError):
             pass
-    got = got or llm.ask("writer", "note", payload_of(name, fs, today), lambda j: fill_note(j, fs), schema(fs))
-    note, writer = (got, f"llm:{llm.MODELS['writer']}") if got else (code_note(fs), "code")
+    cheap, good = llm.model_of("writer"), llm.MODELS["writer"]
+    used = cheap
+    got = got or llm.ask("writer", "note", payload_of(name, fs, today), lambda j: fill_note(j, fs), schema(fs), tries=2 if cheap != good else 3)
+    if not got and cheap != good:  # 싼 모델이 두 번 다 검사에 떨어지면 좋은 모델로 — 그래도 안 되면 코드 문장
+        used = good
+        got = llm.ask("writer", "note", payload_of(name, fs, today), lambda j: fill_note(j, fs), schema(fs), model=good, tries=2)
+    note, writer = (got, f"llm:{used}") if got else (code_note(fs), "code")
     return finish(note, fs, name), writer
 
 
