@@ -206,6 +206,13 @@ PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
 
 
+# 내 종목이 하나도 없을 때 — 처음 온 사람이 빈 화면만 보던 것 (눌러 보기 10/11)
+EMPTY_CARDS = ('<div class="py-10 flex flex-col items-center text-center gap-2 lg:col-span-2">'
+               '<span class="material-symbols-outlined text-primary text-[30px]">search</span>'
+               '<b class="font-body-reading-strong text-body-reading-strong text-on-surface">가진 종목을 담아 보세요</b>'
+               '<p class="font-body-compact text-body-compact text-on-surface-variant">위 칸에 회사 이름을 넣으면 그 회사의 노트가 여기에 쌓여요.<br>'
+               '여러 종목은 쉼표로 한 번에 — 예: 삼성전자, SK하이닉스<br>카메라 단추로 증권사 앱의 보유 종목 화면을 올려도 돼요.</p></div>')
+
 # 「홈 화면에 추가」 안내 — 내 종목 화면, 휴대폰에서만. 아이폰은 앱 없이 이것만 둔다(docs/launch.md: 웹을 감싼 앱은 심사에서 잘 떨어진다).
 # 아이폰·아이패드 사파리: 설치 단추를 띄울 길이 없어 「공유 → 홈 화면에 추가」를 글로 알린다. 안드로이드 크롬: 브라우저가 설치할 수 있다고 알려 오면(beforeinstallprompt) 단추를 보인다.
 # 이미 홈 화면 앱으로 열었거나 한 번 닫은 사람에겐 다시 안 보인다(이 브라우저에만 기억 — 서버에 남기지 않는다).
@@ -1401,8 +1408,8 @@ class App:
             self.con.rollback()
 
     def initial(self, uid: int) -> str:
-        """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 이메일 첫 글자."""
-        row = self.con.execute("select email, photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
+        """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 닉네임 첫 글자(정하기 전이면 이메일 첫 글자)."""
+        row = self.con.execute("select coalesce(nickname, email), photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
         me = Me((photo_url(uid, row[1]) or row[0][:1]) if row else "?")
         if row:
             regs, arts = self.fresh(uid, row[2])
@@ -1603,11 +1610,13 @@ class App:
             '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크와 6자리 코드를 보냈어요. 15분 안에 메일 속 링크를 누르거나, 코드를 아래에 넣어 주세요.</p>'
             # 코드 넣기 — 앱(웹뷰)이나 홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열려 로그인이 안 이어진다. 코드는 어디서든 된다 (앱 출시 준비 10/11)
             f'<form method="post" action="/login/code" class="mt-2.5 flex items-center gap-2"><input type="hidden" name="email" value="{e(sent)}">{hidden}'
-            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
+            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" autofocus inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
             'class="flex-1 min-w-0 font-body-reading text-body-reading bg-surface-container-lowest text-on-surface placeholder:text-outline rounded-lg px-4 py-2.5 focus:outline-none tracking-widest">'
             '<button class="shrink-0 px-4 py-2.5 bg-primary text-on-primary font-label-regular text-label-regular font-semibold rounded-lg" type="submit">확인</button></form>'
             '<div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
-            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
+            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'
+            # 이 상자는 폼 아래에 있어 휴대폰에선 화면 밖이다 — 뜨자마자 보이게 내린다. 자동 초점(autofocus)만으로는 안 된다: 아이폰은 사용자가 누르지 않은 초점을 무시한다 (눌러 보기 10/11)
+            "<script>document.getElementById('success-box').scrollIntoView({block:'center'});</script>"))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
@@ -1733,7 +1742,9 @@ class App:
         return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else "#"
 
     def stocks_v(self) -> str:
-        return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
+        """종목 목록의 내용 지문 — 주소(?v=)에 붙인다. 브라우저가 하루 저장해 두므로, 내용(순서 포함)이 바뀌면 주소도 바뀌어야 새로 받는다
+        (종목 수만 세면 순서를 바꿔도 옛 목록이 남는다 — 눌러 보기 10/11)."""
+        return self.cached("stocks_v", lambda: hashlib.sha256(self.stocks_js().encode()).hexdigest()[:10])
 
     def stocks_js(self) -> str:
         """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만). 186KB 를 매번 만들지 않게 cached."""
@@ -1741,7 +1752,8 @@ class App:
 
     def _stocks_js(self) -> str:
         rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
-                self.con.execute("select ticker, name, induty_code, market from stocks order by active desc, market, name")]  # fmt: skip
+                self.con.execute("select ticker, name, induty_code, market from stocks s order by active desc,"
+                                 " (select count(*) from holdings h where h.ticker = s.ticker) desc, market, name")]  # 많이 담긴 종목 먼저 — 시가총액은 쓸 권리가 없어 모른다  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
 
     def match(self, q: str) -> str | None:
@@ -1883,7 +1895,7 @@ class App:
                     + '</nav><script>document.querySelectorAll(".mchip").forEach(b=>b.onclick=()=>{const m=b.dataset.m;'
                     'document.querySelectorAll(".mchip").forEach(x=>{const on=x===b;x.className=x.className.replace(/bg-primary text-on-primary border-primary|border-outline-variant[/]60 text-on-surface-variant/,on?"bg-primary text-on-primary border-primary":"border-outline-variant/60 text-on-surface-variant")});'
                     'document.querySelectorAll("#stock-list>article").forEach(a=>a.style.display=(m==="all"||a.dataset.market===m)?"":"none")});</script>' if both else "")
-                 + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
+                 + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out) or EMPTY_CARDS}</section>'
                  '<footer class="mt-auto px-margin pt-16 pb-6 flex flex-col items-center justify-center gap-1.5 opacity-80"><p class="font-label-micro text-label-micro text-outline text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[13px]">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 상장사 전체는 /stocks.js 로 따로 (하루 캐시, 100KB 남짓)
@@ -1891,7 +1903,8 @@ class App:
                  "const STOCKS=window.STOCKS||[];"
                  "const inp=document.getElementById('stock-search-input'),fly=document.getElementById('search-flyout'),res=document.getElementById('search-results');"
                  "function esc(s){return s.replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
-                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const Q=q.toUpperCase();const hit=STOCKS.filter(s=>s.n.toUpperCase().includes(Q)||s.t.startsWith(Q)).slice(0,6);"
+                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const Q=q.toUpperCase();const all=STOCKS.filter(s=>s.n.toUpperCase().includes(Q)||s.t.startsWith(Q)),first=s=>s.n.toUpperCase().startsWith(Q)||s.t.startsWith(Q);"
+                 "const hit=[...all.filter(first),...all.filter(s=>!first(s))].slice(0,6);"
                  "res.innerHTML=hit.map((s,i)=>"
                  "'<form method=\"post\" action=\"/add\" onclick=\"if(event.target!==this.lastChild)this.requestSubmit()\" class=\"group flex items-center justify-between p-2.5 rounded-lg cursor-pointer hover:bg-surface-container transition-colors\"><input type=\"hidden\" name=\"q\" value=\"'+s.t+'\"><div class=\"flex items-center gap-2 min-w-0\"><span class=\"w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-body-reading-strong text-[12px]\">'+esc(s.n[0])+'</span><div class=\"flex flex-col min-w-0\"><div class=\"flex items-center gap-1.5\"><span class=\"font-headline-sm text-headline-sm text-on-surface\">'+esc(s.n)+'</span><span class=\"font-citation-ref text-citation-ref text-outline\">'+(s.t.startsWith('ETF')?'':s.t)+'</span></div><span class=\"font-label-micro text-label-micro text-on-surface-variant truncate\">'+esc(s.l)+'</span></div></div>'"
                  "+'<button class=\"px-2.5 py-1 bg-primary-container text-on-primary font-label-micro text-label-micro rounded-lg shadow-sm hover:opacity-90 active:scale-95 transition-all\" type=\"submit\">+ 담기</button>'+'</form>').join('');"
@@ -2507,7 +2520,7 @@ class App:
             return f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요."
         return ""
 
-    def welcome_page(self, nick: str = "", error: str = "") -> str:
+    def welcome_page(self, nick: str = "", error: str = "", agreed: bool = False) -> str:
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-16 pb-12">'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span>'
                  '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">닉네임을 정해 주세요</h1>'
@@ -2515,7 +2528,7 @@ class App:
                  '<form method="post" action="/welcome" class="mt-space-lg flex flex-col gap-space-sm">'
                  f'<input autofocus class="w-full font-body-reading text-body-reading bg-surface-container-low rounded-lg px-4 py-3.5 focus:outline-none" maxlength="20" name="nickname" required value="{e(nick)}">'
                  # 이용 규칙 동의 — 닉네임·소개·사진이 남에게 보이기 전에 (앱 마켓이 사용자 콘텐츠가 있는 앱에 요구한다)
-                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1">'
+                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1"' + (" checked" if agreed else "") + '>'
                  '<span>[필수] <a class="text-primary underline" href="/rules" target="_blank">이용 규칙</a>에 동의해요 — 욕설·사칭·종목 추천·광고는 올리지 않아요</span></label>'
                  + (f'<p class="font-body-compact text-body-compact text-tertiary" role="alert">{e(error)}</p>' if error else "")
                  + '<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">시작하기</button></form>'
@@ -2524,14 +2537,14 @@ class App:
 
     def welcome(self, uid: int, nick: str, agreed: bool = False):
         if err := self.nick_error(uid, nick):
-            return "200 OK", [], self.welcome_page(nick, err)
+            return "200 OK", [], self.welcome_page(nick, err, agreed)
         if not agreed:
             return "200 OK", [], self.welcome_page(nick, "이용 규칙에 동의해야 시작할 수 있어요.")
         try:
             self.con.execute("update users set nickname = ?, rules_at = ? where id = ?", (nick, datetime.now().isoformat(), uid))
             self.con.commit()
         except sqlite3.IntegrityError:  # 거의 같은 때 누가 먼저 가져간 경우
-            return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.")
+            return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.", agreed)
         return self.see("/")
 
     def save_profile(self, uid: int, nick: str, bio: str):
@@ -2968,7 +2981,8 @@ class App:
         if mine:  # 내가 차단한 사람 — 이름과 풀기 단추만
             return "200 OK", [], self.simple(nick, f"<b>{e(nick)}</b> 님을 차단했어요. 서로의 프로필과 리그램이 보이지 않아요."
                                              f"<form method='post' action='/block' class='mt-4'><input type='hidden' name='u' value='{other}'>"
-                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>")
+                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>"
+                                             "<a class='mt-4 inline-block text-primary underline' href='/feed'>피드로 돌아가기</a>")
         # 신고·차단 — 눈에 띄지 않게 접어 둔다 (앱 마켓의 사용자 콘텐츠 요구: 신고 · 차단 · 빠른 처리)
         more = ('<details class="mt-space-lg"><summary class="font-label-micro text-label-micro text-outline cursor-pointer">신고 · 차단</summary>'
                 '<div class="mt-2 flex flex-col gap-3 rounded-xl border border-outline-variant/50 px-space-md py-3">'

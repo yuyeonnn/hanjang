@@ -568,7 +568,7 @@ def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     assert con.execute("select ticker from holdings order by ticker").fetchall()[-1] == ("247540",)
     assert "첫 노트" in call(app, "/", cookie=ck)[2]  # 바로 받기가 끝났거나(실패) 만드는 중
     js = call(app, "/stocks.js")[2]
-    assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]
+    assert js.index("삼성전자") < js.index("에코프로비엠") and re.search(r"/stocks\.js\?v=[0-9a-f]{10}\"", call(app, "/", cookie=ck)[2])  # 주소의 v 는 목록 내용의 지문 — 내용이 바뀌면 브라우저가 새로 받는다
 
 
 def test_repeated_numbers_and_paragraphs():
@@ -1482,3 +1482,31 @@ def test_cookie_of_a_deleted_account_goes_to_login_not_error():
     con.execute("delete from users")
     s, h, _ = call(app, "/feed", cookie=ck)  # 다른 기기에서 탈퇴한 뒤 남은 쿠키
     assert s.startswith("303") and h["Location"] == "/" and "Max-Age=0" in h["Set-Cookie"]
+
+
+def test_things_found_by_clicking_through_every_screen(monkeypatch):
+    """화면을 하나씩 눌러 보며 찾은 것들 (10/11) — 글자만 보는 테스트로는 안 보이던 쓰임새 문제."""
+    app, con = _app()
+    monkeypatch.setattr(mail, "send", lambda *a, **k: None)
+    assert "autofocus" in re.search(r'<input[^>]*name="code"[^>]*>', call(app, "/login", "POST", "email=a%40b.c&agree=1")[2])[0]  # 코드 칸이 화면 아래로 밀려 있었다
+    _, h, _ = call(app, "/auth?t=" + quote(web.login_token("new@b.c", SECRET, 1_000_000.0)))
+    ck = h["Set-Cookie"].split(";")[0]
+    body = call(app, "/welcome", "POST", "nickname=" + quote("리딩방장") + "&rules=1", ck)[2]
+    assert "쓸 수 없는 말" in body and re.search(r'name="rules"[^>]* checked', body)  # 오류로 다시 떠도 동의 체크는 그대로
+    assert "checked" not in call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[2].split('name="rules"')[1].split(">")[0]
+    call(app, "/welcome", "POST", "nickname=" + quote("새사람") + "&rules=1", ck)
+    home = call(app, "/", cookie=ck)[2]
+    assert "가진 종목을 담아 보세요" in home  # 종목이 없을 때 빈 화면만 보이던 것
+    assert re.search(r'<a[^>]*href="/me"[^>]*>.*?새', home, re.S)  # 위쪽 동그라미는 닉네임 첫 글자
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    assert "가진 종목을 담아 보세요" not in call(app, "/", cookie=ck)[2]
+    # 자동완성 — 많이 담긴 종목이 목록 앞에, 그리고 이름이 그 글자로 시작하는 종목 먼저
+    con.executemany("insert into stocks (ticker, name) values (?, ?)", [("000001", "가나삼성"), ("000002", "삼성가나")])
+    con.commit()
+    js = app._stocks_js()
+    assert js.index("삼성전자") < js.index("삼성가나") and "all.filter(first)" in home
+    # 차단한 사람 화면에 돌아갈 길
+    con.execute("insert into users (id, email, created_at, nickname) values (50, 'o@b.c', '2026-10-01', '남남')")
+    con.commit()
+    call(app, "/block", "POST", "u=50", ck)
+    assert "피드로 돌아가기" in call(app, "/u/50", cookie=ck)[2]
