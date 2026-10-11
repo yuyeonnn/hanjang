@@ -103,6 +103,23 @@ sh deploy/check.sh
 
 **도메인을 옮기면** 감시 주소도 바꾼다 — 업타임 체크의 주소는 고칠 수 없어 새로 만든다: `gcloud monitoring uptime create hanjang-health --resource-type=uptime-url --resource-labels=host=<새 도메인>,project_id=education-508407 --protocol=https --path=/health --period=5 --timeout=10 --matcher-content=ok --matcher-type=contains-string --regions=usa-iowa,asia-pacific,europe` → 알림 정책 조건의 `check_id` 를 새 이름으로 고침 → 옛 체크(`hanjang-health-bDwzkNMaS98`) 지움.
 
+### 연속 백업 (Litestream, 2026-10-12)
+
+하루 한 번 백업만으로는 마지막 하루치(담기·좋아요·팔로우)를 잃을 수 있어, **Litestream** 이 DB 의 WAL 을 1초마다 서버 밖으로 복사한다.
+
+- 서버: `/etc/litestream.yml`(DB 경로·저장소), `/etc/systemd/system/litestream.service.d/hanjang.conf`(hanjang 사용자로 · 열쇠 `data/gcs-backup.json`). `systemctl status litestream`.
+- 저장소: `gs://hanjang-litestream-education-508407/hanjang.db/` — 하루 백업 버킷과 **따로**(이 열쇠는 여기서만 지울 수 있다). 72시간 보관.
+- **복구** (서버에서, 화면 서버를 먼저 끈다):
+
+```bash
+sudo systemctl stop hanjang-web litestream
+sudo -u hanjang mv /srv/hanjang/data/hanjang.db /srv/hanjang/data/hanjang.db.bad
+sudo -u hanjang env GOOGLE_APPLICATION_CREDENTIALS=/srv/hanjang/data/gcs-backup.json litestream restore -o /srv/hanjang/data/hanjang.db gs://hanjang-litestream-education-508407/hanjang.db
+sudo systemctl start litestream hanjang-web
+```
+
+- 10/12 에 `/tmp` 로 복구해 `pragma integrity_check` ok 를 확인했다. 특정 시각으로 돌아가려면 `-timestamp 2026-10-12T00:00:00Z` 를 더한다.
+
 ## 데이터가 쌓이는 속도와 지우는 주기 (2026-10-11 점검 — DB 6.5MB · 사용자 11명)
 
 | 무엇 | 지금 | 늘어나는 속도 | 지우는 때 |
