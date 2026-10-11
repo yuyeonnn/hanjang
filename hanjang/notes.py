@@ -1008,7 +1008,8 @@ def reword(text: str) -> str:
 
 DAY = r"\d{1,2}월 \d{1,2}일"
 # 주가가 어떻게 될지·누가 사고파는지를 옮기는 말 — 기사에 있어도 싣지 않는다(불변식 1). 「주가가 10% 내렸다」 같은 지난 일은 걸리지 않는다
-PRICE_TALK = re.compile(r"수혜주|상승확률|수급|주가 ?전망|주가(?:가|는|도)? ?(?:오를|내릴|반등|상승할|하락할|뛸)|반등할|반등 기대")
+PRICE_TALK = re.compile(r"수혜주|상승확률|수급|주가 ?전망|주가(?:가|는|도)? ?(?:오를|내릴|반등|상승할|하락할|뛸)|반등할|반등 기대|반등 열쇠"
+                        r"|(?:외인|외국인|기관|개인)[^.]{0,14}(?:팔자|사자|순매도|순매수|주식을 (?:줄였|늘렸|팔았|샀))")
 META = re.compile(r"자료[는가]? ?없어요|알 수 없어요|나와 있지 않아요|주어진 (?:사실|자료)|이 사실만으로는")  # 재료 사정을 글에 드러내는 말
 DAY_ONLY = re.compile(rf"(?:이|그|이번) ?[가-힣 ]{{0,10}}(?:결정|계약|공시|보고|소식)[은는도] ({DAY})에 (?:알려졌|나왔|이뤄졌)어요\.?")  # 날짜만 알리는 토막
 
@@ -1197,6 +1198,8 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"좋다·나쁘다를 단정: {text!r}")
     if STEM.search(outside):
         raise ValueError(f"끝이 잘린 말: {text!r}")
+    if re.search(r"\d(?:조|억|만)?원어요|%어요", text):  # 「16.3% 4.8조원어요」 — 방향 낱말(늘었·줄었) 빈칸을 빠뜨리고 금액에 바로 「어요」를 붙였다
+        raise ValueError(f"끝이 잘린 말: {text!r}")
     if any(REPEAT.search(x) for x in re.split(r"(?<=[.?!])\s", outside)):
         raise ValueError(f"같은 말 되풀이: {text!r}")
 
@@ -1226,8 +1229,11 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
             try:
                 y = fill(x, by)
                 check_sentence(y, fs)
-                if "이번 주" in y["text"] and not any(by.get(r, {}).get("slots", {}).get("시기") == "이번 주" for r in y["refs"]):
-                    y["text"] = re.sub(r"이번 주(?:에는|엔|에|의)?\s*", "최근 ", y["text"])
+                if "이번 주" in y["text"]:  # 이번 주 일이 아니면 「최근」으로 — 근거에 이번 주 사실이 없거나, 문장에 적힌 날짜가 이번 주 날짜가 아닐 때
+                    week_days = {by[r]["slots"].get("날짜") for r in y["refs"] if by.get(r, {}).get("slots", {}).get("시기") == "이번 주"}
+                    said = set(re.findall(DAY, y["text"]))
+                    if not week_days or (said and not said & week_days):
+                        y["text"] = re.sub(r"이번 주(?:에는|엔|에|의)?\s*", "최근 ", y["text"])
                 if "같은 날" in y["text"] and (not out or not days(y["refs"]) or not days(y["refs"]) <= days(out[-1]["refs"])):
                     raise ValueError(f"「같은 날」인데 날짜가 다름: {y['text']!r}")
                 out.append(y)

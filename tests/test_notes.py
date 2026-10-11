@@ -689,3 +689,19 @@ def test_mend_cheap_model_habits():
         with pytest.raises(ValueError):
             notes.check_sentence({"text": bad, "refs": ["N1"]}, fs)
     notes.check_sentence({"text": "실적 발표 뒤 주가가 내렸다는 기사가 있었어요.", "refs": ["N1"]}, fs)  # 지난 일은 괜찮다
+
+
+def test_this_week_only_for_this_week_dates():
+    """「이번 주」 — 근거에 이번 주 사실이 있어도, 문장에 적힌 날짜가 이번 주 날짜가 아니면 「최근」으로 (싼 모델 평가 10/11: 8월 7일 공시를 「이번 주 가장 큰 소식」)."""
+    fs = [{"id": "D1", "text": "8월 7일 합병·인수 공시 — 무슨 일: 다른 회사의 주식을 사서 지분을 갖기로 했어요", "url": "u", "tone": 0, "slots": {"날짜": "8월 7일", "시기": "8월"}},
+          {"id": "N1", "text": "10월 6일 소식 「새 서비스를 열었어요」", "url": "u", "tone": 0, "slots": {"날짜": "10월 6일", "시기": "이번 주"}}]
+    j = {"headline": "지분을 갖기로 했어요.", "summary": [], "good": [], "concern": [], "good_title": "", "concern_title": "",
+         "sections": [{"title": "최근 소식", "sentences": [
+             {"text": "이번 주 가장 큰 소식은 다른 회사 주식을 사서 지분을 갖기로 한 일이었어요(8월 7일).", "refs": ["D1", "N1"]},
+             {"text": "이번 주에는 새 서비스를 열었다는 소식이 있었어요(10월 6일).", "refs": ["N1"]}]}]}
+    got = [x["text"] for x in notes.fill_note(j, fs)["sections"][0]["sentences"]]
+    assert got[0].startswith("최근 가장 큰 소식은") and got[1].startswith("이번 주에는")
+    with pytest.raises(ValueError):
+        notes.check_sentence({"text": "실적 공개를 앞두고 외국인과 기관이 주식을 줄였다는 보도가 있었어요.", "refs": ["N1"]}, fs)
+    with pytest.raises(ValueError):  # 방향 낱말을 빠뜨린 문장
+        notes.check_sentence({"text": "본업으로 남긴 돈은 16.3% 4.8조원어요.", "refs": ["N1"]}, fs + [{"id": "F9", "text": "영업이익 4.8조원(-16.3%)", "url": "u", "tone": 0, "slots": {}}])
