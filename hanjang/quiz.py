@@ -1,0 +1,243 @@
+"""읽기 팁 퀴즈 — 글 끝의 세 문제 · 오늘의 한 문제 · 다 맞히면 도장 (사용자 10/12).
+
+문제의 답은 모두 글에 적힌 사실이거나 코드가 계산한 내 종목의 숫자다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1·2).
+글은 잠그지 않는다. 틀려도 다시 고를 수 있고, 세 문제를 다 맞히면 그 글에 도장이 찍힌다. AI 는 쓰지 않는다.
+QUIZ[slug] = [(물음, [보기 셋], 정답 번호(0부터), 풀이)]. 숫자를 DB 로 채우는 글(rates·long-short)은 문제가 없다 — 읽으면 도장.
+"""
+
+import sqlite3
+import zlib
+from datetime import date
+from html import escape as e
+
+from . import learn, notes
+
+QUIZ = {
+    "start": [
+        ("주식을 사고팔려면 가장 먼저 무엇이 있어야 할까요?", ["증권사 주식 계좌", "회사의 초대장", "사업자등록증"], 0, "증권사에서 주식 계좌를 열어야 주문을 낼 수 있어요."),
+        ("원하는 값을 정해 두고 내는 주문은 무엇일까요?", ["시장가 주문", "지정가 주문", "예약 주문"], 1, "값을 내가 정하는 것이 지정가, 지금 값에 바로 사고파는 것이 시장가예요."),
+        ("주문이 체결되면 돈과 주식은 언제 실제로 주고받아질까요?", ["바로 그 순간", "이틀 뒤(영업일)", "한 달 뒤"], 1, "체결되고 영업일로 이틀 뒤에 주고받아요. 그래서 판 돈을 바로 못 빼는 일이 있어요."),
+    ],
+    "stock-bond": [
+        ("채권을 산다는 건 무엇에 가까울까요?", ["회사의 주인이 된다", "회사나 나라에 돈을 빌려준다", "회사 물건을 미리 산다"], 1, "채권은 빌려준 돈에 대한 증서예요. 이자를 받고 만기에 원금을 돌려받기로 약속돼 있어요."),
+        ("금리가 오르면 이미 나와 있는 채권의 값은 보통 어떻게 될까요?", ["내려가요", "올라가요", "상관없어요"], 0, "금리가 오르면 이미 나온 채권의 값은 내려가는 관계가 있어요."),
+        ("회사가 문을 닫으면 남은 재산은 누구에게 먼저 돌아갈까요?", ["주주", "빚을 준 사람(채권자)", "똑같이 나눠요"], 1, "채권자에게 먼저, 주주에게는 나중에 돌아가요. 그래서 같은 회사라도 주식의 위험이 더 커요."),
+    ],
+    "fund-etf": [
+        ("ETF가 보통의 펀드와 다른 점은 무엇일까요?", ["거래소에서 주식처럼 사고팔 수 있다", "수수료가 전혀 없다", "값이 떨어지지 않는다"], 0, "ETF는 펀드를 거래소에서 사고팔 수 있게 만든 거예요. 보수가 있고, 담은 자산이 내리면 함께 내려요."),
+        ("지수를 그대로 따라가도록 만든 펀드를 무엇이라고 부를까요?", ["액티브", "패시브", "레버리지"], 1, "지수를 그대로 따라가면 패시브, 운용사가 종목을 골라 시장보다 나은 결과를 노리면 액티브예요."),
+        ("ETF 이름 끝의 (H)는 무슨 뜻일까요?", ["배당을 많이 준다", "환율 변동을 줄였다(환헤지)", "두 배로 움직인다"], 1, "(H)는 환헤지를 했다는 표시예요."),
+    ],
+    "index": [
+        ("「오늘 코스피가 1% 올랐다」면 내 종목은 어떨까요?", ["반드시 1% 올랐다", "다르게 움직였을 수 있다", "반드시 내렸다"], 1, "지수는 시장 전체의 평균이에요. 내 종목은 다르게 움직일 수 있어요."),
+        ("코스피와 S&P 500에서 더 크게 반영되는 회사는 어디일까요?", ["시가총액이 큰 회사", "주가가 낮은 회사", "가장 오래된 회사"], 0, "시가총액(주가 × 주식 수)이 큰 회사일수록 더 크게 반영돼요."),
+        ("지수 자체를 살 수 있을까요?", ["네, 바로 살 수 있어요", "아니요, 지수를 따라가는 ETF나 펀드로 담아요", "큰 회사만 살 수 있어요"], 1, "지수 자체는 살 수 없고, 지수를 따라가게 만든 ETF나 펀드로 간접적으로 담아요."),
+    ],
+    "inverse-leverage": [
+        ("인버스·레버리지 ETF의 「몇 배」「반대」는 어떤 기간을 기준으로 할까요?", ["하루", "한 달", "1년"], 0, "하루 기준이에요. 여러 날 들고 있으면 지수의 기간 수익률과 크게 달라질 수 있어요."),
+        ("지수가 첫날 10% 오르고 다음 날 10% 내리면, 2배 레버리지는 100에서 얼마가 될까요?", ["100", "99", "96"], 2, "100 → 120 → 96이에요. 지수(100 → 110 → 99)보다 손실이 2배 넘게 커졌어요."),
+        ("레버리지 상품을 처음 사기 전에 받아야 하는 것은 무엇일까요?", ["금융투자협회의 사전 교육", "회사의 허락", "아무것도 없어요"], 0, "레버리지 상품은 처음 사기 전에 금융투자협회의 사전 교육을 받아야 해요."),
+    ],
+    "dividend": [
+        ("배당을 받으려면 언제 주주 명단에 있어야 할까요?", ["배당금이 들어오는 날", "배당 기준일", "아무 때나"], 1, "기준일에 주주 명단에 있어야 해요. 주식은 산 날로부터 영업일로 이틀 뒤에 내 것으로 확정돼요."),
+        ("주가가 1만 원이고 한 주에 배당을 500원 주면 배당수익률은 얼마일까요?", ["0.5%", "5%", "50%"], 1, "500원 ÷ 1만 원 = 5%예요. 주가가 바뀌면 이 비율도 바뀌어요."),
+        ("기준일이 지나면 배당 받을 권리가 빠진 만큼 주가가 낮아지는 일을 무엇이라고 할까요?", ["배당락", "배당성향", "분배금"], 0, "배당락이라고 불러요."),
+    ],
+    "disclosure": [
+        ("회사의 공시를 누구나 무료로 볼 수 있는 곳은 어디일까요?", ["금융감독원 DART", "증권사 유료 창구", "회사를 직접 찾아가야 해요"], 0, "금융감독원 전자공시시스템(DART)에서 누구나 무료로 봐요."),
+        ("공시 제목 앞에 「[기재정정]」이 붙어 있으면 무슨 뜻일까요?", ["아주 중요한 공시다", "앞서 낸 공시를 고쳤다", "곧 지워질 공시다"], 1, "앞서 낸 공시를 고친 거예요. 최종본을 보는 게 좋아요."),
+        ("사업보고서는 사업연도가 끝나고 며칠 안에 내야 할까요?", ["30일", "90일", "1년"], 1, "사업보고서는 90일 안, 반기·분기보고서는 45일 안이에요."),
+    ],
+    "statements": [
+        ("「1년 동안 얼마를 팔고 얼마를 남겼는지」 보여 주는 표는 무엇일까요?", ["손익계산서", "재무상태표", "현금흐름표"], 0, "손익계산서예요. 재무상태표는 가진 것과 갚을 것, 현금흐름표는 현금이 돈 흐름을 보여 줘요."),
+        ("재무상태표에서 자산은 무엇과 무엇을 더한 것일까요?", ["매출 + 이익", "부채 + 자본", "현금 + 주식"], 1, "자산 = 부채 + 자본이에요."),
+        ("분기 실적은 보통 무엇과 견줘 볼까요?", ["바로 앞 분기", "1년 전 같은 분기", "경쟁사의 주가"], 1, "계절마다 장사가 달라서, 보통 1년 전 같은 분기와 견줘 봐요."),
+    ],
+    "ratios": [
+        ("주가가 5만 원이고 EPS(주당순이익)가 5천 원이면 PER은 몇 배일까요?", ["5배", "10배", "25배"], 1, "주가 ÷ EPS = 5만 원 ÷ 5천 원 = 10배예요."),
+        ("은행·보험의 부채비율을 다른 업종과 그대로 비교하면 안 되는 까닭은 무엇일까요?", ["예금·보험금이 빚으로 잡혀 원래 높게 나와서", "빚이 전혀 없어서", "공시를 하지 않아서"], 0, "예금과 보험금이 장부에 빚으로 잡혀서 원래 높게 나와요."),
+        ("ROE가 높을 때 함께 보라고 한 숫자는 무엇일까요?", ["부채비율", "직원 수", "회사 나이"], 0, "빚을 많이 써서 ROE가 높아진 것일 수 있어서, 부채비율과 함께 봐요."),
+    ],
+    "sector-finance": [
+        ("은행의 부채비율이 수백~천 %인 까닭은 무엇일까요?", ["위험한 회사라서", "고객이 맡긴 예금이 빚으로 잡혀서", "세금을 안 내서"], 1, "예금을 받아 대출해 주는 게 일이라, 예금이 장부에 빚으로 잡혀요."),
+        ("금융회사를 볼 때 먼저 보라고 한 숫자는 무엇일까요?", ["100원당 남긴 돈", "ROE", "매출 순위"], 1, "ROE(자기 돈으로 1년에 얼마를 벌었나)를 먼저 보고, 건전성 지표를 함께 봐요."),
+        ("은행의 건전성을 재는 지표는 무엇일까요?", ["BIS 자기자본비율", "배당락", "PER"], 0, "은행은 BIS 자기자본비율, 증권사는 순자본비율, 보험사는 지급여력비율(K-ICS)이에요."),
+    ],
+    "sector-debt": [
+        ("조선·방산 회사가 주문을 받고 미리 받은 돈은 장부에 무엇으로 잡힐까요?", ["매출", "빚(선수금·계약부채)", "이익"], 1, "아직 물건을 넘기지 않아서 빚으로 잡혀요. 주문이 많을수록 빚이 커 보일 수 있어요."),
+        ("이런 회사는 부채비율과 함께 무엇을 보라고 했을까요?", ["수주잔고", "사무실 크기", "광고비"], 0, "수주잔고(이미 계약해 앞으로 만들 일감)와 몇 년 치 영업이익률을 함께 봐요."),
+        ("건설사를 볼 때, 장부의 빚에는 안 잡혀도 나중에 갚아야 할 수 있는 돈은 무엇일까요?", ["보증(PF 보증 같은 우발채무)", "직원 월급", "배당금"], 0, "재무제표 주석에 나오는 보증(우발채무)이에요."),
+    ],
+    "sector-margin": [
+        ("「100원어치 팔아 3원 남긴다」면 장사를 못 하는 회사일까요?", ["네, 언제나 그래요", "업종에 따라 달라요", "네, 곧 망해요"], 1, "정유·유통처럼 조금씩 남기고 많이 파는 업종이 있어요. 같은 업종끼리 견줘 봐요."),
+        ("한 번 만들어 두면 더 팔 때 드는 돈이 적어서 많이 남기기도 하는 업종은 어디일까요?", ["정유", "소프트웨어·게임", "유통"], 1, "소프트웨어·게임·바이오 위탁생산은 100원당 수십 원을 남기기도 해요."),
+        ("남기는 비율이 낮은 업종에서 비율과 함께 보라고 한 것은 무엇일까요?", ["남긴 돈의 금액", "대표의 나이", "본사 위치"], 0, "매출이 아주 크면 100원당 몇 원이어도 남긴 돈의 합은 클 수 있어요."),
+    ],
+    "insiders": [
+        ("어떤 회사 주식을 몇 % 넘게 가지면 「대량보유 보고」를 해야 할까요?", ["1%", "5%", "50%"], 1, "5% 넘게 가진 곳은 보유가 1%p 넘게 바뀌면 보고해요."),
+        ("임원이 주식을 「늘렸다」는 보고는 언제나 「샀다」는 뜻일까요?", ["네", "아니요, 회사에서 보상으로 받은 주식도 들어가요", "아니요, 판 것이에요"], 1, "보상으로 받은 주식이나 스톡옵션 행사도 늘어난 것으로 보고돼요."),
+        ("큰 주주가 한꺼번에 많은 주식을 넘기는 거래를 무엇이라고 할까요?", ["블록딜", "배당락", "환헤지"], 0, "블록딜이라고 해요. 언제, 몇 주를, 얼마에 넘겼는지가 보고서에 적혀요."),
+    ],
+    "diversify": [
+        ("분산 투자를 하면 손실이 없어질까요?", ["네, 없어져요", "아니요, 시장 전체가 내리면 함께 내릴 수 있어요", "네, 다섯 종목이면 돼요"], 1, "한 곳의 충격은 줄여 주지만, 손실을 없애 주는 방법은 아니에요."),
+        ("분산의 효과가 커지는 것은 어떤 것끼리 나눌 때일까요?", ["같은 업종끼리", "함께 움직이지 않는 것끼리", "이름이 비슷한 것끼리"], 1, "같은 업종 회사들은 같은 이유로 함께 오르내리기 쉬워요."),
+        ("흐트러진 비율을 정해 둔 비율로 되돌리는 것을 무엇이라고 할까요?", ["리밸런싱", "블록딜", "배당성향"], 0, "리밸런싱이라고 불러요."),
+    ],
+    "fx": [
+        ("미국 주식의 주가가 그대로인데 원·달러 환율이 오르면, 원화로 바꾼 금액은 어떻게 될까요?", ["늘어요", "줄어요", "그대로예요"], 0, "환율이 오르면(원화 약세) 같은 달러가 더 많은 원화가 돼요."),
+        ("원화를 달러로 바꿀 때, 사는 값과 파는 값의 차이를 무엇이라고 할까요?", ["환전 스프레드", "배당락", "추적 오차"], 0, "환전 스프레드예요. 증권사마다 우대율이 달라요."),
+        ("환헤지 (H) 상품은 무엇을 줄인 상품일까요?", ["환율에 따른 흔들림", "운용 보수", "세금"], 0, "환율이 움직여도 원화 결과가 덜 흔들리게 만든 상품이에요. 대신 그 비용이 들어요."),
+    ],
+    "book-graham": [
+        ("그레이엄의 「미스터 마켓」은 무엇을 사람에 빗댄 이야기일까요?", ["시장", "은행", "정부"], 0, "매일 기분에 따라 값을 부르는 동업자로 시장을 빗댔어요. 그 값을 쓸지는 내가 정하면 된다고 말해요."),
+        ("「안전마진」은 어떤 생각일까요?", ["가치보다 넉넉히 낮은 값에 산다", "빚을 내서 크게 산다", "남들이 살 때 따라 산다"], 0, "내 계산이 틀리거나 운이 나빠도 크게 다치지 않게, 가치보다 넉넉히 낮은 값에 산다는 생각이에요."),
+        ("그레이엄의 비유에서 시장은 「짧게 보면 인기투표, 길게 보면」 무엇일까요?", ["저울", "복권", "거울"], 0, "저울이에요. 오래 보면 회사가 실제로 버는 힘이 값에 반영된다는 뜻이에요."),
+    ],
+    "book-buffett": [
+        ("버핏의 말에서 「가격은 내가 내는 것이고」 가치는 무엇일까요?", ["내가 얻는 것", "남이 정하는 것", "늘 같은 것"], 0, "「가격은 내가 내는 것이고, 가치는 내가 얻는 것이다.」 2008년 서한의 문장이에요."),
+        ("「능력의 범위」에서 더 중요하다고 한 것은 무엇일까요?", ["범위를 최대한 넓히기", "범위의 경계를 아는 것", "모든 회사를 아는 것"], 1, "범위가 얼마나 넓은지보다 그 경계를 아는 게 더 중요하다고 말해요."),
+        ("버핏의 주주서한이 판단하는 방식을 배우는 글로 읽히는 까닭 하나는 무엇일까요?", ["실수도 숨기지 않고 적어서", "종목을 추천해서", "매주 나와서"], 0, "잘못 산 회사, 늦게 판 회사 이야기를 서한에 직접 적어요."),
+    ],
+    "book-lynch": [
+        ("린치는 일상에서 회사를 알게 되는 것을 무엇이라고 했을까요?", ["그것으로 충분하다", "시작일 뿐이다", "쓸모없다"], 1, "시작일 뿐이고, 그 회사의 실적과 살림을 반드시 따로 확인해야 한다고 했어요."),
+        ("「2분 이야기」는 무엇을 할 수 있어야 한다는 뜻일까요?", ["2분 안에 주문 내기", "왜 갖고 있는지 2분 안에 설명하기", "2분마다 값 확인하기"], 1, "열 살 아이에게 2분 안에 설명할 수 있어야 한다는 거예요. 안 되면 잘 모르는 회사예요."),
+        ("린치는 회사를 몇 가지 종류로 나눠 봤을까요?", ["두 가지", "여섯 가지", "스무 가지"], 1, "여섯 가지로 나눴고, 종류마다 봐야 할 숫자가 다르다고 했어요."),
+    ],
+    "book-bogle": [
+        ("보글이 책에서 가장 강조한 것은 무엇일까요?", ["비용(수수료)", "차트 모양", "빠른 매매"], 0, "「비용이 수익을 갉아먹는다」가 핵심이에요."),
+        ("보글의 유명한 비유는 「바늘을 찾느니」 무엇을 하라는 것일까요?", ["건초 더미를 통째로 가져라", "더 큰 바늘을 찾아라", "바늘을 만들어라"], 0, "어느 회사가 잘될지 맞히기보다 시장 전체를 담는 쪽을 주장했어요. 이건 그의 생각이에요."),
+        ("보글은 자주 사고팔면 어떻게 된다고 했을까요?", ["비용이 늘고 감정에 따라 판단하기 쉬워진다", "수익이 반드시 는다", "세금이 없어진다"], 0, "비용이 늘고, 감정에 따라 판단하기 쉬워진다고 경고했어요."),
+    ],
+    "book-malkiel": [
+        ("「랜덤워크」는 무엇을 맞히기 어렵다는 뜻일까요?", ["짧은 기간의 주가 움직임", "회사의 이름", "배당 기준일"], 0, "술 취한 사람의 걸음처럼, 짧은 기간의 주가 움직임은 맞히기 어렵다는 뜻이에요."),
+        ("말킬의 비유에서 신문 주식 면에 다트를 던지는 것은 누구일까요?", ["눈을 가린 원숭이", "경제학자", "어린아이"], 0, "눈을 가린 원숭이가 고른 종목도 전문가와 크게 다르지 않을 수 있다는 비유예요."),
+        ("말킬은 시장이 늘 옳다고 봤을까요?", ["네", "아니요, 거품과 공포가 반복된 역사를 길게 다뤄요", "책에 나오지 않아요"], 1, "튤립 파동, 닷컴 거품 같은 역사를 책에서 길게 다뤄요."),
+    ],
+    "book-marks": [
+        ("「좋은 회사인 건 모두가 알고, 그게 이미 값에 들어가 있지 않을까?」는 몇 번째 단계의 생각일까요?", ["첫 번째", "두 번째", "세 번째"], 1, "한 번 더 묻는 것이 두 번째 단계의 생각이에요."),
+        ("막스가 진짜 위험이라고 본 것은 무엇일까요?", ["값이 오르내리는 것", "돈을 영영 잃을 가능성", "뉴스가 많은 것"], 1, "값이 오르내리는 것보다, 돈을 영영 잃을 가능성을 진짜 위험으로 봤어요."),
+        ("막스는 앞날에 대해 어떻게 말할까요?", ["맞힐 수 있다", "우리는 앞날을 모른다는 걸 인정하자", "늘 오른다"], 1, "「우리는 앞날을 모른다」는 걸 인정하는 데서 시작하라고 해요."),
+    ],
+    "book-housel": [
+        ("하우절은 돈 문제에서 지식보다 무엇이 더 중요하다고 봤을까요?", ["행동", "학력", "운"], 0, "아무리 많이 알아도 겁날 때 다 팔거나 들뜰 때 무리하면 결과가 나빠진다고 봤어요."),
+        ("버핏의 예로 설명한, 「얼마나 오래 버텼느냐」와 이어진 말은 무엇일까요?", ["복리", "블록딜", "환헤지"], 0, "복리예요. 아주 어릴 때 시작해 아주 오래 계속했기 때문이라고 설명해요."),
+        ("「여유(room for error)」를 두라는 것은 어떤 뜻일까요?", ["계획이 틀려도 견딜 수 있게 돈을 나눠 둔다", "빚을 내서 여유를 만든다", "한 종목에 모은다"], 0, "앞날은 생각대로 흘러가지 않으니, 생활비와 투자 돈을 나눠 두라는 거예요."),
+    ],
+    "book-fisher": [
+        ("피셔의 「스커틀버트」는 어떤 방법일까요?", ["고객·거래처·경쟁사에게 물어보며 회사를 알아가기", "차트만 보기", "소문난 종목 따라 사기"], 0, "주변에서 듣는 이야기라는 뜻으로, 물어보며 회사를 알아가는 방법이에요."),
+        ("피셔는 좋은 회사를 고르는 질문을 몇 가지 남겼을까요?", ["3가지", "15가지", "100가지"], 1, "15가지 질문을 남겼어요."),
+        ("피셔가 경영진을 볼 때 중요하게 본 것은 무엇일까요?", ["문제를 솔직하게 알리는지", "말을 잘하는지", "나이가 많은지"], 0, "일이 잘 안 풀릴 때 솔직하게 알리는 회사가 오래 믿을 만하다고 봤어요."),
+    ],
+}
+
+
+def mine(con: sqlite3.Connection, uid: int) -> dict[str, tuple]:
+    """내 종목 숫자로 내는 문제 — 글마다 하나(세 번째 문제 자리). 국내 종목의 최근 두 해 재무에서 코드가 만든다.
+    {글 slug: (물음, 보기, 정답, 풀이)} — 낼 수 없으면(재무가 없거나 적자·금융) 그 글은 빠진다."""
+    out = {}
+    rows = con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.user_id = ? and s.market = 'KR' order by h.added_at", (uid,)).fetchall()
+    for t, name in rows:
+        fin = con.execute("select fiscal_year, revenue, operating_income, equity, liabilities from financials where ticker = ? order by fiscal_year desc limit 2", (t,)).fetchall()
+        if len(fin) < 2 or not fin[0][1] or not fin[1][1]:
+            continue
+        (y, rev, op, eq, li), (_, rev0, *_rest) = fin
+        nun = notes.josa(name, "은")
+        if "statements" not in out and rev != rev0:
+            out["statements"] = (f"내 종목 {name}의 {y}년 매출은 한 해 전보다 늘었을까요, 줄었을까요?", ["늘었어요", "줄었어요", "똑같아요"], 0 if rev > rev0 else 1,
+                                 f"{y}년 매출은 {notes.won(rev)}, 한 해 전은 {notes.won(rev0)}이었어요. 노트의 「회사 사정은 어떤가요?」에 나와요.")  # fmt: skip
+        if "sector-margin" not in out and op and op > 0:
+            m = round(op / rev * 100)
+            wrong = sorted({max(1, m // 3), m * 2 + 5} - {m})
+            if m >= 1 and len(wrong) == 2:
+                picks = sorted([m, *wrong])
+                out["sector-margin"] = (f"내 종목 {name}{nun} {y}년에 100원어치를 팔아 본업으로 몇 원쯤 남겼을까요?", [f"{x}원" for x in picks], picks.index(m),
+                                        f"영업이익 {notes.won(op)} ÷ 매출 {notes.won(rev)} = 100원당 약 {m}원이에요. 노트의 「100원 팔면 얼마 남았나」에 나와요.")  # fmt: skip
+        if "ratios" not in out and eq and eq > 0 and li and li != eq:
+            out["ratios"] = (f"내 종목 {name}의 {y}년 말 빚은 자기 돈(자본)보다 많을까요, 적을까요?", ["많아요(부채비율 100% 넘음)", "적어요(부채비율 100% 아래)", "빚이 없어요"], 0 if li > eq else 1,
+                             f"빚 {notes.won(li)}, 자기 돈 {notes.won(eq)} — 부채비율 {li / eq * 100:.0f}%예요. 업종마다 보통 수준이 달라요.")  # fmt: skip
+    return out
+
+
+def questions(con: sqlite3.Connection, uid: int, slug: str) -> list[tuple]:
+    """그 글의 세 문제 — 내 종목 문제를 낼 수 있으면 세 번째 자리에."""
+    qs = list(QUIZ.get(slug, []))
+    if qs and (m := mine(con, uid).get(slug)):
+        qs[2] = m
+    return qs
+
+
+def daily(con: sqlite3.Connection, uid: int, today: date) -> tuple[str, tuple]:
+    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 짝수 날은 내 종목 문제(있으면), 그 밖엔 모든 글의 문제를 날마다 차례로."""
+    n = today.toordinal()
+    own = list(mine(con, uid).values())
+    pool = [q for qs in QUIZ.values() for q in qs]
+    return f"daily:{today.isoformat()}", (own[n // 2 % len(own)] if own and n % 2 == 0 else pool[n * 7 % len(pool)])
+
+
+def done(con: sqlite3.Connection, uid: int) -> set[str]:
+    return {r[0] for r in con.execute("select slug from quiz_done where user_id = ?", (uid,))}
+
+
+# 보기를 누르면 — 맞으면 풀이가 열리고, 틀리면 그 보기만 흐려져 다시 고른다. 다 맞히면 도장(서버에 한 줄)
+JS = ("<script>document.querySelectorAll('[data-quiz]').forEach(box=>{const qs=[...box.querySelectorAll('[data-q]')];let ok=0;"
+      "qs.forEach(q=>q.querySelectorAll('button').forEach((b,i)=>b.onclick=()=>{if(q.dataset.ok)return;"
+      "if(String(i)===q.dataset.a){q.dataset.ok=1;b.style.background='#bceddc';b.style.borderColor='#154539';b.style.fontWeight='600';"
+      "q.querySelector('[data-why]').hidden=false;ok++;"
+      "if(ok===qs.length){box.querySelector('[data-end]').style.display='flex';"
+      "fetch('/learn/done',{method:'POST',body:new URLSearchParams({slug:box.dataset.quiz})});}}"
+      "else{b.disabled=true;b.style.opacity='.45';b.style.textDecoration='line-through';}}));});</script>")
+
+
+def block(key: str, qs: list[tuple], stamped: bool, title: str, end: str) -> str:
+    """문제 묶음 한 칸 — key 는 도장 열쇠(글 slug 또는 daily:날짜)."""
+    if not qs:
+        return ""
+
+    def mixed(q, choices, a, why):  # 보기 순서를 문제마다 정해진 대로 섞는다 — 정답이 늘 첫째·둘째에 몰리지 않게(같은 문제는 늘 같은 순서)
+        order = sorted(range(len(choices)), key=lambda i: zlib.crc32((q + choices[i]).encode()))
+        return q, [choices[i] for i in order], order.index(a), why
+
+    qs = [mixed(*x) for x in qs]
+    items = "".join(
+        f'<div data-q data-a="{a}" class="py-3"><p class="text-[15px] leading-[23px] font-semibold text-on-surface">{f"{i}. " if len(qs) > 1 else ""}{e(q)}</p>'
+        '<div class="mt-2 flex flex-col gap-1.5">'
+        + "".join(f'<button type="button" class="text-left px-3 py-2 rounded-lg border border-outline-variant/60 text-[14px] leading-[21px] text-on-surface">{e(c)}</button>' for c in choices)
+        + f'</div><p data-why hidden class="mt-2 text-[13px] leading-[20px] text-on-surface-variant">{e(why)}</p></div>'
+        for i, (q, choices, a, why) in enumerate(qs, 1))  # fmt: skip
+    mark = ('<span class="flex items-center gap-0.5 text-[12px] font-semibold text-primary"><span class="material-symbols-outlined text-[16px]">verified</span>도장 받음</span>' if stamped else "")
+    return (f'<section data-quiz="{e(key)}" class="mt-space-lg rounded-xl border border-surface-container-high px-space-md py-space-md">'
+            f'<div class="flex items-center justify-between"><h2 class="flex items-center gap-1.5 text-[16px] font-bold text-on-surface">'
+            f'<span class="material-symbols-outlined text-primary text-[20px]">quiz</span>{e(title)}</h2>{mark}</div>'
+            f'<div class="divide-y divide-surface-container-high/70">{items}</div>'
+            f'<p data-end style="display:none" class="mt-1 items-center gap-1 text-[14px] font-semibold text-primary"><span class="material-symbols-outlined text-[18px]">verified</span>{e(end)}</p></section>')  # fmt: skip
+
+
+def path(stamps: set[str], read: set[str]) -> str:
+    """배움 길 — 단계(처음 시작 → … → 책에서 배우기)마다 글이 동그라미 하나. 도장 받은 글은 초록 도장, 읽기만 한 글은 옅은 초록, 아직은 빈 동그라미.
+    잠그지 않는다 — 순서를 권할 뿐. 맨 위에 다음에 읽을 글 하나."""
+    total = len(learn.ARTICLES)
+    got = sum(a["slug"] in stamps for a in learn.ARTICLES)
+    nxt = next((a for a in learn.ARTICLES if a["slug"] not in stamps), None)
+    rows = []
+    for i, c in enumerate(learn.CATS, 1):
+        arts = [a for a in learn.ARTICLES if a["cat"] == c]
+        dots = "".join(
+            f'<a href="/learn/{e(a["slug"])}" title="{e(a["title"])}" aria-label="{e(a["title"])}{" — 도장 받음" if a["slug"] in stamps else ""}" '
+            f'class="w-7 h-7 rounded-full flex items-center justify-center '
+            + ("bg-primary text-on-primary" if a["slug"] in stamps else "bg-primary-fixed text-primary" if a["slug"] in read else "border border-outline-variant text-outline")
+            + f'"><span class="material-symbols-outlined text-[16px]">{"verified" if a["slug"] in stamps else "check" if a["slug"] in read else "circle"}</span></a>'
+            for a in arts)  # fmt: skip
+        full = all(a["slug"] in stamps for a in arts)
+        rows.append(f'<div class="py-2.5 flex items-center gap-3"><span class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[12px] font-bold '
+                    f'{"bg-primary text-on-primary" if full else "bg-surface-container text-on-surface-variant"}">{i}</span>'
+                    f'<span class="w-[88px] shrink-0 text-[13px] font-semibold text-on-surface">{e(c)}</span><span class="flex flex-wrap gap-1.5">{dots}</span></div>')  # fmt: skip
+    return ('<section class="mt-space-lg"><div class="flex items-center justify-between"><h2 class="flex items-center gap-2 text-[16px] font-bold text-on-surface">'
+            '<span class="w-2 h-2 rounded-full bg-primary"></span>배움 길</h2>'
+            f'<span class="text-[12px] text-on-surface-variant">도장 {got} / {total}</span></div>'
+            f'<div class="mt-1 divide-y divide-surface-container-high/70">{"".join(rows)}</div>'
+            + (f'<a href="/learn/{e(nxt["slug"])}" class="mt-2 flex items-center justify-between gap-2 rounded-lg bg-primary-fixed/40 px-3 py-2.5">'
+               f'<span class="min-w-0"><span class="block text-[12px] text-primary font-semibold">다음에 읽을 글</span>'
+               f'<span class="block text-[15px] font-semibold text-on-surface truncate">{e(nxt["title"])}</span></span>'
+               '<span class="material-symbols-outlined text-primary">chevron_right</span></a>' if nxt else
+               '<p class="mt-2 text-[14px] font-semibold text-primary">모든 글에 도장을 받았어요.</p>')
+            + '<p class="mt-2 text-[12px] text-outline">글은 어느 것이든 바로 읽을 수 있어요. 글 끝의 세 문제를 다 맞히면 도장이 찍혀요.</p></section>')  # fmt: skip

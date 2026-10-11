@@ -92,6 +92,8 @@ create table if not exists likes (
 create table if not exists follows (
   follower_id integer not null references users, followee_id integer not null references users,
   at text not null, primary key (follower_id, followee_id));
+create table if not exists quiz_done (
+  user_id integer not null references users, slug text not null, at text not null, primary key (user_id, slug));
 create table if not exists regrams (
   id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
   week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));
