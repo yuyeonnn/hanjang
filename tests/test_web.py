@@ -1478,7 +1478,9 @@ def test_my_stock_card_shows_what_happened_to_it():
     assert "오늘의 내 종목" not in call(app, "/feed", cookie=ck)[2]  # 피드에서는 뺐다
     card = home[home.index('data-stock-id="005930"'):]
     assert 'href="/n/005930"><p' in card and 'href="/calendar"' not in card[:card.index("노트 읽기")]  # 글자를 누르면 노트로
+    assert "매출이 늘었어요." in card[:card.index("노트 읽기")] and 'href="/n/005930#recent"' in card  # 노트 핵심 한 줄도 함께 · 생긴 일은 노트의 그 자리로
     note = call(app, "/n/005930", cookie=ck)[2]
+    assert 'id="recent"' in note and 'href="#who"' in note  # 임원·큰손 줄은 노트의 그 대목으로
     assert "요즘 생긴 일" in note and "국민연금이 지분을 늘렸어요" in note and "임원 주식 거래 보고 1건" in note and "회사 사정은 어떤가요?" in note  # 맨 위에 그 일들, 아래에 원래 노트
 
 
