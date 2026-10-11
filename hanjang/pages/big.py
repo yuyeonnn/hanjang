@@ -2,7 +2,7 @@
 
 from hanjang import gurus, holders, notes, sources
 from hanjang.charts import TOP_LIST, bars, ind_tag, issuer_name, pie
-from hanjang.ui import DART_VIEW, PEOPLE, e, guru_face, kdate, logo, page, row, sector
+from hanjang.ui import DART_VIEW, PEOPLE, e, guru_face, kdate, logo, page, sector
 
 
 class BigPages:

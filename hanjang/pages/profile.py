@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 from hanjang import mail, notes, sources, tree
-from hanjang.ui import BAD, BIO_MAX, MAX_STOCKS, NICK, PHOTO_MAX, REPORT_WHY, ago, bottom_nav, e, logo, page, photo_url, row, top_bar
+from hanjang.ui import BAD, BIO_MAX, MAX_STOCKS, NICK, PHOTO_MAX, REPORT_WHY, ago, bottom_nav, e, logo, page, photo_url, top_bar
 
 
 class ProfilePages:

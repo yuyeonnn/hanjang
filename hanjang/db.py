@@ -128,10 +128,11 @@ def tune(con: sqlite3.Connection) -> sqlite3.Connection:
     return con
 
 
-def connect(path=PATH) -> sqlite3.Connection:
+def connect(path=PATH, threads: bool = False) -> sqlite3.Connection:
+    """threads=True: 화면 서버처럼 여러 실이 연결 하나를 돌려 쓸 때(잠금은 쓰는 쪽이 건다)."""
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path, timeout=30)  # 매일 실행이 쓰는 동안 화면이 읽고 써도 잠깐 기다린다
+    con = sqlite3.connect(path, timeout=30, check_same_thread=not threads)  # 매일 실행이 쓰는 동안 화면이 읽고 써도 잠깐 기다린다
     con.execute("pragma journal_mode = wal")  # 읽기와 쓰기가 서로 막지 않게 (파일에 남는다)
     tune(con)
     con.execute("pragma foreign_keys = on")
@@ -191,6 +192,10 @@ MIGRATIONS = (
     "create index if not exists regrams_ref on regrams (kind, ref, week)",
     "create index if not exists likes_note on likes (ticker, week)",
     "create index if not exists views_week on views (page, at)",  # 피드 「이번 주 한장」 — 지난 7일 열람을 센다. 열람 30만 줄에서 35ms → 범위만 (규모 점검 10/11)
+    # 로그인 요청 기록·코드 — 메모리에 두면 서버를 다시 켤 때(올릴 때마다) 로그인하던 사람의 코드가 사라졌다 (10/12)
+    "create table if not exists login_hits (key text not null, at real not null)",  # key: 이메일 · ip:주소 · * (전체)
+    "create index if not exists login_hits_key on login_hits (key, at)",
+    "create table if not exists login_codes (email text primary key, code text not null, expires real not null, tries integer not null default 0)",
 )
 
 

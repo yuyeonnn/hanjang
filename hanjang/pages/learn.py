@@ -5,9 +5,9 @@ from datetime import date, datetime
 from hanjang import quiz
 
 from hanjang import learn, policy, sources
-from hanjang.charts import groups, index_chart, loss_bars, rate_chart, rate_ladder
-from hanjang.notepage import figure, paras
-from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, mark, page, top_bar
+from hanjang.charts import index_chart, loss_bars, rate_chart, rate_ladder
+from hanjang.notepage import figure
+from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, page, top_bar
 
 
 class LearnPages:

@@ -7,6 +7,7 @@ import json
 import sqlite3
 import sys
 import time
+from datetime import datetime, timedelta
 
 from hanjang import db, web
 
@@ -38,6 +39,9 @@ def pages() -> dict[str, tuple[str, str]]:
                       " and u.banned = 0 group by 1 order by count(*) desc limit 1").fetchone()  # fmt: skip
     if row:
         ck = web.session_cookie(row[0], SECRET, time.time()).split(";")[0]
+        if "articles" in sys.argv:  # 최근 이틀 기사 화면만 — 글을 읽어 보려고 (deploy/check.sh 와 무관)
+            since = (datetime.now() - timedelta(days=2)).isoformat()
+            return {f"/a/{i}": get(f"/a/{i}", ck) for (i,) in con.execute("select id from articles where made_at >= ? order by id", (since,))}
         (t,) = con.execute("select ticker from holdings where user_id = ? limit 1", (row[0],)).fetchone()
         art = con.execute("select id from articles order by id desc limit 1").fetchone()
         other = con.execute("select id from users where nickname is not null and id != ? limit 1", (row[0],)).fetchone()

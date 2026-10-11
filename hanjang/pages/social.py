@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from hanjang import learn, notes
 from hanjang.notepage import FILLED
-from hanjang.ui import HL_MAX, HL_PAGE, HL_PER_PAGE, Photos, QUOTE_MAX, QUOTE_MIN, TAGS, bottom_nav, e, mark, mini, note_card, page, photo_url, row, top_bar
+from hanjang.ui import HL_MAX, HL_PAGE, HL_PER_PAGE, Photos, QUOTE_MAX, QUOTE_MIN, TAGS, bottom_nav, e, mini, note_card, page, photo_url, row, top_bar
 
 
 class SocialPages:

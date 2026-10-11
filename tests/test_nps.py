@@ -1,4 +1,3 @@
-from datetime import date
 
 from hanjang import db, gurus, nps, web
 

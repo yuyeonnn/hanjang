@@ -4,8 +4,8 @@ import json
 from datetime import date, datetime, timedelta
 
 from hanjang import holders, notes
-from hanjang.notepage import CITE, EVENT_EXPLAIN, clean_title, paras, safe_url
-from hanjang.ui import Photos, ago, bottom_nav, e, gist, logo, mark, page, row, story, top_bar
+from hanjang.notepage import CITE, EVENT_EXPLAIN, clean_title, safe_url
+from hanjang.ui import Photos, bottom_nav, e, gist, logo, page, story, top_bar
 
 
 class FeedPages:

@@ -11,7 +11,7 @@ from hanjang import llm, morning, notes, sources, tree
 from hanjang.notepage import WHO_ICONS, render_note
 from hanjang.pwa import EMPTY_CARDS, INSTALL_HINT
 from hanjang.sources import industry_label
-from hanjang.ui import FIRST, MAX_STOCKS, SCAN_HOURLY, bottom_nav, e, logo, page, row, top_bar
+from hanjang.ui import FIRST, MAX_STOCKS, SCAN_HOURLY, bottom_nav, e, logo, page, top_bar
 
 
 class HomePages:

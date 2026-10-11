@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from hanjang import db, mail, sources
 from hanjang.auth import CODE_TRIES, LINK_TTL, LOGIN_ALL_HOURLY, LOGIN_GAP, LOGIN_HOURLY, LOGIN_IP_HOURLY, login_token, session_cookie
-from hanjang.ui import COHORT, DEMO_EMAIL, DEMO_STOCKS, e, page, row
+from hanjang.ui import COHORT, DEMO_EMAIL, DEMO_STOCKS, e, page
 
 
 class LoginPages:
@@ -113,24 +113,24 @@ class LoginPages:
             return "200 OK", [], self.login_page(error="개인정보 수집·이용에 동의해야 시작할 수 있어요.", cohort=cohort)
         # 누구든 메일로 온 링크를 눌러야 들어온다 — 남의 이메일을 넣어 남의 계정에 들어가거나, 남의 이메일로 가입하지 못하게 (공개 출시 준비 10/10)
         now = self.clock()
-        times = [t for t in self.sent.get(email, []) if now - t < 3600]
+        # 요청 기록·코드는 DB 표에(login_hits·login_codes) — 서버를 다시 켜도(올릴 때마다) 로그인하던 사람의 코드가 살아 있고, 서버가 여러 대여도 된다 (10/12)
+        self.con.execute("delete from login_hits where at < ?", (now - 3600,))  # 한 시간 지난 기록은 그때그때 비운다
+        hits = lambda key: [t for (t,) in self.con.execute("select at from login_hits where key = ? order by at", (key,))]  # noqa: E731
+        times = hits(email)
         if (times and now - times[-1] < LOGIN_GAP) or len(times) >= LOGIN_HOURLY:
             return "429 Too Many Requests", [], self.login_page(error="링크를 방금 보냈어요. 메일함을 먼저 확인하고, 잠시 뒤에 다시 요청해 주세요.", cohort=cohort)
         ip = "ip:" + getattr(self.local, "ip", "")
-        by_ip, by_all = ([t for t in self.sent.get(k, []) if now - t < 3600] for k in (ip, "*"))
-        if len(by_ip) >= LOGIN_IP_HOURLY or len(by_all) >= LOGIN_ALL_HOURLY:
+        if len(hits(ip)) >= LOGIN_IP_HOURLY or len(hits("*")) >= LOGIN_ALL_HOURLY:
             return "429 Too Many Requests", [], self.login_page(error="로그인 요청이 너무 많아요. 한 시간쯤 뒤에 다시 해 주세요.", cohort=cohort)
-        if len(self.sent) > 2000:  # 한 시간 지난 요청 기록·만료된 코드를 비운다 — 주소·IP 마다 한 칸씩 끝없이 늘지 않게
-            self.sent = {k: v for k, v in self.sent.items() if v and now - v[-1] < 3600}
-            self.codes = {k: v for k, v in self.codes.items() if now <= v[1]}
-        self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
+        self.con.executemany("insert into login_hits values (?, ?)", [(email, now), (ip, now), ("*", now)])
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
         # 앱 심사자(구글·애플)는 메일을 받을 수 없다 — .env 에 정해 둔 주소로는 메일 없이, 정해 둔 코드로 들어온다. 나머지(15분·5번 틀리면 버림·한 시간 5번)는 같다
         # ponytail: 6자리 고정 코드 — 주소까지 알아도 한 시간 25번(100만 가지)이고 빈 일반 계정일 뿐이다. 심사가 끝나면 .env 에서 지운다
         fixed = sources.env().get("REVIEW_CODE", "") if email == sources.env().get("REVIEW_EMAIL", "").strip().lower() else ""
         review = len(fixed) == 6 and fixed.isdigit()
         code = fixed if review else f"{secrets.randbelow(10**6):06d}"
-        self.codes[email] = [code, now + LINK_TTL, 0]  # ponytail: 메모리에 — 서버를 다시 켜면 코드는 사라지고 링크만 남는다(링크는 서명이라 그대로 된다)
+        self.con.execute("insert or replace into login_codes values (?, ?, ?, 0)", (email, code, now + LINK_TTL))  # 새로 받으면 옛 코드는 버린다
+        self.con.commit()
         if not review:
             with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
                 mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
@@ -139,15 +139,18 @@ class LoginPages:
     def login_code(self, email: str, code: str, cohort: str = ""):
         """메일로 받은 6자리 코드로 들어온다. 틀리면 CODE_TRIES 번까지 — 넘으면 그 코드는 버리고 새로 받아야 한다
         (6자리는 100만 가지라 마구 넣어 볼 수 있다. 코드 하나에 5번, 새 코드는 한 시간에 5통 → 한 시간에 많아야 25번)."""
-        row = self.codes.get(email)
+        row = self.con.execute("select code, expires, tries from login_codes where email = ?", (email,)).fetchone()
+        gone = lambda: (self.con.execute("delete from login_codes where email = ?", (email,)), self.con.commit())  # noqa: E731
         if not row or self.clock() > row[1]:
-            self.codes.pop(email, None)
+            gone()
             return "200 OK", [], self.login_page(error="코드가 만료됐어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
         if not hmac.compare_digest(row[0], code.strip()):
-            row[2] += 1
-            if row[2] >= CODE_TRIES:
-                del self.codes[email]
+            tries = row[2] + 1
+            if tries >= CODE_TRIES:
+                gone()
                 return "200 OK", [], self.login_page(error="코드를 여러 번 틀렸어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
-            return "200 OK", [], self.login_page(email, error=f"코드가 맞지 않아요. 메일의 숫자 6자리를 다시 봐 주세요. ({CODE_TRIES - row[2]}번 남음)", cohort=cohort)
-        del self.codes[email]  # 한 번만 쓴다
+            self.con.execute("update login_codes set tries = ? where email = ?", (tries, email))
+            self.con.commit()
+            return "200 OK", [], self.login_page(email, error=f"코드가 맞지 않아요. 메일의 숫자 6자리를 다시 봐 주세요. ({CODE_TRIES - tries}번 남음)", cohort=cohort)
+        gone()  # 한 번만 쓴다
         return self.start(email, cohort)

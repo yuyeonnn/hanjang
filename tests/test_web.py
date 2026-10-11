@@ -13,7 +13,7 @@ SECRET = "test-secret"
 
 
 def _app(now=1_000_000.0):
-    con = db.connect(":memory:")
+    con = db.connect(":memory:", threads=True)  # 화면 서버와 같게 — 여러 실에서 연결 하나
     # 테스트가 표에 바로 넣는 사람(닉네임 있음)은 이용 규칙에 동의한 것으로 — 동의 관문 자체는 닉네임 테스트가 본다
     con.execute("create trigger agreed after insert on users when new.nickname is not null begin update users set rules_at = 'x' where id = new.id; end")
     collect.save_universe(con, [("005930", "삼성전자")], {})
