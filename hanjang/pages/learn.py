@@ -92,7 +92,8 @@ class LearnPages:
                      + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
-                     + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
+                     + '<div class="relative overflow-hidden">' + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
+                     + quiz.stamp(slug in stamps) + "</div>"  # 다 맞힌 글엔 본문 오른쪽 아래에 도장 — 가장자리에 걸쳐 조금 잘리게 (사용자 10/12)
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
