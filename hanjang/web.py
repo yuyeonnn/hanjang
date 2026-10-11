@@ -370,7 +370,7 @@ if __name__ == "__main__":
         request_queue_size = 128  # 한꺼번에 몰린 연결을 받아 둘 줄 (기본 5 — 넘치면 연결을 끊는다)
 
     sys.stderr.reconfigure(encoding="utf-8")  # 윈도우 콘솔(cp949)에서 한글 로그가 깨지지 않게
-    cfg = env()
+    cfg = sources.env()
     if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
