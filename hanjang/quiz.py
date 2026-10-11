@@ -1,6 +1,6 @@
 """읽기 팁 퀴즈 — 글 끝의 세 문제 · 오늘의 한 문제 · 다 맞히면 도장 (사용자 10/12).
 
-문제의 답은 모두 글에 적힌 사실이거나 코드가 계산한 내 종목의 숫자다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1·2).
+문제의 답은 모두 그 글에 적힌 사실이다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1).
 글은 잠그지 않는다. 틀려도 다시 고를 수 있고, 세 문제를 다 맞히면 그 글에 도장이 찍힌다. AI 는 쓰지 않는다.
 QUIZ[slug] = [(물음, [보기 셋], 정답 번호(0부터), 풀이)]. 숫자를 DB 로 채우는 글(rates·long-short)은 문제가 없다 — 읽으면 도장.
 """
@@ -10,7 +10,6 @@ import zlib
 from datetime import date
 from html import escape as e
 
-from . import learn, notes
 
 QUIZ = {
     "start": [
@@ -131,47 +130,15 @@ QUIZ = {
 }
 
 
-def mine(con: sqlite3.Connection, uid: int) -> dict[str, tuple]:
-    """내 종목 숫자로 내는 문제 — 글마다 하나(세 번째 문제 자리). 국내 종목의 최근 두 해 재무에서 코드가 만든다.
-    {글 slug: (물음, 보기, 정답, 풀이)} — 낼 수 없으면(재무가 없거나 적자·금융) 그 글은 빠진다."""
-    out = {}
-    rows = con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.user_id = ? and s.market = 'KR' order by h.added_at", (uid,)).fetchall()
-    for t, name in rows:
-        fin = con.execute("select fiscal_year, revenue, operating_income, equity, liabilities from financials where ticker = ? order by fiscal_year desc limit 2", (t,)).fetchall()
-        if len(fin) < 2 or not fin[0][1] or not fin[1][1]:
-            continue
-        (y, rev, op, eq, li), (_, rev0, *_rest) = fin
-        nun = notes.josa(name, "은")
-        if "statements" not in out and rev != rev0:
-            out["statements"] = (f"내 종목 {name}의 {y}년 매출은 한 해 전보다 늘었을까요, 줄었을까요?", ["늘었어요", "줄었어요", "똑같아요"], 0 if rev > rev0 else 1,
-                                 f"{y}년 매출은 {notes.won(rev)}, 한 해 전은 {notes.won(rev0)}이었어요. 노트의 「회사 사정은 어떤가요?」에 나와요.")  # fmt: skip
-        if "sector-margin" not in out and op and op > 0:
-            m = round(op / rev * 100)
-            wrong = sorted({max(1, m // 3), m * 2 + 5} - {m})
-            if m >= 1 and len(wrong) == 2:
-                picks = sorted([m, *wrong])
-                out["sector-margin"] = (f"내 종목 {name}{nun} {y}년에 100원어치를 팔아 본업으로 몇 원쯤 남겼을까요?", [f"{x}원" for x in picks], picks.index(m),
-                                        f"영업이익 {notes.won(op)} ÷ 매출 {notes.won(rev)} = 100원당 약 {m}원이에요. 노트의 「100원 팔면 얼마 남았나」에 나와요.")  # fmt: skip
-        if "ratios" not in out and eq and eq > 0 and li and li != eq:
-            out["ratios"] = (f"내 종목 {name}의 {y}년 말 빚은 자기 돈(자본)보다 많을까요, 적을까요?", ["많아요(부채비율 100% 넘음)", "적어요(부채비율 100% 아래)", "빚이 없어요"], 0 if li > eq else 1,
-                             f"빚 {notes.won(li)}, 자기 돈 {notes.won(eq)} — 부채비율 {li / eq * 100:.0f}%예요. 업종마다 보통 수준이 달라요.")  # fmt: skip
-    return out
+def questions(slug: str) -> list[tuple]:
+    """그 글의 세 문제 — 모두 그 글에 적힌 내용에서(내 종목 숫자로 내는 문제는 뺐다: 공시 숫자를 외우고 있어야 풀 수 있었다, 사용자 10/12)."""
+    return list(QUIZ.get(slug, []))
 
 
-def questions(con: sqlite3.Connection, uid: int, slug: str) -> list[tuple]:
-    """그 글의 세 문제 — 내 종목 문제를 낼 수 있으면 세 번째 자리에."""
-    qs = list(QUIZ.get(slug, []))
-    if qs and (m := mine(con, uid).get(slug)):
-        qs[2] = m
-    return qs
-
-
-def daily(con: sqlite3.Connection, uid: int, today: date) -> tuple[str, tuple]:
-    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 짝수 날은 내 종목 문제(있으면), 그 밖엔 모든 글의 문제를 날마다 차례로."""
-    n = today.toordinal()
-    own = list(mine(con, uid).values())
+def daily(today: date) -> tuple[str, tuple]:
+    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 모든 글의 문제를 날마다 차례로."""
     pool = [q for qs in QUIZ.values() for q in qs]
-    return f"daily:{today.isoformat()}", (own[n // 2 % len(own)] if own and n % 2 == 0 else pool[n * 7 % len(pool)])
+    return f"daily:{today.isoformat()}", pool[today.toordinal() * 7 % len(pool)]
 
 
 def done(con: sqlite3.Connection, uid: int) -> set[str]:
@@ -210,34 +177,3 @@ def block(key: str, qs: list[tuple], stamped: bool, title: str, end: str) -> str
             f'<span class="material-symbols-outlined text-primary text-[20px]">quiz</span>{e(title)}</h2>{mark}</div>'
             f'<div class="divide-y divide-surface-container-high/70">{items}</div>'
             f'<p data-end style="display:none" class="mt-1 items-center gap-1 text-[14px] font-semibold text-primary"><span class="material-symbols-outlined text-[18px]">verified</span>{e(end)}</p></section>')  # fmt: skip
-
-
-def path(stamps: set[str], read: set[str]) -> str:
-    """배움 길 — 단계(처음 시작 → … → 책에서 배우기)마다 글이 동그라미 하나. 도장 받은 글은 초록 도장, 읽기만 한 글은 옅은 초록, 아직은 빈 동그라미.
-    잠그지 않는다 — 순서를 권할 뿐. 맨 위에 다음에 읽을 글 하나."""
-    total = len(learn.ARTICLES)
-    got = sum(a["slug"] in stamps for a in learn.ARTICLES)
-    nxt = next((a for a in learn.ARTICLES if a["slug"] not in stamps), None)
-    rows = []
-    for i, c in enumerate(learn.CATS, 1):
-        arts = [a for a in learn.ARTICLES if a["cat"] == c]
-        dots = "".join(
-            f'<a href="/learn/{e(a["slug"])}" title="{e(a["title"])}" aria-label="{e(a["title"])}{" — 도장 받음" if a["slug"] in stamps else ""}" '
-            f'class="w-7 h-7 rounded-full flex items-center justify-center '
-            + ("bg-primary text-on-primary" if a["slug"] in stamps else "bg-primary-fixed text-primary" if a["slug"] in read else "border border-outline-variant text-outline")
-            + f'"><span class="material-symbols-outlined text-[16px]">{"verified" if a["slug"] in stamps else "check" if a["slug"] in read else "circle"}</span></a>'
-            for a in arts)  # fmt: skip
-        full = all(a["slug"] in stamps for a in arts)
-        rows.append(f'<div class="py-2.5 flex items-center gap-3"><span class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[12px] font-bold '
-                    f'{"bg-primary text-on-primary" if full else "bg-surface-container text-on-surface-variant"}">{i}</span>'
-                    f'<span class="w-[88px] shrink-0 text-[13px] font-semibold text-on-surface">{e(c)}</span><span class="flex flex-wrap gap-1.5">{dots}</span></div>')  # fmt: skip
-    return ('<section class="mt-space-lg"><div class="flex items-center justify-between"><h2 class="flex items-center gap-2 text-[16px] font-bold text-on-surface">'
-            '<span class="w-2 h-2 rounded-full bg-primary"></span>배움 길</h2>'
-            f'<span class="text-[12px] text-on-surface-variant">도장 {got} / {total}</span></div>'
-            f'<div class="mt-1 divide-y divide-surface-container-high/70">{"".join(rows)}</div>'
-            + (f'<a href="/learn/{e(nxt["slug"])}" class="mt-2 flex items-center justify-between gap-2 rounded-lg bg-primary-fixed/40 px-3 py-2.5">'
-               f'<span class="min-w-0"><span class="block text-[12px] text-primary font-semibold">다음에 읽을 글</span>'
-               f'<span class="block text-[15px] font-semibold text-on-surface truncate">{e(nxt["title"])}</span></span>'
-               '<span class="material-symbols-outlined text-primary">chevron_right</span></a>' if nxt else
-               '<p class="mt-2 text-[14px] font-semibold text-primary">모든 글에 도장을 받았어요.</p>')
-            + '<p class="mt-2 text-[12px] text-outline">글은 어느 것이든 바로 읽을 수 있어요. 글 끝의 세 문제를 다 맞히면 도장이 찍혀요.</p></section>')  # fmt: skip

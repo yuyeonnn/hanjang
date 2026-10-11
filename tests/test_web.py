@@ -4,9 +4,11 @@ import re
 import io
 from datetime import date, datetime, timedelta
 import json
+from pathlib import Path
 from urllib.parse import quote, unquote
 
-from hanjang import collect, db, learn, mail, notes, web
+from hanjang import collect, db, learn, mail, notes, sources, web
+from hanjang.pages import home
 
 SECRET = "test-secret"
 
@@ -462,9 +464,9 @@ def test_industry_bars():
 
 def test_demo_browse_without_email_is_read_only(monkeypatch):
     app, con = _app()
-    monkeypatch.setattr(web, "env", lambda: {})
+    monkeypatch.setattr(sources, "env", lambda: {})
     assert call(app, "/demo")[0].startswith("404")  # 꺼져 있으면 없다
-    monkeypatch.setattr(web, "env", lambda: {"DEMO": "1"})
+    monkeypatch.setattr(sources, "env", lambda: {"DEMO": "1"})
     s, h, _ = call(app, "/demo")
     ck = h["Set-Cookie"].split(";")[0]
     assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
@@ -635,7 +637,7 @@ def test_adding_a_stock_without_note_starts_first_note_now(monkeypatch):
     con.execute("insert or ignore into stocks (ticker, name, active) values ('036620', '감성코퍼레이션', 0)")
     con.commit()
     started, gate = [], threading.Event()
-    monkeypatch.setattr(web, "FIRST", lambda t: (started.append(t), gate.wait(2)))
+    monkeypatch.setattr(home, "FIRST", lambda t: (started.append(t), gate.wait(2)))
     ck = _login(app)
     call(app, "/add", "POST", "q=036620", ck)
     assert started == ["036620"] and "036620" in app.making
@@ -724,7 +726,7 @@ def test_installable_app_pieces_are_public(monkeypatch):
     assert "/offline" in call(app, "/sw.js")[2] and "연결이 끊겼어요" in call(app, "/offline")[2]
     assert 'rel="manifest"' in call(app, "/")[2]
     assert call(app, "/.well-known/assetlinks.json")[0].startswith("404")  # 지문을 넣기 전엔 닫혀 있다
-    monkeypatch.setattr(web, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
+    monkeypatch.setattr(sources, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
     s, _, body = call(app, "/.well-known/assetlinks.json")
     assert json.loads(body)[0]["target"] == {"namespace": "android_app", "package_name": "kr.hanjang.app", "sha256_cert_fingerprints": ["AA:BB"]}
 
@@ -1203,7 +1205,7 @@ def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
     app, _ = _app()
     mails = []
     monkeypatch.setattr(mail, "send", lambda to, *a, **k: mails.append(to))
-    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
+    monkeypatch.setattr(sources, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
     assert "만료" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")[2]  # 먼저 이메일을 넣어야 한다(요청 한도를 거친다)
     assert 'name="code"' in call(app, "/login", "POST", "email=review%40hanjang.test&agree=1")[2] and mails == []
     assert "4번 남음" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=000000")[2]
@@ -1211,7 +1213,7 @@ def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
     assert s.startswith("303") and "s=" in h["Set-Cookie"]
     call(app, "/login", "POST", "email=a%40b.c&agree=1")
     assert mails == ["a@b.c"] and "맞지 않아요" in call(app, "/login/code", "POST", "email=a%40b.c&code=482913")[2]
-    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
+    monkeypatch.setattr(sources, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
     call(app, "/login", "POST", "email=r%40hanjang.test&agree=1")
     assert mails[-1] == "r@hanjang.test"
 
@@ -1256,7 +1258,7 @@ def test_report_block_rules_and_ban(monkeypatch):
     app, con = _app()
     mails = []
     monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((subject, text)))
-    monkeypatch.setattr(web, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
+    monkeypatch.setattr(sources, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
     con.execute("insert into users (id, email, created_at, nickname, bio) values (1, 'a@b.c', '2026-10-01', '가가', '소개'), (2, 'b@b.c', '2026-10-01', '나나', null), (3, 'c@b.c', '2026-10-01', '다다', null)")
     con.commit()
     a, b, c = (f"s={web.sign(str(i), SECRET)}" for i in (1, 2, 3))
@@ -1674,24 +1676,32 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert set(quiz.QUIZ) <= set(learn.BY_SLUG) and set(learn.BY_SLUG) - set(quiz.QUIZ) == {"rates", "long-short"}  # 숫자를 DB 로 채우는 두 글만 문제가 없다
     app, con = _app()
     ck = _login(app)
-    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     (uid,) = con.execute("select id from users").fetchone()
-    con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, equity, liabilities, rcept_no) values ('005930', 2025, 300, 30, 400, 100, 'a'), ('005930', 2024, 250, 20, 350, 90, 'b')")
-    con.commit()
-    mine = quiz.mine(con, uid)
-    assert mine["statements"][2] == 0 and "삼성전자" in mine["statements"][0]  # 매출 250 → 300, 늘었다
-    assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
-    assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
+    assert quiz.questions("statements") == quiz.QUIZ["statements"] and quiz.daily(date(2026, 10, 12))[0] == "daily:2026-10-12"
     top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" in top and f"도장 0 / {len(learn.ARTICLES)}" in top and "다음에 읽을 글" in top
+    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 안 읽음" in top
     art = call(app, "/learn/statements", cookie=ck)[2]
-    assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
+    assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
     call(app, "/learn/done", "POST", "slug=statements", ck)
     call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
-    assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
+    assert top.count('aria-label="도장 받음"') == 2 and "도장 1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
+
+
+def test_web_main_block_only_uses_names_that_exist():
+    """`python -m hanjang.web` 의 시작 코드 — 테스트는 모듈만 가져오고 이 블록은 돌리지 않는다. 10/12 에 이름 하나(env)가 빠져 서버가 켜지지 않았다."""
+    import ast
+    import builtins
+
+    tree = ast.parse(Path(web.__file__).read_text(encoding="utf-8"))
+    main = next(n for n in tree.body if isinstance(n, ast.If))
+    local = {x.id for x in ast.walk(main) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
+    local |= {(a.asname or a.name).split(".")[0] for n in ast.walk(main) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    local |= {n.name for n in ast.walk(main) if isinstance(n, ast.ClassDef)}
+    used = {x.id for x in ast.walk(main) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load)}
+    assert not [n for n in used if n not in local and not hasattr(web, n) and not hasattr(builtins, n)]
 
 
 def test_article_gives_up_after_two_failed_runs(monkeypatch):
