@@ -50,6 +50,34 @@ def login_mail(link: str, code: str) -> tuple[str, str]:
             "직접 요청하지 않았다면 이 메일은 지우셔도 돼요. 코드를 남에게 알려 주지 마세요.")  # fmt: skip
 
 
+def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
+    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 새 소식이 있는 날만, 하루 한 통(사용자 10/11).
+    m = morning.build 의 결과, body = morning.text(m). 메일 앱은 CSS 를 못 읽어 인라인 스타일만."""
+    from html import escape as e
+
+    url = base_url()
+    who = "·".join(x["name"] for x in m["news"][:3]) + (" 등" if len(m["news"]) > 3 or m.get("more") else "")
+    soon = next((x["label"] for x in m["week"] if x.get("url")), "")
+    subject = f"[한장] 오늘 내 종목 소식 — {who}" if m["news"] else f"[한장] 곧 있는 내 종목 일정 — {soon}"
+    foot = "새 소식이 있는 날 아침에만 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
+    news = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:{INK}">'
+                   f'<a href="{e(x["url"])}" style="color:{GREEN};font-weight:700;text-decoration:none">{e(x["name"])}</a> '
+                   f'<span style="color:{SUB}">{e(x["body"])}</span></p>' for x in m["news"])  # fmt: skip
+    week = "".join(f'<tr><td style="padding:5px 12px 5px 0;font-size:13px;color:{MUTE};white-space:nowrap">{e(_day(x["date"]))}</td>'
+                   f'<td style="padding:5px 0;font-size:14px;color:{INK}">{e(x["label"])}</td></tr>' for x in m["week"][:6])  # fmt: skip
+    head, tip, _ = m["tip"]
+    html = (f'<div style="font-family:{FONT};max-width:560px;margin:0 auto;padding:28px 22px;background:#fff">'
+            f'<p style="margin:0 0 4px;font-size:13px;color:{MUTE}">{e(m["title"])}</p>'
+            f'<h1 style="margin:0 0 18px;font-size:21px;line-height:1.4;color:{GREEN}">오늘 내 종목 소식</h1>'
+            + (news or f'<p style="margin:0 0 14px;font-size:15px;color:{SUB}">새로 나온 내 종목 공시는 없어요.</p>')
+            + (f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">이번 주</h2><table style="border-collapse:collapse">{week}</table>' if week else "")
+            + f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">알아 두면 좋아요 · {e(head)}</h2>'
+            f'<p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:{SUB}">{e(tip)}</p>'
+            f'<p style="margin:0 0 22px"><a href="{e(url)}" style="display:inline-block;padding:11px 18px;border-radius:999px;background:{GREEN};color:#fff;font-size:14px;font-weight:700;text-decoration:none">한장에서 보기</a></p>'
+            f'<p style="margin:0;padding-top:14px;border-top:1px solid {LINE};font-size:12px;line-height:1.6;color:{MUTE}">사실만 모았어요. 사고팔라는 뜻이 아니에요.<br>{foot}</p></div>')  # fmt: skip
+    return subject, f"{body}\n\n한장에서 보기: {url}\n\n{foot}", html
+
+
 # 화면과 같은 색 (docs/design.md 「Warm Editorial Finance」) — 메일 앱은 CSS 파일·클래스·웹 글꼴을 못 읽어
 # 인라인 스타일과 기기 기본 글꼴 하나로만 쓴다 (글꼴을 섞으면 앱마다 다르게 바뀌어 더 어수선해진다)
 INK, SUB, MUTE, LINE, BG, GREEN, MINT, PALE, RED = ("#1b1b1d", "#404945", "#717975", "#c0c8c4", "#f6f3f5",
