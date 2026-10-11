@@ -1675,18 +1675,12 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert set(quiz.QUIZ) <= set(learn.BY_SLUG) and set(learn.BY_SLUG) - set(quiz.QUIZ) == {"rates", "long-short"}  # 숫자를 DB 로 채우는 두 글만 문제가 없다
     app, con = _app()
     ck = _login(app)
-    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     (uid,) = con.execute("select id from users").fetchone()
-    con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, equity, liabilities, rcept_no) values ('005930', 2025, 300, 30, 400, 100, 'a'), ('005930', 2024, 250, 20, 350, 90, 'b')")
-    con.commit()
-    mine = quiz.mine(con, uid)
-    assert mine["statements"][2] == 0 and "삼성전자" in mine["statements"][0]  # 매출 250 → 300, 늘었다
-    assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
-    assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
+    assert quiz.questions("statements") == quiz.QUIZ["statements"] and quiz.daily(date(2026, 10, 12))[0] == "daily:2026-10-12"
     top = call(app, "/learn", cookie=ck)[2]
     assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 안 읽음" in top
     art = call(app, "/learn/statements", cookie=ck)[2]
-    assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
+    assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
     call(app, "/learn/done", "POST", "slug=statements", ck)
     call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장

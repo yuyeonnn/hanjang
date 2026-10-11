@@ -58,7 +58,7 @@ class LearnPages:
 
     def learn_top(self, uid: int, stamps: set) -> str:
         """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) (사용자 10/12)."""
-        key, q = quiz.daily(self.con, uid, date.today())
+        key, q = quiz.daily(date.today())
         return quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS
 
     def learn(self, uid: int, slug: str):
@@ -78,7 +78,7 @@ class LearnPages:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
             stamps = quiz.done(self.con, uid)
-            qs = quiz.questions(self.con, uid, slug)
+            qs = quiz.questions(slug)
             if not qs and slug not in stamps:  # 숫자를 DB 로 채우는 글(금리·오래 들기)은 문제가 없다 — 읽으면 도장
                 self.con.execute("insert or ignore into quiz_done values (?, ?, ?)", (uid, slug, datetime.now().isoformat()))
                 self.con.commit()
