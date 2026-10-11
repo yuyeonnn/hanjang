@@ -1,0 +1,10 @@
+# 올릴 때마다 깃허브가 테스트를 돌린다 — 내 컴퓨터에서 안 돌리고 올린 것도 잡힌다 (서버와 같은 파이썬 3.13)
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --python 3.13 pytest -q
