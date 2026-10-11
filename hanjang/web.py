@@ -1843,18 +1843,26 @@ class App:
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
         out = []
+        happened: dict[str, list] = {}
+        for c in self.my_events(uid):
+            happened.setdefault(c[9], []).append(c)
         both = len({r[6] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
         for t, name, week, body, facts, home, mkt in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
             head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
-            more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
-            status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
+            href, sub, status = f"/n/{t}", "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
+            if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 첫 줄 대신 (사용자 10/11: 딱딱한 요약 말고 이 문구로)
+                _, icon, tint, _, _, head, sub, when, href, _ = evs[0]
+                head = f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(head)}'
+                status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
+            else:
+                head = e(head)
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
-                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p>'
-                       + (f'<p class="hidden lg:block mt-1.5 text-[14px] leading-[23px] text-on-surface-variant line-clamp-3">{e(more)}</p>' if more else "") + '</a>'
+                       f'<a href="{e(href)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{head}</p>'
+                       + (f'<p class="mt-1 text-[14px] leading-[22px] text-on-surface-variant">{e(sub)}</p>' if sub else "") + '</a>'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full flex-1">'
@@ -2849,10 +2857,11 @@ class App:
                 f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
 
-    def for_you(self, uid: int, today: date | None = None) -> str:
-        """오늘의 내 종목 — 담은 종목에 생긴 일을 점수 큰 순으로 한 줄씩(맞춤 피드 1차, 사용자 10/11).
+    def my_events(self, uid: int, today: date | None = None) -> list[tuple]:
+        """담은 종목에 생긴 일 — 점수 큰 순. 「내 종목」 카드가 종목마다 맨 위 것을 보여 준다(피드의 「오늘의 내 종목」을 옮김, 사용자 10/11).
         재료: ① 최근 7일 큰 공시 ② 앞으로 14일 일정(실적 발표·주총·배당) ③ 큰손 움직임(기관 5% 지분 변화 30일 · 임원 거래 14일).
-        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다. 끝이 있는 피드(「오늘은 여기까지」)."""
+        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다.
+        [(점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크, 종목코드)]"""
         today = today or date.today()
         iso = today.isoformat()
         back = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
@@ -2870,14 +2879,14 @@ class App:
                 " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date desc", (uid, back(7), iso)):  # fmt: skip
             n = (today - date.fromisoformat(d)).days
             cards.append((100 - 10 * n + 5 * (imp or 0), "campaign", "text-primary", name, home, clean_title(title, code),
-                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}"))
+                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}", t))
         for d, kind, what, t, name, home in self.con.execute(
                 f"select e.date, e.kind, e.title, s.ticker, s.name, s.homepage from events e join stocks s on s.ticker = e.ticker {mine}"
                 " where e.date between ? and ? order by e.date", (uid, iso, (today + timedelta(days=14)).isoformat())):  # fmt: skip
             n = (date.fromisoformat(d) - today).days
             dd = date.fromisoformat(d)
             cards.append((95 - 5 * n, "event_upcoming", "text-secondary", name, home, what,
-                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar"))
+                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar", t))
         for inst, rate, chg, d, t, name, home in self.con.execute(
                 f"select b.inst, b.rate, b.rate_chg, b.date, s.ticker, s.name, s.homepage from big_holdings b join stocks s on s.ticker = b.stock_code {mine}"
                 " where b.rate_chg is not null and b.rate_chg != 0 and b.date >= ? order by b.date desc", (uid, back(30))):  # fmt: skip
@@ -2886,37 +2895,22 @@ class App:
             n = (today - date.fromisoformat(d)).days
             who = holders.BIG[inst][0]
             cards.append((70 - 2 * n, "account_balance", "text-tertiary", name, home, f'{who}{notes.josa(who, "이")} 지분을 {"늘렸어요" if chg > 0 else "줄였어요"}',
-                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}"))
+                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}", t))
         for t, name, home, cnt, net, last in self.con.execute(
                 f"select s.ticker, s.name, s.homepage, count(*), sum(i.change), max(i.date) from insiders i join stocks s on s.ticker = i.ticker {mine}"
                 " where i.kind = '임원' and i.date >= ? group by s.ticker", (uid, back(14))):  # fmt: skip
             n = (today - date.fromisoformat(last)).days
             side = "사들인 쪽이 많아요" if (net or 0) > 0 else "판 쪽이 많아요" if (net or 0) < 0 else "사고판 양이 비슷해요"
-            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}"))
+            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}", t))
         cards.sort(key=lambda c: -c[0])
-        items = "".join(
-            f'<a href="{e(href)}" class="py-3.5 flex items-start gap-3">{logo(name, home, "w-9 h-9")}'
-            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="flex items-center gap-1.5 text-[12px] text-outline">'
-            f'<span class="material-symbols-outlined text-[15px] {tint}">{icon}</span><b class="font-medium text-on-surface-variant truncate">{e(name)}</b></span>'
-            f'<span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(head)}</span>'
-            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(sub)}</span></span>'
-            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
-            for _, icon, tint, name, home, head, sub, when, href in cards[:12])  # fmt: skip
-        (has,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
-        empty = ("아직 담은 종목이 없어요. 종목을 담으면 그 종목에 생긴 일을 여기에 모아 드려요." if not has
-                 else "오늘은 내 종목에 새로 생긴 일이 없어요.")
-        return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">오늘의 내 종목</h2>'
-                '<p class="mt-0.5 text-[12px] text-outline">내가 담은 종목에 생긴 일을 관련 큰 순으로 모았어요.</p>'
-                + (f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
-                   '<p class="py-3 text-center text-[12px] text-outline">오늘은 여기까지예요. 사실만 모았어요 — 사고팔라는 뜻이 아니에요.</p>' if items
-                   else f'<p class="py-6 text-center text-[13px] text-on-surface-variant">{empty}</p>') + "</section>")  # fmt: skip
+        return cards
 
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.for_you(uid) + self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
+        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
