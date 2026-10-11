@@ -1195,6 +1195,24 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
 
 
+def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
+    """앱 심사자는 메일을 받을 수 없다 — .env 에 정해 둔 주소는 메일 없이 정해 둔 코드로 들어온다. 다른 주소에는 그 코드가 통하지 않는다."""
+    app, _ = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, *a, **k: mails.append(to))
+    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
+    assert "만료" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")[2]  # 먼저 이메일을 넣어야 한다(요청 한도를 거친다)
+    assert 'name="code"' in call(app, "/login", "POST", "email=review%40hanjang.test&agree=1")[2] and mails == []
+    assert "4번 남음" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=000000")[2]
+    s, h, _ = call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")
+    assert s.startswith("303") and "s=" in h["Set-Cookie"]
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    assert mails == ["a@b.c"] and "맞지 않아요" in call(app, "/login/code", "POST", "email=a%40b.c&code=482913")[2]
+    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
+    call(app, "/login", "POST", "email=r%40hanjang.test&agree=1")
+    assert mails[-1] == "r@hanjang.test"
+
+
 def test_login_with_six_digit_code_from_the_mail(monkeypatch):
     """앱(웹뷰)·홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열린다 — 메일의 6자리 코드를 화면에 넣어 들어온다 (앱 출시 준비 10/11)."""
     app, _ = _app()

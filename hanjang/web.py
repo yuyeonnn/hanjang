@@ -1720,10 +1720,15 @@ class App:
             self.codes = {k: v for k, v in self.codes.items() if now <= v[1]}
         self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
-        code = f"{secrets.randbelow(10**6):06d}"
+        # 앱 심사자(구글·애플)는 메일을 받을 수 없다 — .env 에 정해 둔 주소로는 메일 없이, 정해 둔 코드로 들어온다. 나머지(15분·5번 틀리면 버림·한 시간 5번)는 같다
+        # ponytail: 6자리 고정 코드 — 주소까지 알아도 한 시간 25번(100만 가지)이고 빈 일반 계정일 뿐이다. 심사가 끝나면 .env 에서 지운다
+        fixed = env().get("REVIEW_CODE", "") if email == env().get("REVIEW_EMAIL", "").strip().lower() else ""
+        review = len(fixed) == 6 and fixed.isdigit()
+        code = fixed if review else f"{secrets.randbelow(10**6):06d}"
         self.codes[email] = [code, now + LINK_TTL, 0]  # ponytail: 메모리에 — 서버를 다시 켜면 코드는 사라지고 링크만 남는다(링크는 서명이라 그대로 된다)
-        with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
-            mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+        if not review:
+            with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
+                mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def login_code(self, email: str, code: str, cohort: str = ""):
