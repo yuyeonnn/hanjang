@@ -10,7 +10,7 @@ import zlib
 from datetime import date
 from html import escape as e
 
-from . import learn, notes
+from . import notes
 
 QUIZ = {
     "start": [
@@ -210,34 +210,3 @@ def block(key: str, qs: list[tuple], stamped: bool, title: str, end: str) -> str
             f'<span class="material-symbols-outlined text-primary text-[20px]">quiz</span>{e(title)}</h2>{mark}</div>'
             f'<div class="divide-y divide-surface-container-high/70">{items}</div>'
             f'<p data-end style="display:none" class="mt-1 items-center gap-1 text-[14px] font-semibold text-primary"><span class="material-symbols-outlined text-[18px]">verified</span>{e(end)}</p></section>')  # fmt: skip
-
-
-def path(stamps: set[str], read: set[str]) -> str:
-    """배움 길 — 단계(처음 시작 → … → 책에서 배우기)마다 글이 동그라미 하나. 도장 받은 글은 초록 도장, 읽기만 한 글은 옅은 초록, 아직은 빈 동그라미.
-    잠그지 않는다 — 순서를 권할 뿐. 맨 위에 다음에 읽을 글 하나."""
-    total = len(learn.ARTICLES)
-    got = sum(a["slug"] in stamps for a in learn.ARTICLES)
-    nxt = next((a for a in learn.ARTICLES if a["slug"] not in stamps), None)
-    rows = []
-    for i, c in enumerate(learn.CATS, 1):
-        arts = [a for a in learn.ARTICLES if a["cat"] == c]
-        dots = "".join(
-            f'<a href="/learn/{e(a["slug"])}" title="{e(a["title"])}" aria-label="{e(a["title"])}{" — 도장 받음" if a["slug"] in stamps else ""}" '
-            f'class="w-7 h-7 rounded-full flex items-center justify-center '
-            + ("bg-primary text-on-primary" if a["slug"] in stamps else "bg-primary-fixed text-primary" if a["slug"] in read else "border border-outline-variant text-outline")
-            + f'"><span class="material-symbols-outlined text-[16px]">{"verified" if a["slug"] in stamps else "check" if a["slug"] in read else "circle"}</span></a>'
-            for a in arts)  # fmt: skip
-        full = all(a["slug"] in stamps for a in arts)
-        rows.append(f'<div class="py-2.5 flex items-center gap-3"><span class="w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[12px] font-bold '
-                    f'{"bg-primary text-on-primary" if full else "bg-surface-container text-on-surface-variant"}">{i}</span>'
-                    f'<span class="w-[88px] shrink-0 text-[13px] font-semibold text-on-surface">{e(c)}</span><span class="flex flex-wrap gap-1.5">{dots}</span></div>')  # fmt: skip
-    return ('<section class="mt-space-lg"><div class="flex items-center justify-between"><h2 class="flex items-center gap-2 text-[16px] font-bold text-on-surface">'
-            '<span class="w-2 h-2 rounded-full bg-primary"></span>배움 길</h2>'
-            f'<span class="text-[12px] text-on-surface-variant">도장 {got} / {total}</span></div>'
-            f'<div class="mt-1 divide-y divide-surface-container-high/70">{"".join(rows)}</div>'
-            + (f'<a href="/learn/{e(nxt["slug"])}" class="mt-2 flex items-center justify-between gap-2 rounded-lg bg-primary-fixed/40 px-3 py-2.5">'
-               f'<span class="min-w-0"><span class="block text-[12px] text-primary font-semibold">다음에 읽을 글</span>'
-               f'<span class="block text-[15px] font-semibold text-on-surface truncate">{e(nxt["title"])}</span></span>'
-               '<span class="material-symbols-outlined text-primary">chevron_right</span></a>' if nxt else
-               '<p class="mt-2 text-[14px] font-semibold text-primary">모든 글에 도장을 받았어요.</p>')
-            + '<p class="mt-2 text-[12px] text-outline">글은 어느 것이든 바로 읽을 수 있어요. 글 끝의 세 문제를 다 맞히면 도장이 찍혀요.</p></section>')  # fmt: skip

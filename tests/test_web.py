@@ -1684,7 +1684,7 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
     assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
     top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" in top and f"도장 0 / {len(learn.ARTICLES)}" in top and "다음에 읽을 글" in top
+    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 안 읽음" in top
     art = call(app, "/learn/statements", cookie=ck)[2]
     assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
     call(app, "/learn/done", "POST", "slug=statements", ck)
@@ -1692,4 +1692,4 @@ def test_learn_quiz_daily_question_and_path_stamps():
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
-    assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
+    assert top.count('aria-label="도장 받음"') == 2 and "도장 1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
