@@ -58,7 +58,9 @@ def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
     url = base_url()
     who = "·".join(x["name"] for x in m["news"][:3]) + (" 등" if len(m["news"]) > 3 or m.get("more") else "")
     soon = next((x["label"] for x in m["week"] if x.get("url")), "")
-    subject = f"[한장] 오늘 내 종목 소식 — {who}" if m["news"] else f"[한장] 곧 있는 내 종목 일정 — {soon}"
+    moves = m.get("moves", [])
+    subject = (f"[한장] 오늘 내 종목 소식 — {who}" if m["news"] else f"[한장] 내 종목 큰손 움직임 — {moves[0].rstrip('.')}" if moves
+               else f"[한장] 곧 있는 내 종목 일정 — {soon}")
     foot = "새 소식이 있는 날 아침에만 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
     news = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:{INK}">'
                    f'<a href="{e(x["url"])}" style="color:{GREEN};font-weight:700;text-decoration:none">{e(x["name"])}</a> '
@@ -70,6 +72,7 @@ def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
             f'<p style="margin:0 0 4px;font-size:13px;color:{MUTE}">{e(m["title"])}</p>'
             f'<h1 style="margin:0 0 18px;font-size:21px;line-height:1.4;color:{GREEN}">오늘 내 종목 소식</h1>'
             + (news or f'<p style="margin:0 0 14px;font-size:15px;color:{SUB}">새로 나온 내 종목 공시는 없어요.</p>')
+            + "".join(f'<p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:{SUB}">{e(x)}</p>' for x in moves)
             + (f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">이번 주</h2><table style="border-collapse:collapse">{week}</table>' if week else "")
             + f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">알아 두면 좋아요 · {e(head)}</h2>'
             f'<p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:{SUB}">{e(tip)}</p>'

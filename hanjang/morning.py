@@ -13,7 +13,7 @@ import sys
 from datetime import date, timedelta
 from html import escape as e
 
-from . import learn, notes, sources
+from . import holders, learn, notes, sources
 
 WEEK = "월화수목금토일"
 
@@ -159,6 +159,15 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         body = " ".join(("" if i == 0 else "이와 함께 ") + happened(title, ai) for i, (_, title, _, _, ai) in enumerate(items[:2]))
         news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}", "body": body, "tag": KIND.get(items[0][3], "공시")})
         codes += [("EARNINGS_US" if c == "EARNINGS" and not t.isdigit() else c, t) for _, _, _, c, _ in items]
+    # 큰손 움직임 — 5% 넘게 가진 기관의 지분 변화 · 임원 주식 거래. 소식과 같은 기간(피드의 「오늘의 내 종목」을 여기로 합쳤다, 사용자 10/11)
+    moves = [f"{holders.BIG[i][0]}{notes.josa(holders.BIG[i][0], '이')} {name.get(t, t)} 지분을 {'늘렸어요' if chg > 0 else '줄였어요'}(지분 {rate:.2f}%)."
+             for i, t, rate, chg in con.execute(
+                 f"select inst, stock_code, rate, rate_chg from big_holdings where stock_code in ({q}) and date >= ? and rate_chg is not null and rate_chg != 0"
+                 " order by date desc limit 3", (*tickers, lo.isoformat())).fetchall() if i in holders.BIG]  # fmt: skip
+    moves += [f"{name.get(t, t)} 임원의 주식 거래 보고가 {k}건 나왔어요({'사들인 쪽이 많아요' if (net or 0) > 0 else '판 쪽이 많아요' if (net or 0) < 0 else '사고판 양이 비슷해요'})."
+              for t, k, net in con.execute(
+                  f"select ticker, count(*), sum(change) from insiders where ticker in ({q}) and kind = '임원' and date >= ? group by ticker limit 3",
+                  (*tickers, lo.isoformat())).fetchall()]  # fmt: skip
     follows = []
     if uid:
         follows = [f"팔로우한 {n}님은 글 {k}개를 리그램했어요." for n, k in con.execute(
@@ -194,13 +203,13 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         a = learn.ARTICLES[today.toordinal() % len(learn.ARTICLES)]
         tip = (a["title"], a["lead"].replace("**", ""), ("이어서 읽기", f"/learn/{a['slug']}"))
     return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4),
-            "follows": follows, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
+            "moves": moves, "follows": follows, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
 
 
 def text(m: dict) -> str:
     out = [m["title"], "", f"[내 종목 소식 · {m['when']}]"]
     out += [x["text"] for x in m["news"]] or ["새로 나온 내 종목 공시는 없어요."]
-    out += m["follows"]
+    out += m.get("moves", []) + m["follows"]
     out += ["", "[이번 주]"] + [f"{x['date'][5:]}  {x['tag']:<4} {x['label']}" + (f"  ({x['note']})" if x.get("note") else "") for x in m["week"]] + ([m["ipo"]] if m["ipo"] else [])
     head, body, more = m["tip"]
     out += ["", f"[알아 두면 좋아요 · {head}]", body] + ([f"→ {more[0]}"] if more else [])
@@ -232,7 +241,7 @@ def html(m: dict) -> str:
         arts = '<p class="text-[14px] leading-[23px] text-on-surface-variant">새로 나온 내 종목 공시는 없어요.</p>'
     if m["more"]:
         arts += f'<p class="text-[13px] text-on-surface-variant">그 밖에 {m["more"]}곳 소식은 각 노트에서 볼 수 있어요.</p>'
-    arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m["follows"])
+    arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m.get("moves", []) + m["follows"])
     count = f"{len(m['news']) + m['more']}곳" if m["news"] else ""
     news = f'<section class="flex flex-col">{h3("내 종목 소식 · " + e(m["when"]), count)}<div class="flex flex-col gap-4">{arts}</div></section>'
 

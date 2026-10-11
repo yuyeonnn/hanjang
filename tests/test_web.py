@@ -1543,6 +1543,10 @@ def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
     con.execute("delete from disclosures")
     con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
     assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
+    con.execute("delete from events")
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-13', 'r2')")
+    assert daily.brief(con, today) == 1  # 큰손 움직임만 있어도 — 아침 한 장과 메일에 같은 문장
+    assert sent[-1][1] == "[한장] 내 종목 큰손 움직임 — 국민연금이 삼성전자 지분을 늘렸어요(지분 7.76%)" and "국민연금이 삼성전자 지분을 늘렸어요" in sent[-1][3]
 
 
 def test_smoke_draws_real_pages_without_writing_to_the_db(tmp_path, monkeypatch):
