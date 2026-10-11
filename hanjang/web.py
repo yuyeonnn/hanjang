@@ -1885,10 +1885,9 @@ class App:
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
             event, status = "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
             if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 핵심 한 줄 아래에. 누르면 노트의 그 대목으로 (임원·큰손은 #who, 그 밖은 #recent)
-                _, icon, tint, _, _, what, sub, when, _, _ = evs[0]
+                _, icon, tint, _, _, what, _, when, _, _ = evs[0]
                 event = (f'<a href="/n/{e(t)}#{"who" if icon in WHO_ICONS else "recent"}" class="mt-2 block"><p class="text-[15px] leading-[22px] font-semibold text-on-surface">'
-                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p>'
-                         f'<p class="mt-0.5 text-[14px] leading-[22px] text-on-surface-variant">{e(sub)}</p></a>')  # fmt: skip
+                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p></a>')  # 회색 설명 줄은 카드에서 뺐다 — 노트에 있다 (사용자 10/11)  # fmt: skip
                 status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
@@ -2763,10 +2762,12 @@ class App:
         return self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()[0] or img
 
     def latest(self, uid: int, photos: "Photos") -> str:
-        """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
+        """최근 소식 — 사건마다 쓴 기사. 최신 날짜 먼저(내 종목이라고 옛 기사가 맨 위에 붙박이지 않게 — 사용자 10/11), 같은 날 안에선 내 종목 먼저.
+        같은 날·같은 무게의 기사끼리는 12시간마다 차례를 섞는다 — 새 기사는 하루 한 번(07:00) 들어와서, 그 사이에도 화면이 달라 보이게."""
+        slot = int(self.clock() // (12 * 3600))
         rows = self.con.execute(
             "select a.id, a.kind, a.date, a.body, s.name, s.induty_code, a.ticker in (select ticker from holdings where user_id = ?) mine"
-            " from articles a join stocks s using(ticker) order by mine desc, a.date desc, a.id desc limit 30", (uid,)).fetchall()  # fmt: skip
+            " from articles a join stocks s using(ticker) order by a.date desc, mine desc, (a.id * 7919 + ?) % 97, a.id desc limit 30", (uid, slot)).fetchall()  # fmt: skip
         if not rows:
             return ""
         items = "".join(
