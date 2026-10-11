@@ -67,13 +67,66 @@ def apart(code: str) -> None:
     subprocess.run([sys.executable, "-X", "utf8", "-c", "import sys; sys.stdout.reconfigure(encoding='utf-8'); " + code], check=True)
 
 
+def brief(con: sqlite3.Connection, today: date) -> int:
+    """아침 소식 메일 — 「아침 한 장」과 같은 내용을, 내 종목에 새 소식(공시·큰손 움직임)이 있거나 오늘·내일 내 종목 일정이 있는 사람에게만 한 통.
+    안내 메일을 끈 사람·막힌 계정·종목을 안 담은 사람은 빼고. 한 사람이 실패해도 나머지는 보낸다."""
+    soon, n = (today + timedelta(days=1)).isoformat(), 0
+    for uid, email in con.execute("select id, email from users where mail_on = 1 and coalesce(banned, 0) = 0").fetchall():
+        tickers = [t for (t,) in con.execute("select ticker from holdings where user_id = ? order by added_at", (uid,))]
+        if not tickers:
+            continue
+        m = morning.build(con, tickers, today, uid)
+        if not (m["news"] or m.get("moves") or any(x.get("url") and x["date"] <= soon for x in m["week"])):
+            continue  # 새로 알릴 것이 없으면 보내지 않는다 — 알림은 적게, 정확하게
+        try:
+            mail.send(email, *mail.morning_mail(m, morning.text(m)))
+            n += 1
+        except Exception as err:  # noqa: BLE001
+            print(f"아침 소식 메일 실패 (사용자 {uid}) — {type(err).__name__}", file=sys.stderr)
+    return n
+
+
+def watch(today: date, con: sqlite3.Connection | None = None, dart: "sources.Dart | None" = None) -> int:
+    """그날 바로 알림 — 누가 담은 국내 종목의 오늘 공시만 받아, 걸리는 공시(횡령·배임·거래정지·소송·증자·전환사채·새 보도 해명)가 있으면
+    담은 사람에게 한 통. 공시마다 한 번(alerted). 제목 규칙으로만 가린다 — AI 를 부르지 않아 13시·19시에 가볍게 돈다."""
+    con, dart = con or db.connect(), dart or sources.Dart()
+    held = {t for (t,) in con.execute("select distinct h.ticker from holdings h join stocks s using(ticker) where s.market = 'KR'")}
+    if not held:
+        return 0
+    collect.save_disclosures(con, dart.disclosures(today, today, held))
+    for rno, title in con.execute("select rcept_no, title from disclosures where read_at is null and date = ?", (today.isoformat(),)).fetchall():
+        if got := notes.by_rule(title):
+            notes._save_code(con, rno, title, *got, "rule")
+    con.commit()
+    morning.rumors(con, dart)
+    n = 0
+    for rno, t, name, title, code, ai in con.execute(
+            "select d.rcept_no, d.ticker, s.name, d.title, d.code, d.plain from disclosures d join stocks s using(ticker)"
+            f" where d.date = ? and d.importance >= 2 and {morning.WARN} and d.rcept_no not in (select rcept_no from alerted)", (today.isoformat(),)).fetchall():  # fmt: skip
+        con.execute("insert into alerted values (?)", (rno,))
+        con.commit()  # 먼저 적는다 — 보내다 멈춰도 같은 공시를 두 번 보내지 않게
+        line = f"{name}{morning.eun(name)} {morning.happened(title, ai)}"
+        for (email,) in con.execute("select u.email from users u join holdings h on h.user_id = u.id"
+                                    " where h.ticker = ? and u.mail_on = 1 and coalesce(u.banned, 0) = 0", (t,)).fetchall():  # fmt: skip
+            try:
+                mail.send(email, *mail.alert_mail(name, morning.KIND.get(code, "공시"), line, src(con, rno)))
+                n += 1
+            except Exception as err:  # noqa: BLE001
+                print(f"바로 알림 메일 실패 ({rno}) — {type(err).__name__}", file=sys.stderr)
+    return n
+
+
 def main(today: date) -> None:
     """하루 세 번 불린다(07·13·19시). 아침에 끝까지 돌았으면 오후엔 바로 끝난다. DART 가 쉬는 날(점검)엔 DART 가 필요한 일만 건너뛰고
     나머지는 어제까지의 자료로 끝까지 돈다 — 오후에 DART 가 돌아오면 그때 마저 한다(월요일 안내 메일도 그때).
     단계 하나가 실패해도 다음 단계는 돈다. 실패한 단계는 운영자에게 알리고, 끝에 실패로 끝낸다(journalctl·systemctl 에 보이게)."""
     before = today_state(today)
     if before.get("complete"):
-        print("오늘은 이미 끝까지 돌았어요 — 건너뜀")
+        print("오늘은 이미 끝까지 돌았어요 — 낮에 나온 걸리는 공시만 살펴봐요")
+        try:
+            print(f"바로 알림 {watch(today)}통")
+        except Exception as err:  # noqa: BLE001
+            alert(err, "바로 알림 실패")
         return
     dart_up = sources.Dart().up()
     if before and not before.get("failed") and not dart_up:
@@ -107,6 +160,8 @@ def main(today: date) -> None:
     got = step("국내 받기", apart, f"from datetime import date; from hanjang import collect; collect.main({day}, {dart_up})")
     step("미국 받기", apart, f"from datetime import date; from hanjang import us; us.main({day})")  # 미국 주식 받기 (SEC) — 노트·화면은 아직 (docs/stage3-us.md)
     step("미국 읽기", us.read, today)  # 미국 10-K 사업 설명 · 실적 전망 (AI) — 새 보고서만
+    if dart_up:
+        step("보도 해명", lambda: print(f"보도 해명 {morning.rumors(db.connect())}건"))  # 노트보다 먼저 — 되풀이 공시가 새 소식으로 실리지 않게
     wrote = step("노트", notes.main, [], today, only_changed=not monday, read=dart_up, carry=monday, batch=True)  # 월요일 — 사실이 그대로인 노트는 옮겨 적는다
     if dart_up:
         step("ETF", etf.main, today)  # 담은 ETF 한 장 — 투자설명서 표지로, AI 없이
@@ -122,9 +177,15 @@ def main(today: date) -> None:
     mailed = bool(before.get("mailed"))
     if monday and got and wrote:  # 빈 노트로 안내 메일을 보내지 않게 — 받기와 노트가 다 된 날만
         mailed = step("안내 메일", lambda: print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명"))
+    # 아침 소식 메일 — 하루 한 번, 화~토(월요일은 소식지가 나가고, 일요일은 토요일에 이미 금요일 소식을 보냈다)
+    briefed = bool(before.get("briefed"))
+    if not briefed and got and 1 <= today.weekday() <= 5:
+        briefed = step("아침 소식 메일", lambda: print(f"아침 소식 메일 {brief(db.connect(), today)}명"))
+    if dart_up:
+        step("바로 알림", lambda: print(f"바로 알림 {watch(today)}통"))
     if llm.spent.get("no_credit") and (to := sources.env().get("SMTP_USER")):  # 멈추진 않았지만 운영자는 알아야 한다
         mail.send(to, "[한장] OpenAI 크레딧 소진 — 오늘 노트는 코드 문장으로", "platform.openai.com 결제(Billing)에서 크레딧을 채우면 다음 실행부터 AI 글로 돌아와요.")
-    STATE.write_text(json.dumps({"date": today.isoformat(), "dart": dart_up, "failed": failed, "mailed": mailed,
+    STATE.write_text(json.dumps({"date": today.isoformat(), "dart": dart_up, "failed": failed, "mailed": mailed, "briefed": briefed,
                                  "complete": dart_up and not failed}, ensure_ascii=False), encoding="utf-8")  # fmt: skip
     if failed:
         raise SystemExit(f"실패한 단계: {', '.join(failed)}")

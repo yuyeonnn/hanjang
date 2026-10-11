@@ -13,7 +13,7 @@ import sys
 from datetime import date, timedelta
 from html import escape as e
 
-from . import learn, notes, sources
+from . import holders, learn, notes, sources
 
 WEEK = "월화수목금토일"
 
@@ -61,6 +61,7 @@ TIPS = {
                "신청한 금액의 절반쯤을 증거금으로 먼저 맡기고, 경쟁률에 따라 주식을 나눠 받아요. 받지 못한 증거금은 며칠 뒤 돌려받아요. "
                "투자설명서에 공모가를 정한 근거와 모은 돈의 쓰임이 적혀 있어요.", "start"),
 }
+WARN = "(coalesce(direction, 0) = -1 or code = 'RUMOR')"  # 걸리는 공시 — 맨 위에, 빨간 꼬리표로, 그날 바로 (사용자 10/12)
 TIP_ORDER = ("TRADING_HALT", "RIGHTS_ISSUE", "CB_BW", "CLINICAL", "EARNINGS", "BUYBACK", "DIVIDEND", "MAJOR_CONTRACT", "MA")
 
 
@@ -123,6 +124,72 @@ def prepare(con: sqlite3.Connection, today: date) -> int:
     return n
 
 
+Q = "'\"‘’“”「」"
+
+
+def rumor(body: str, title: str, day: str) -> tuple[str, bool]:
+    """보도 해명·조회공시 원문 → (한 문장, 되풀이 공시인가). 거래소 서식의 칸(보도 내용·매체·발생일자)을 그대로 꺼낸다 — AI 없음.
+    회사는 답이 정해질 때까지 석 달마다 같은 공시를 다시 낸다(재공시). 그건 새 소식이 아니라 중요도를 낮춘다."""
+    x = re.sub(r"\s+", " ", body[body.rfind("}") + 1:])
+    t = re.sub(r"\s", "", title)
+    head, press, at = "", "", None
+    if m := re.search(r"1\. ?풍문 또는 보도의 내용 (.+?) 2\. ?풍문 또는 보도의 매체 (.+?) 3\. ?풍문 또는 보도의 발생일자 (\d{4})-(\d\d)-(\d\d)", x):
+        head, press, at = m[1], m[2], date(int(m[3]), int(m[4]), int(m[5]))
+    elif m := re.search(r"1\. ?제목 (.+?) 2\. ?내용", x) or re.search(r"1\. ?조회공시요구내용 (.+?) 2\. ?공시시한", x):
+        head = m[1]
+        if d := re.search(r"\((\d{4})\.(\d\d)\.(\d\d)\)", head):
+            at = date(int(d[1]), int(d[2]), int(d[3]))
+    old = bool(re.search(r"재공시 ?사항|\(재공시\)", x)) or bool(at and (date.fromisoformat(day) - at).days > 7)
+    head = re.sub(r" ?(보도|기사)(에| 관련|와 관련).*$", "", head)  # 「… 보도에 대한 조회공시 답변」「… 보도 관련」
+    head = re.sub(r"^.{1,20}?\(주\)[,.] ?", "", head)  # 「HD현대중공업(주), …」
+    head = re.sub(r" ?(관련 ?)?사실 ?여부.*$", "", re.sub(r"^\[[^\]]*\] ?", "", head))
+    head = re.sub(r"( ?(에 대한|관련|언론|보도|기사))+$", "", head).strip()  # 「… 관련 보도」「… 언론」 — 뒤에 「보도」를 우리가 붙인다
+    if head[:1] in Q and head[-1:] in Q:  # 통째로 싼 따옴표만 벗긴다 — 제목 속 따옴표는 그대로
+        head = head[1:-1].strip()
+    for a, b in ("「」", "''", '""'):  # 짝이 안 맞는 따옴표·낫표는 지운다
+        if (head.count(a) + (head.count(b) if a != b else 0)) % 2:
+            head = head.replace(a, "").replace(b, "")
+    if not head or len(head) > 80:
+        return "언론 보도에 대해 회사가 해명 공시를 냈어요.", old
+    what = f"「{head}」 보도" + (f"({press})" if press and len(press) <= 20 else "")
+    if "답변" not in t and "해명" not in t:  # 거래소가 물은 것 — 회사 답은 아직
+        return f"{what}가 사실인지 거래소의 물음을 받았어요 — 회사가 곧 답해야 해요.", old
+    if "미확정" in t:
+        return f"{what}에 대해 아직 정해진 것은 없다고 답했어요.", old
+    if re.search(r"사실이 아니|사실무근|사실과 다", x):
+        return f"{what}에 대해 사실이 아니라고 밝혔어요.", old
+    return f"{what}에 대해 회사의 입장을 밝혔어요 — 내용은 원문에 있어요.", old
+
+
+def rumors(con: sqlite3.Connection, dart=None) -> int:
+    """보도 해명·조회공시(제목 규칙 RUMOR)마다 원문을 한 번 열어 문장(disclosures.plain)과 중요도(새 것 2 · 되풀이 1)를 정한다.
+    노트·아침 한 장보다 먼저 돈다 — 되풀이 공시가 새 소식처럼 실리지 않게."""
+    rows = [r for r in con.execute("select rcept_no, title, date from disclosures where plain is null and title like '%풍문%'").fetchall()
+            if (notes.by_rule(r[1]) or ("",))[0] == "RUMOR"]  # fmt: skip
+    dart = dart or (sources.Dart() if rows else None)
+    for rno, title, day in rows:
+        s, old = rumor(dart.doc_text(rno), title, day)
+        notes._save_code(con, rno, title, "RUMOR", 1 if old else 2, "rule")
+        con.execute("update disclosures set plain = ? where rcept_no = ?", (s, rno))
+        con.commit()
+    return len(rows)
+
+
+def market(con: sqlite3.Connection, today: date) -> str:
+    """환율·금리 한 줄 — 한국은행(ECOS)이 낸 값 그대로, 앞 거래일과의 차이만 코드가 뺀다. 일주일 넘게 묵은 값은 적지 않는다."""
+    out = []
+    for sid, label, unit, step in (("ECOS:731Y003:0000003", "원/달러 환율", "원", "원"), ("ECOS:817Y002:010200000", "국고채 3년 금리", "%", "%p")):
+        rows = con.execute("select date, value from macro where series_id = ? order by date desc limit 2", (sid,)).fetchall()
+        if len(rows) < 2 or (today - date.fromisoformat(rows[0][0])).days > 7:
+            continue
+        (d, v), (_, b) = rows
+        num = (lambda n: f"{n:,.1f}") if unit == "원" else (lambda n: f"{n:.2f}")
+        diff = round(v - b, 2)
+        move = "앞 거래일과 같아요" if not diff else f"앞 거래일보다 {num(abs(diff))}{step} {'올랐어요' if diff > 0 else '내렸어요'}"
+        out.append(f"{label}{notes.josa(label, '은')} {num(v)}{unit}{'으로' if unit == '원' else '로'} {move}({int(d[5:7])}월 {int(d[8:])}일).")
+    return " ".join(out)
+
+
 def rate_now(con: sqlite3.Connection) -> str:
     """한국 기준금리 지금 값과 가장 최근에 바뀐 때 — 「지금 3.00% · 8월에 2.75%에서 올렸어요」. 시장의 예상은 쓸 데이터가 없어 적지 않는다."""
     rows = con.execute("select date, value from macro where series_id = 'ECOS:722Y001:0101000' order by date desc limit 24").fetchall()
@@ -148,17 +215,39 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
     when = f"어제({lo.month}월 {lo.day}일)" if lo == today - timedelta(days=1) else f"지난 {WEEK[lo.weekday()]}요일({lo.month}월 {lo.day}일)부터"
 
     # 1) 내 종목 소식 — 회사마다 한 문단. 한 회사 안에서는 「이와 함께」로 이어지게. 회사 이름에 원문 링크
-    rows = con.execute(f"select ticker, title, rcept_no, code, plain from disclosures where ticker in ({q}) and date >= ? and date < ? and importance >= 2"
-                       " order by importance desc, date desc limit 8", (*tickers, lo.isoformat(), today.isoformat())).fetchall()  # fmt: skip
+    # 걸리는 공시(WARN)는 오늘 나온 것도 바로, 맨 위에 — 나머지는 어제까지 것만(아침에 한 번 읽는 글이라 낮에 바뀌지 않게)
+    rows = con.execute(f"select ticker, title, rcept_no, code, plain, {WARN} from disclosures where ticker in ({q}) and date >= ? and (date < ? or {WARN})"
+                       f" and importance >= 2 order by {WARN} desc, importance desc, date desc limit 8", (*tickers, lo.isoformat(), today.isoformat())).fetchall()  # fmt: skip
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r[0], []).append(r)
     news, codes = [], []
     for t, items in list(by.items())[:4]:
         nm = name.get(t, t)
-        body = " ".join(("" if i == 0 else "이와 함께 ") + happened(title, ai) for i, (_, title, _, _, ai) in enumerate(items[:2]))
-        news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}", "body": body, "tag": KIND.get(items[0][3], "공시")})
-        codes += [("EARNINGS_US" if c == "EARNINGS" and not t.isdigit() else c, t) for _, _, _, c, _ in items]
+        body = " ".join(("" if i == 0 else "이와 함께 ") + happened(title, ai) for i, (_, title, _, _, ai, _) in enumerate(items[:2]))
+        news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}", "body": body, "tag": KIND.get(items[0][3], "공시"), "warn": bool(items[0][5])})
+        codes += [("EARNINGS_US" if c == "EARNINGS" and not t.isdigit() else c, t) for _, _, _, c, _, _ in items]
+    # 같은 업종 소식 — 내가 안 담은, 같은 업종 회사의 중요 공시. 내 종목이 조용한 날에도 읽을 것이 있게 (사용자 10/12)
+    # ponytail: 한국 업종(통계청 분류)만. 미국 종목의 같은 업종은 SEC 산업분류로 묶어야 한다 — 미국 종목 담은 사람이 늘면
+    mine = {sources.industry_label(c) for (c,) in con.execute(f"select induty_code from stocks where ticker in ({q})", tickers)} - {None}
+    peers, seen = [], set()
+    for t, nm, ind, title, ai, rno, code in con.execute(
+            "select d.ticker, s.name, s.induty_code, d.title, d.plain, d.rcept_no, d.code from disclosures d join stocks s using(ticker)"
+            f" where d.date >= ? and d.date < ? and d.importance >= 2 and d.code not in ('OTHER', 'RUMOR') and d.ticker not in ({q}) and s.induty_code is not null"
+            " order by d.importance desc, d.date desc", (lo.isoformat(), today.isoformat(), *tickers)) if mine else ():  # fmt: skip
+        label = sources.industry_label(ind)
+        if label in mine and t not in seen and len(peers) < 3:
+            seen.add(t)
+            peers.append({"name": nm, "label": label, "body": happened(title, ai), "url": src(con, rno), "tag": KIND.get(code, "공시")})
+    # 큰손 움직임 — 5% 넘게 가진 기관의 지분 변화 · 임원 주식 거래. 소식과 같은 기간(피드의 「오늘의 내 종목」을 여기로 합쳤다, 사용자 10/11)
+    moves = [f"{holders.BIG[i][0]}{notes.josa(holders.BIG[i][0], '이')} {name.get(t, t)} 지분을 {'늘렸어요' if chg > 0 else '줄였어요'}(지분 {rate:.2f}%)."
+             for i, t, rate, chg in con.execute(
+                 f"select inst, stock_code, rate, rate_chg from big_holdings where stock_code in ({q}) and date >= ? and rate_chg is not null and rate_chg != 0"
+                 " order by date desc limit 3", (*tickers, lo.isoformat())).fetchall() if i in holders.BIG]  # fmt: skip
+    moves += [f"{name.get(t, t)} 임원의 주식 거래 보고가 {k}건 나왔어요({'사들인 쪽이 많아요' if (net or 0) > 0 else '판 쪽이 많아요' if (net or 0) < 0 else '사고판 양이 비슷해요'})."
+              for t, k, net in con.execute(
+                  f"select ticker, count(*), sum(change) from insiders where ticker in ({q}) and kind = '임원' and date >= ? group by ticker limit 3",
+                  (*tickers, lo.isoformat())).fetchall()]  # fmt: skip
     follows = []
     if uid:
         follows = [f"팔로우한 {n}님은 글 {k}개를 리그램했어요." for n, k in con.execute(
@@ -194,13 +283,15 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         a = learn.ARTICLES[today.toordinal() % len(learn.ARTICLES)]
         tip = (a["title"], a["lead"].replace("**", ""), ("이어서 읽기", f"/learn/{a['slug']}"))
     return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4),
-            "follows": follows, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
+            "moves": moves, "follows": follows, "market": market(con, today), "peers": peers, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
 
 
 def text(m: dict) -> str:
     out = [m["title"], "", f"[내 종목 소식 · {m['when']}]"]
     out += [x["text"] for x in m["news"]] or ["새로 나온 내 종목 공시는 없어요."]
-    out += m["follows"]
+    out += m.get("moves", []) + m["follows"]
+    if m.get("market") or m.get("peers"):
+        out += ["", "[시장 · 같은 업종]"] + ([m["market"]] if m.get("market") else []) + [f"#{x['label']} {x['name']}{eun(x['name'])} {x['body']}" for x in m.get("peers", [])]
     out += ["", "[이번 주]"] + [f"{x['date'][5:]}  {x['tag']:<4} {x['label']}" + (f"  ({x['note']})" if x.get("note") else "") for x in m["week"]] + ([m["ipo"]] if m["ipo"] else [])
     head, body, more = m["tip"]
     out += ["", f"[알아 두면 좋아요 · {head}]", body] + ([f"→ {more[0]}"] if more else [])
@@ -209,7 +300,7 @@ def text(m: dict) -> str:
 
 KIND = {"RIGHTS_ISSUE": "유상증자", "CB_BW": "전환사채", "BONUS_ISSUE": "무상증자", "EARNINGS": "실적", "MAJOR_CONTRACT": "큰 계약", "BUYBACK": "자사주",
         "DIVIDEND": "배당", "MA": "지분·합병", "CLINICAL": "신약", "TRADING_HALT": "거래 정지", "EXEC": "경영진", "DEBT": "빚", "LAWSUIT": "소송",
-        "WRITE_DOWN": "손상", "HOLDER_CHANGE": "최대주주"}  # fmt: skip
+        "WRITE_DOWN": "손상", "HOLDER_CHANGE": "최대주주", "RUMOR": "보도 해명", "FRAUD": "횡령·배임"}  # fmt: skip
 
 
 def html(m: dict) -> str:
@@ -224,7 +315,10 @@ def html(m: dict) -> str:
     dot = "border-b border-dotted border-primary/20"
     arts = "".join(
         f'<article class="flex flex-col gap-1.5 pb-3 {dot} last:border-b-0"><div class="flex items-center gap-2">'
-        f'<span class="text-[16px] font-bold text-on-surface">{e(x["name"])}</span><span class="text-[11px] font-bold text-primary">{e(x["tag"])}</span></div>'
+        f'<span class="text-[16px] font-bold text-on-surface">{e(x["name"])}</span>'
+        + (f'<span class="inline-flex items-center gap-0.5 text-[11px] font-bold text-error"><span class="material-symbols-outlined text-[14px]">error</span>꼭 확인 · {e(x["tag"])}</span></div>'
+           if x.get("warn") else f'<span class="text-[11px] font-bold text-primary">{e(x["tag"])}</span></div>') +
+        ''
         f'<p class="text-[14px] leading-[23px] text-on-surface">{e(x["body"])}</p>'
         f'<a class="pt-1 text-[11px] font-bold text-primary hover:underline inline-flex items-center gap-0.5" href="{e(x["url"])}">공시 원문 보기'
         '<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a></article>' for x in m["news"])  # fmt: skip
@@ -232,9 +326,16 @@ def html(m: dict) -> str:
         arts = '<p class="text-[14px] leading-[23px] text-on-surface-variant">새로 나온 내 종목 공시는 없어요.</p>'
     if m["more"]:
         arts += f'<p class="text-[13px] text-on-surface-variant">그 밖에 {m["more"]}곳 소식은 각 노트에서 볼 수 있어요.</p>'
-    arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m["follows"])
+    arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m.get("moves", []) + m["follows"])
     count = f"{len(m['news']) + m['more']}곳" if m["news"] else ""
     news = f'<section class="flex flex-col">{h3("내 종목 소식 · " + e(m["when"]), count)}<div class="flex flex-col gap-4">{arts}</div></section>'
+
+    around = ""
+    if m.get("market") or m.get("peers"):
+        ps = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface"><span class="text-[12px] text-outline">#{e(x["label"])}</span> '
+                     f'<a class="font-bold hover:underline" href="{e(x["url"])}">{e(x["name"])}</a>{e(eun(x["name"]))} {e(x["body"])}</p>' for x in m.get("peers", []))  # fmt: skip
+        mk = f'<p class="text-[14px] leading-[23px] text-on-surface">{e(m["market"])}</p>' if m.get("market") else ""
+        around = rule + f'<section class="flex flex-col">{h3("시장 · 같은 업종")}<div class="flex flex-col gap-2.5">{mk}{ps}</div></section>'
 
     rows = []
     for x in m["week"]:
@@ -278,7 +379,7 @@ def html(m: dict) -> str:
              f'<h2 class="font-headline-lg text-[22px] font-bold tracking-tight mt-0.5">{e(m["title"])}</h2></div>'
              '<form method="dialog"><button aria-label="닫기" class="text-on-primary/80 hover:text-on-primary p-1 rounded-full hover:bg-on-primary/10 transition-colors">'
              '<span class="material-symbols-outlined text-[20px]">close</span></button></form></header>'
-             f'<div class="overflow-y-auto px-6 pt-5 pb-7 flex flex-col gap-4">{news}{week}{tip}</div></div></dialog>')  # fmt: skip
+             f'<div class="overflow-y-auto px-6 pt-5 pb-7 flex flex-col gap-4">{news}{around}{week}{tip}</div></div></dialog>')  # fmt: skip
     return card + sheet
 
 

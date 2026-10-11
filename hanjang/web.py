@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources, tree
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, quiz, sources, tree
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -205,6 +205,13 @@ PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme
             '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png"><link rel="icon" href="/static/icon-192.png" type="image/png">'
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
 
+
+# 내 종목이 하나도 없을 때 — 처음 온 사람이 빈 화면만 보던 것 (눌러 보기 10/11)
+EMPTY_CARDS = ('<div class="py-10 flex flex-col items-center text-center gap-2 lg:col-span-2">'
+               '<span class="material-symbols-outlined text-primary text-[30px]">search</span>'
+               '<b class="font-body-reading-strong text-body-reading-strong text-on-surface">가진 종목을 담아 보세요</b>'
+               '<p class="font-body-compact text-body-compact text-on-surface-variant">위 칸에 회사 이름을 넣으면 그 회사의 노트가 여기에 쌓여요.<br>'
+               '여러 종목은 쉼표로 한 번에 — 예: 삼성전자, SK하이닉스<br>카메라 단추로 증권사 앱의 보유 종목 화면을 올려도 돼요.</p></div>')
 
 # 「홈 화면에 추가」 안내 — 내 종목 화면, 휴대폰에서만. 아이폰은 앱 없이 이것만 둔다(docs/launch.md: 웹을 감싼 앱은 심사에서 잘 떨어진다).
 # 아이폰·아이패드 사파리: 설치 단추를 띄울 길이 없어 「공유 → 홈 화면에 추가」를 글로 알린다. 안드로이드 크롬: 브라우저가 설치할 수 있다고 알려 오면(beforeinstallprompt) 단추를 보인다.
@@ -792,13 +799,15 @@ EVENT_EXPLAIN = {
     "HOLDER_CHANGE": "큰 주주의 지분이 바뀌었어요.",
     "CLINICAL": "신약 임상 시험 소식이에요.",
     "TRADING_HALT": "거래가 멈추거나 관리 대상이 됐어요.",
+    "RUMOR": "언론 보도나 소문에 대해 회사가 답했어요.",
+    "FRAUD": "임직원의 횡령·배임 혐의와 관련된 공시예요.",
     "SPLIT": "주식 한 주를 여러 주로 쪼개기로 했어요.",
     "REVERSE_SPLIT": "여러 주를 한 주로 합치거나 자본을 줄이기로 했어요.",
 }
 EVENT_SHORT = {"BUYBACK": "자사주", "DIVIDEND": "배당", "EARNINGS": "실적", "MAJOR_CONTRACT": "계약",
                "RIGHTS_ISSUE": "증자", "BONUS_ISSUE": "무상증자", "CB_BW": "전환사채", "LAWSUIT": "소송",
                "MA": "합병·인수", "HOLDER_CHANGE": "대주주", "CLINICAL": "임상", "TRADING_HALT": "거래정지·관리",
-               "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
+               "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
 TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종류에 맞춰
     "BUYBACK": ("자사주 취득 공시는 소각 여부까지 함께 확인해요", "사둔 주식을 없애야(소각) 시중에 도는 주식 수가 실제로 줄어요."),
     "DIVIDEND": ("배당 공시는 기준일을 함께 확인해요", "기준일에 주식을 갖고 있어야 배당을 받아요."),
@@ -1006,8 +1015,11 @@ def figure(f: dict | None) -> str:
     return ""
 
 
-def chapter(title: str, body: str, extra: str = "") -> str:
-    return ('<article class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+WHO_ICONS = ("badge", "account_balance")  # 임원 거래·기관 지분 — 노트의 「임원·큰손은 어떻게 움직였나요?」(#who)로 간다. 그 밖은 「요즘 생긴 일」(#recent)
+
+
+def chapter(title: str, body: str, extra: str = "", anchor: str = "") -> str:
+    return (f'<article {f"""id="{anchor}" """ if anchor else ""}class="scroll-mt-20 mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
             f'<div class="font-body-reading text-body-reading text-on-surface leading-loose">{body}</div>{extra}</article>')  # fmt: skip
 
@@ -1185,6 +1197,17 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
+    recent = ""
+    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 「좋게 볼 점과 주의해서 볼 점」 아래에 놓는다 (사용자 10/11)
+        rows = "".join(
+            f'<a href="{"#who" if icon in WHO_ICONS else e(href)}" class="py-3 flex items-start gap-2.5"><span class="material-symbols-outlined text-[18px] mt-0.5 {tint}">{icon}</span>'
+            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(what)}</span>'
+            f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(sub)}</span></span>'
+            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
+            for _, icon, tint, _, _, what, sub, when, href, _ in report["events"][:5])  # fmt: skip
+        recent = ('<section id="recent" class="scroll-mt-20 mb-12"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+                  '<h3 class="font-headline-md text-headline-md text-on-surface">요즘 생긴 일</h3></div>'
+                  f'<div class="mt-1 flex flex-col divide-y divide-surface-container-high/70">{rows}</div></section>')  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
         parts.append('<section class="mb-12 pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
@@ -1212,7 +1235,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
-        parts.append(chapter(sec["title"], text, extra))
+        parts.append(chapter(sec["title"], text, extra, "who" if sec["title"].startswith("임원·큰손") else ""))
         if sec["title"].startswith(NEWS_TITLES):
             parts.append(dividend_block(report.get("divs", []), report.get("fin"), report.get("buys")))
     if not any(s["title"].startswith(NEWS_TITLES) for s in body["sections"]):
@@ -1234,6 +1257,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
                      + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요. 기준은 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
+    parts.append(recent)
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
@@ -1401,8 +1425,8 @@ class App:
             self.con.rollback()
 
     def initial(self, uid: int) -> str:
-        """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 이메일 첫 글자."""
-        row = self.con.execute("select email, photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
+        """위쪽 동그라미에 넣을 것 — 사진 주소, 없으면 닉네임 첫 글자(정하기 전이면 이메일 첫 글자)."""
+        row = self.con.execute("select coalesce(nickname, email), photo_at, coalesce(notices_seen, '') from users where id = ?", (uid,)).fetchone()
         me = Me((photo_url(uid, row[1]) or row[0][:1]) if row else "?")
         if row:
             regs, arts = self.fresh(uid, row[2])
@@ -1570,7 +1594,7 @@ class App:
         if path == "/me/delete" and method == "POST":
             # 탈퇴 — 이 사용자의 모든 행을 지운다 (되돌릴 수 없음, 화면에서 한 번 더 확인)
             for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("likes", "user_id"),
-                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
+                               ("regrams", "user_id"), ("quiz_done", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
                                ("blocks", "user_id"), ("blocks", "blocked_id"), ("reports", "user_id"), ("reports", "target_id"), ("users", "id")):  # fmt: skip
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
@@ -1584,6 +1608,12 @@ class App:
             return "200 OK", [], self.profile(uid)
         if path == "/me/settings":
             return "200 OK", [], self.settings(uid, query.get("msg"))
+        if path == "/learn/done" and method == "POST":  # 문제를 다 맞혔다 — 도장 한 줄. 글의 세 문제 또는 오늘의 한 문제만
+            slug = form.get("slug", "")
+            if slug in quiz.QUIZ or slug == f"daily:{date.today().isoformat()}":
+                self.con.execute("insert or ignore into quiz_done values (?, ?, ?)", (uid, slug, datetime.now().isoformat()))
+                self.con.commit()
+            return "200 OK", [("Content-Type", "application/json; charset=utf-8")], "{}"
         if path == "/learn" or path.startswith("/learn/"):
             slug = path[7:]
             self.log(uid, "learn", slug or None)
@@ -1603,11 +1633,13 @@ class App:
             '<p class="font-body-compact text-body-compact text-on-secondary-container">위 주소로 로그인 링크와 6자리 코드를 보냈어요. 15분 안에 메일 속 링크를 누르거나, 코드를 아래에 넣어 주세요.</p>'
             # 코드 넣기 — 앱(웹뷰)이나 홈 화면에 추가한 한장에서는 메일의 링크가 다른 브라우저로 열려 로그인이 안 이어진다. 코드는 어디서든 된다 (앱 출시 준비 10/11)
             f'<form method="post" action="/login/code" class="mt-2.5 flex items-center gap-2"><input type="hidden" name="email" value="{e(sent)}">{hidden}'
-            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
+            '<input aria-label="메일로 받은 6자리 코드" autocomplete="one-time-code" autofocus inputmode="numeric" maxlength="6" name="code" pattern="[0-9]{6}" placeholder="6자리 코드" required '
             'class="flex-1 min-w-0 font-body-reading text-body-reading bg-surface-container-lowest text-on-surface placeholder:text-outline rounded-lg px-4 py-2.5 focus:outline-none tracking-widest">'
             '<button class="shrink-0 px-4 py-2.5 bg-primary text-on-primary font-label-regular text-label-regular font-semibold rounded-lg" type="submit">확인</button></form>'
             '<div class="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-outline-variant/30"><p class="font-label-micro text-label-micro text-outline">메일이 오지 않았나요? 스팸함을 보거나 잠시 뒤에 다시 받아 보세요.</p>'
-            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'))  # fmt: skip
+            f'<form method="post" action="/login"><input type="hidden" name="email" value="{e(sent)}"><input type="hidden" name="agree" value="1">{hidden}<button class="self-start font-label-regular text-label-regular text-primary font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity mt-1" id="resend-btn" type="submit">링크 다시 보내기</button></form></div></div></div></div>'
+            # 이 상자는 폼 아래에 있어 휴대폰에선 화면 밖이다 — 뜨자마자 보이게 내린다. 자동 초점(autofocus)만으로는 안 된다: 아이폰은 사용자가 누르지 않은 초점을 무시한다 (눌러 보기 10/11)
+            "<script>document.getElementById('success-box').scrollIntoView({block:'center'});</script>"))  # fmt: skip
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-12">'
                  '<div class="flex flex-col items-center text-center mt-6 mb-8"><div class="relative flex items-center justify-center w-20 h-20 rounded-full bg-surface-container-low shadow-sm mb-5"><svg class="w-9 h-9 text-primary" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" x2="8" y1="13" y2="13"></line><line x1="16" x2="8" y1="17" y2="17"></line><line x1="10" x2="8" y1="9" y2="9"></line></svg><div class="absolute -bottom-1 -right-1 flex items-center justify-center w-6 h-6 rounded-full bg-secondary-container shadow-xs"><span class="material-symbols-outlined text-on-secondary-container text-xs" style="font-variation-settings: \'FILL\' 1;">auto_stories</span></div></div>'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span><span class="font-label-micro text-label-micro text-outline uppercase tracking-widest mt-1">Hanjang · Weekly Financial Letter</span>'
@@ -1701,10 +1733,15 @@ class App:
             self.codes = {k: v for k, v in self.codes.items() if now <= v[1]}
         self.sent |= {email: times + [now], ip: by_ip + [now], "*": by_all + [now]}
         link = f"{mail.base_url()}/auth?t={quote(login_token(email, self.secret, now))}" + (f"&c={cohort}" if COHORT.fullmatch(cohort) else "")
-        code = f"{secrets.randbelow(10**6):06d}"
+        # 앱 심사자(구글·애플)는 메일을 받을 수 없다 — .env 에 정해 둔 주소로는 메일 없이, 정해 둔 코드로 들어온다. 나머지(15분·5번 틀리면 버림·한 시간 5번)는 같다
+        # ponytail: 6자리 고정 코드 — 주소까지 알아도 한 시간 25번(100만 가지)이고 빈 일반 계정일 뿐이다. 심사가 끝나면 .env 에서 지운다
+        fixed = env().get("REVIEW_CODE", "") if email == env().get("REVIEW_EMAIL", "").strip().lower() else ""
+        review = len(fixed) == 6 and fixed.isdigit()
+        code = fixed if review else f"{secrets.randbelow(10**6):06d}"
         self.codes[email] = [code, now + LINK_TTL, 0]  # ponytail: 메모리에 — 서버를 다시 켜면 코드는 사라지고 링크만 남는다(링크는 서명이라 그대로 된다)
-        with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
-            mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
+        if not review:
+            with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
+                mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
         return "200 OK", [], self.login_page(email, cohort=cohort)
 
     def login_code(self, email: str, code: str, cohort: str = ""):
@@ -1733,7 +1770,9 @@ class App:
         return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else "#"
 
     def stocks_v(self) -> str:
-        return "%d-%d" % self.con.execute("select count(*), coalesce(sum(active), 0) from stocks").fetchone()
+        """종목 목록의 내용 지문 — 주소(?v=)에 붙인다. 브라우저가 하루 저장해 두므로, 내용(순서 포함)이 바뀌면 주소도 바뀌어야 새로 받는다
+        (종목 수만 세면 순서를 바꿔도 옛 목록이 남는다 — 눌러 보기 10/11)."""
+        return self.cached("stocks_v", lambda: hashlib.sha256(self.stocks_js().encode()).hexdigest()[:10])
 
     def stocks_js(self) -> str:
         """노트가 있는 종목 먼저(검색하면 위에), 그다음 상장사 전체. 업종은 DART 업종 코드에서 (받아 둔 종목만). 186KB 를 매번 만들지 않게 cached."""
@@ -1741,7 +1780,8 @@ class App:
 
     def _stocks_js(self) -> str:
         rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
-                self.con.execute("select ticker, name, induty_code, market from stocks order by active desc, market, name")]  # fmt: skip
+                self.con.execute("select ticker, name, induty_code, market from stocks s left join (select ticker, count(*) n from holdings group by ticker) h"
+                                 " using (ticker) order by active desc, coalesce(n, 0) desc, market, name")]  # 많이 담긴 종목 먼저 — 시가총액은 쓸 권리가 없어 모른다. 담은 수는 한 번에 센다(종목마다 세면 3,000명에서 4초)  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
 
     def match(self, q: str) -> str | None:
@@ -1843,18 +1883,24 @@ class App:
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
         out = []
+        happened: dict[str, list] = {}
+        for c in self.my_events(uid):
+            happened.setdefault(c[9], []).append(c)
         both = len({r[6] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
         for t, name, week, body, facts, home, mkt in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
             b = json.loads(body) if body else {}
             head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
-            more = " ".join(x["text"] for x in b.get("summary", [])[:4] if x["text"] != head)  # PC 에서만 — 넓은 화면엔 한 줄이 너무 짧다 (사용자 10/8)
-            status = "<span></span>"  # 「노트 읽기 →」를 오른쪽에 두는 빈 자리
+            event, status = "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
+            if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 핵심 한 줄 아래에. 누르면 노트의 그 대목으로 (임원·큰손은 #who, 그 밖은 #recent)
+                _, icon, tint, _, _, what, _, when, _, _ = evs[0]
+                event = (f'<a href="/n/{e(t)}#{"who" if icon in WHO_ICONS else "recent"}" class="mt-2 block"><p class="text-[15px] leading-[22px] font-semibold text-on-surface">'
+                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p></a>')  # 회색 설명 줄은 카드에서 뺐다 — 노트에 있다 (사용자 10/11)  # fmt: skip
+                status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
-                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p>'
-                       + (f'<p class="hidden lg:block mt-1.5 text-[14px] leading-[23px] text-on-surface-variant line-clamp-3">{e(more)}</p>' if more else "") + '</a>'
+                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p></a>{event}'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full flex-1">'
@@ -1883,7 +1929,7 @@ class App:
                     + '</nav><script>document.querySelectorAll(".mchip").forEach(b=>b.onclick=()=>{const m=b.dataset.m;'
                     'document.querySelectorAll(".mchip").forEach(x=>{const on=x===b;x.className=x.className.replace(/bg-primary text-on-primary border-primary|border-outline-variant[/]60 text-on-surface-variant/,on?"bg-primary text-on-primary border-primary":"border-outline-variant/60 text-on-surface-variant")});'
                     'document.querySelectorAll("#stock-list>article").forEach(a=>a.style.display=(m==="all"||a.dataset.market===m)?"":"none")});</script>' if both else "")
-                 + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out)}</section>'
+                 + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out) or EMPTY_CARDS}</section>'
                  '<footer class="mt-auto px-margin pt-16 pb-6 flex flex-col items-center justify-center gap-1.5 opacity-80"><p class="font-label-micro text-label-micro text-outline text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[13px]">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
                  '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 상장사 전체는 /stocks.js 로 따로 (하루 캐시, 100KB 남짓)
@@ -1891,7 +1937,8 @@ class App:
                  "const STOCKS=window.STOCKS||[];"
                  "const inp=document.getElementById('stock-search-input'),fly=document.getElementById('search-flyout'),res=document.getElementById('search-results');"
                  "function esc(s){return s.replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
-                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const Q=q.toUpperCase();const hit=STOCKS.filter(s=>s.n.toUpperCase().includes(Q)||s.t.startsWith(Q)).slice(0,6);"
+                 "function draw(){const q=inp.value.trim();if(!q){fly.classList.add('hidden');return;}const Q=q.toUpperCase();const all=STOCKS.filter(s=>s.n.toUpperCase().includes(Q)||s.t.startsWith(Q)),first=s=>s.n.toUpperCase().startsWith(Q)||s.t.startsWith(Q);"
+                 "const hit=[...all.filter(first),...all.filter(s=>!first(s))].slice(0,6);"
                  "res.innerHTML=hit.map((s,i)=>"
                  "'<form method=\"post\" action=\"/add\" onclick=\"if(event.target!==this.lastChild)this.requestSubmit()\" class=\"group flex items-center justify-between p-2.5 rounded-lg cursor-pointer hover:bg-surface-container transition-colors\"><input type=\"hidden\" name=\"q\" value=\"'+s.t+'\"><div class=\"flex items-center gap-2 min-w-0\"><span class=\"w-7 h-7 rounded-full bg-primary-fixed text-primary flex items-center justify-center font-body-reading-strong text-[12px]\">'+esc(s.n[0])+'</span><div class=\"flex flex-col min-w-0\"><div class=\"flex items-center gap-1.5\"><span class=\"font-headline-sm text-headline-sm text-on-surface\">'+esc(s.n)+'</span><span class=\"font-citation-ref text-citation-ref text-outline\">'+(s.t.startsWith('ETF')?'':s.t)+'</span></div><span class=\"font-label-micro text-label-micro text-on-surface-variant truncate\">'+esc(s.l)+'</span></div></div>'"
                  "+'<button class=\"px-2.5 py-1 bg-primary-container text-on-primary font-label-micro text-label-micro rounded-lg shadow-sm hover:opacity-90 active:scale-95 transition-all\" type=\"submit\">+ 담기</button>'+'</form>').join('');"
@@ -1968,7 +2015,7 @@ class App:
                                          self.initial(uid), self.survey(uid, ticker, week, thanks), made, home, (views, likes, liked),
                                          self.regram_form(uid, "note", ticker, week),
                                          prices=self.con.execute("select date, close from prices where ticker = ? order by date", (ticker,)).fetchall()
-                                         if sources.price_dev() else None, report=self.report(ticker) | {"owners": self.owners(ticker)})  # fmt: skip
+                                         if sources.price_dev() else None, report=self.report(ticker) | {"owners": self.owners(ticker), "events": self.my_events(uid, ticker=ticker)})  # fmt: skip
 
     def report(self, ticker: str) -> dict:
         if self.con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
@@ -2232,7 +2279,7 @@ class App:
 
     def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
         """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
-        nick 을 주면 남의 프로필에 보이는 모양 — 나무와 날 수만(언제 들어왔는지 보이는 잔디·다음 단계는 본인만). 비공개 계정은 부르는 쪽이 거른다."""
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무·날 수·잔디(「다음 단계까지 며칠」만 본인에게). 비공개 계정은 부르는 쪽이 거른다 (사용자 10/11: 잔디도 보이게)."""
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         if nick is None:
@@ -2244,7 +2291,9 @@ class App:
                     f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
                     f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                     f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
-                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p></section>')  # fmt: skip
+                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p>'
+                    f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {tree.grass(counts, today)[1]}일 들어왔어요</p>'
+                    f'{tree.grass(counts, today)[0]}</section>')  # fmt: skip
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
         return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
@@ -2265,8 +2314,9 @@ class App:
         knob = "translate-x-5" if mail_on else "translate-x-0"
         track = "bg-primary" if mail_on else "bg-surface-container-highest"
         switch = (f'<form method="post" action="/me/mail" class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
-                  '<span class="material-symbols-outlined text-primary text-[18px]">mark_email_unread</span>주간 안내 메일</span>'
-                  f'<button aria-label="주간 안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
+                  '<span class="material-symbols-outlined text-primary text-[18px]">mark_email_unread</span><span class="flex flex-col"><span>안내 메일</span>'
+                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 새 소식이 있는 날 아침 한 통 · 꼭 확인할 공시는 그날 바로</span></span></span>'
+                  f'<button aria-label="안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
         lock = (f'<form method="post" action="/me/private" class="py-3.5 flex items-center justify-between gap-3"><span class="flex flex-col">'
@@ -2507,7 +2557,7 @@ class App:
             return f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요."
         return ""
 
-    def welcome_page(self, nick: str = "", error: str = "") -> str:
+    def welcome_page(self, nick: str = "", error: str = "", agreed: bool = False) -> str:
         inner = ('<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pt-16 pb-12">'
                  '<span class="font-display-editorial text-display-editorial text-primary tracking-tight">한장</span>'
                  '<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mt-space-md">닉네임을 정해 주세요</h1>'
@@ -2515,7 +2565,7 @@ class App:
                  '<form method="post" action="/welcome" class="mt-space-lg flex flex-col gap-space-sm">'
                  f'<input autofocus class="w-full font-body-reading text-body-reading bg-surface-container-low rounded-lg px-4 py-3.5 focus:outline-none" maxlength="20" name="nickname" required value="{e(nick)}">'
                  # 이용 규칙 동의 — 닉네임·소개·사진이 남에게 보이기 전에 (앱 마켓이 사용자 콘텐츠가 있는 앱에 요구한다)
-                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1">'
+                 + '<label class="flex items-start gap-2 font-label-regular text-label-regular text-on-surface-variant"><input class="mt-0.5 accent-primary" name="rules" required type="checkbox" value="1"' + (" checked" if agreed else "") + '>'
                  '<span>[필수] <a class="text-primary underline" href="/rules" target="_blank">이용 규칙</a>에 동의해요 — 욕설·사칭·종목 추천·광고는 올리지 않아요</span></label>'
                  + (f'<p class="font-body-compact text-body-compact text-tertiary" role="alert">{e(error)}</p>' if error else "")
                  + '<button class="w-full py-3.5 bg-primary text-on-primary font-body-reading-strong text-body-reading-strong rounded-lg shadow-sm" type="submit">시작하기</button></form>'
@@ -2524,14 +2574,14 @@ class App:
 
     def welcome(self, uid: int, nick: str, agreed: bool = False):
         if err := self.nick_error(uid, nick):
-            return "200 OK", [], self.welcome_page(nick, err)
+            return "200 OK", [], self.welcome_page(nick, err, agreed)
         if not agreed:
             return "200 OK", [], self.welcome_page(nick, "이용 규칙에 동의해야 시작할 수 있어요.")
         try:
             self.con.execute("update users set nickname = ?, rules_at = ? where id = ?", (nick, datetime.now().isoformat(), uid))
             self.con.commit()
         except sqlite3.IntegrityError:  # 거의 같은 때 누가 먼저 가져간 경우
-            return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.")
+            return "200 OK", [], self.welcome_page(nick, f"「{nick}」은(는) 이미 누가 쓰고 있어요. 다른 닉네임으로 해 주세요.", agreed)
         return self.see("/")
 
     def save_profile(self, uid: int, nick: str, bio: str):
@@ -2720,10 +2770,12 @@ class App:
         return self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()[0] or img
 
     def latest(self, uid: int, photos: "Photos") -> str:
-        """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
+        """최근 소식 — 사건마다 쓴 기사. 최신 날짜 먼저(내 종목이라고 옛 기사가 맨 위에 붙박이지 않게 — 사용자 10/11), 같은 날 안에선 내 종목 먼저.
+        같은 날·같은 무게의 기사끼리는 12시간마다 차례를 섞는다 — 새 기사는 하루 한 번(07:00) 들어와서, 그 사이에도 화면이 달라 보이게."""
+        slot = int(self.clock() // (12 * 3600))
         rows = self.con.execute(
             "select a.id, a.kind, a.date, a.body, s.name, s.induty_code, a.ticker in (select ticker from holdings where user_id = ?) mine"
-            " from articles a join stocks s using(ticker) order by mine desc, a.date desc, a.id desc limit 30", (uid,)).fetchall()  # fmt: skip
+            " from articles a join stocks s using(ticker) order by a.date desc, mine desc, (a.id * 7919 + ?) % 97, a.id desc limit 30", (uid, slot)).fetchall()  # fmt: skip
         if not rows:
             return ""
         items = "".join(
@@ -2827,6 +2879,9 @@ class App:
         하루 전보다 담은 사람·조회수가 조금이라도 늘면 ▲, 줄면 ▼, 같으면 – (NEW 는 쓰지 않는다, 사용자 10/10).
         3명 이상일 때만 순위에 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
         now = datetime.now().replace(minute=0, second=0, microsecond=0)
+        return self.cached(f"week:{now.isoformat()}", lambda: self._this_week(now))  # 정각마다 한 번만 센다 — 피드를 열 때마다 세면 열람 30만 줄에서 70ms 가 모두의 기다림 (규모 점검 10/11)
+
+    def _this_week(self, now: datetime) -> str:
         cur, prev = self.tally(now), self.tally(now - timedelta(days=1))
         up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
         down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'
@@ -2849,14 +2904,17 @@ class App:
                 f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
 
-    def for_you(self, uid: int, today: date | None = None) -> str:
-        """오늘의 내 종목 — 담은 종목에 생긴 일을 점수 큰 순으로 한 줄씩(맞춤 피드 1차, 사용자 10/11).
+    def my_events(self, uid: int, today: date | None = None, ticker: str | None = None) -> list[tuple]:
+        """담은 종목에 생긴 일 — 점수 큰 순. 「내 종목」 카드가 종목마다 맨 위 것을 보여 준다(피드의 「오늘의 내 종목」을 옮김, 사용자 10/11).
         재료: ① 최근 7일 큰 공시 ② 앞으로 14일 일정(실적 발표·주총·배당) ③ 큰손 움직임(기관 5% 지분 변화 30일 · 임원 거래 14일).
-        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다. 끝이 있는 피드(「오늘은 여기까지」)."""
+        점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다.
+        [(점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크, 종목코드)]"""
         today = today or date.today()
         iso = today.isoformat()
         back = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
         mine = "join holdings h on h.ticker = s.ticker and h.user_id = ?"
+        if ticker:  # 노트 화면 — 담았든 아니든 그 종목 하나의 일
+            mine, uid = "join (select ? as tk) x on x.tk = s.ticker", ticker
         cards = []  # (점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크)
 
         def ago(d: str) -> str:
@@ -2870,14 +2928,14 @@ class App:
                 " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date desc", (uid, back(7), iso)):  # fmt: skip
             n = (today - date.fromisoformat(d)).days
             cards.append((100 - 10 * n + 5 * (imp or 0), "campaign", "text-primary", name, home, clean_title(title, code),
-                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}"))
+                          EVENT_EXPLAIN.get(code, ""), ago(d), f"/a/{aid}" if aid else f"/n/{t}", t))
         for d, kind, what, t, name, home in self.con.execute(
                 f"select e.date, e.kind, e.title, s.ticker, s.name, s.homepage from events e join stocks s on s.ticker = e.ticker {mine}"
                 " where e.date between ? and ? order by e.date", (uid, iso, (today + timedelta(days=14)).isoformat())):  # fmt: skip
             n = (date.fromisoformat(d) - today).days
             dd = date.fromisoformat(d)
             cards.append((95 - 5 * n, "event_upcoming", "text-secondary", name, home, what,
-                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar"))
+                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar", t))
         for inst, rate, chg, d, t, name, home in self.con.execute(
                 f"select b.inst, b.rate, b.rate_chg, b.date, s.ticker, s.name, s.homepage from big_holdings b join stocks s on s.ticker = b.stock_code {mine}"
                 " where b.rate_chg is not null and b.rate_chg != 0 and b.date >= ? order by b.date desc", (uid, back(30))):  # fmt: skip
@@ -2886,37 +2944,22 @@ class App:
             n = (today - date.fromisoformat(d)).days
             who = holders.BIG[inst][0]
             cards.append((70 - 2 * n, "account_balance", "text-tertiary", name, home, f'{who}{notes.josa(who, "이")} 지분을 {"늘렸어요" if chg > 0 else "줄였어요"}',
-                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}"))
+                          f"지분 {rate:.2f}% ({chg:+.2f}%p) — 5% 넘게 가진 기관이 낸 보고예요.", ago(d), f"/learn/big/{inst}", t))
         for t, name, home, cnt, net, last in self.con.execute(
                 f"select s.ticker, s.name, s.homepage, count(*), sum(i.change), max(i.date) from insiders i join stocks s on s.ticker = i.ticker {mine}"
                 " where i.kind = '임원' and i.date >= ? group by s.ticker", (uid, back(14))):  # fmt: skip
             n = (today - date.fromisoformat(last)).days
             side = "사들인 쪽이 많아요" if (net or 0) > 0 else "판 쪽이 많아요" if (net or 0) < 0 else "사고판 양이 비슷해요"
-            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}"))
+            cards.append((60 - 3 * n, "badge", "text-outline", name, home, f"임원 주식 거래 보고 {cnt}건", f"최근 2주 동안 {side}. 회사에서 받은 보상 주식도 들어 있을 수 있어요.", ago(last), f"/n/{t}", t))
         cards.sort(key=lambda c: -c[0])
-        items = "".join(
-            f'<a href="{e(href)}" class="py-3.5 flex items-start gap-3">{logo(name, home, "w-9 h-9")}'
-            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="flex items-center gap-1.5 text-[12px] text-outline">'
-            f'<span class="material-symbols-outlined text-[15px] {tint}">{icon}</span><b class="font-medium text-on-surface-variant truncate">{e(name)}</b></span>'
-            f'<span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(head)}</span>'
-            f'<span class="text-[13px] leading-[19px] text-on-surface-variant line-clamp-2">{e(sub)}</span></span>'
-            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
-            for _, icon, tint, name, home, head, sub, when, href in cards[:12])  # fmt: skip
-        (has,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
-        empty = ("아직 담은 종목이 없어요. 종목을 담으면 그 종목에 생긴 일을 여기에 모아 드려요." if not has
-                 else "오늘은 내 종목에 새로 생긴 일이 없어요.")
-        return ('<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">오늘의 내 종목</h2>'
-                '<p class="mt-0.5 text-[12px] text-outline">내가 담은 종목에 생긴 일을 관련 큰 순으로 모았어요.</p>'
-                + (f'<div class="flex flex-col divide-y divide-surface-container-high/70">{items}</div>'
-                   '<p class="py-3 text-center text-[12px] text-outline">오늘은 여기까지예요. 사실만 모았어요 — 사고팔라는 뜻이 아니에요.</p>' if items
-                   else f'<p class="py-6 text-center text-[13px] text-on-surface-variant">{empty}</p>') + "</section>")  # fmt: skip
+        return cards
 
     def feed(self, uid: int, q: str) -> str:
         mine = "where r.user_id in (select followee_id from follows where follower_id = ? and ok = 1) or r.user_id = ?"
         (n,) = self.con.execute("select count(*) from regrams r " + mine, (uid, uid)).fetchone()
         photos = Photos()
         news = self.latest(uid, photos)
-        body = self.for_you(uid) + self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
+        body = self.this_week() + news + (self.regram_list(mine, (uid, uid), "팔로우한 사람들의 리그램", photos=photos) if n else "") + ("" if news or n else self.popular(photos))
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">'
                  '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">피드</h1></header>'
                  + '<form method="get" action="/feed" class="mt-space-md flex items-center gap-space-sm bg-surface-container-low rounded-xl px-4 py-2.5"><span class="material-symbols-outlined text-outline text-[20px]">person_search</span>'
@@ -2968,7 +3011,8 @@ class App:
         if mine:  # 내가 차단한 사람 — 이름과 풀기 단추만
             return "200 OK", [], self.simple(nick, f"<b>{e(nick)}</b> 님을 차단했어요. 서로의 프로필과 리그램이 보이지 않아요."
                                              f"<form method='post' action='/block' class='mt-4'><input type='hidden' name='u' value='{other}'>"
-                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>")
+                                             "<button class='text-primary underline' type='submit'>차단 풀기</button></form>"
+                                             "<a class='mt-4 inline-block text-primary underline' href='/feed'>피드로 돌아가기</a>")
         # 신고·차단 — 눈에 띄지 않게 접어 둔다 (앱 마켓의 사용자 콘텐츠 요구: 신고 · 차단 · 빠른 처리)
         more = ('<details class="mt-space-lg"><summary class="font-label-micro text-label-micro text-outline cursor-pointer">신고 · 차단</summary>'
                 '<div class="mt-2 flex flex-col gap-3 rounded-xl border border-outline-variant/50 px-space-md py-3">'
@@ -3238,6 +3282,13 @@ class App:
                           '<span class="material-symbols-outlined text-primary text-[18px]">chevron_right</span></a>' for x in items)
                 + "</div></section>")  # fmt: skip
 
+    def learn_top(self, uid: int) -> str:
+        """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) · 배움 길(단계마다 도장) (사용자 10/12)."""
+        stamps = quiz.done(self.con, uid)
+        key, q = quiz.daily(self.con, uid, date.today())
+        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
+        return (quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS + quiz.path(stamps, read))
+
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
         end = ('<p class="font-label-micro text-label-micro text-outline text-center py-space-lg">설명을 위한 글이에요. 특정 종목이나 상품을 추천하지 않아요.</p></div></main>'
@@ -3254,6 +3305,11 @@ class App:
         if slug and not a:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
+            stamps = quiz.done(self.con, uid)
+            qs = quiz.questions(self.con, uid, slug)
+            if not qs and slug not in stamps:  # 숫자를 DB 로 채우는 글(금리·오래 들기)은 문제가 없다 — 읽으면 도장
+                self.con.execute("insert or ignore into quiz_done values (?, ?, ?)", (uid, slug, datetime.now().isoformat()))
+                self.con.commit()
             more_label, more_url = a["more"]
             face, credit = book_face(slug)
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
@@ -3268,6 +3324,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
+                     + quiz.block(slug, qs, slug in stamps, "세 문제로 확인하기", "다 맞혔어요. 이 글에 도장이 찍혔어요.") + quiz.JS
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
@@ -3278,7 +3335,8 @@ class App:
                       f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
                       for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>'
+                 + self.learn_top(uid) + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 

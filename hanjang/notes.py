@@ -15,23 +15,26 @@ from hanjang import db, llm, sources
 DART = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={}"
 TAXONOMY = ("RIGHTS_ISSUE", "BONUS_ISSUE", "SPLIT", "REVERSE_SPLIT", "BUYBACK", "CB_BW",
             "MAJOR_CONTRACT", "EARNINGS", "DIVIDEND", "LAWSUIT", "MA", "HOLDER_CHANGE",
-            "CLINICAL", "TRADING_HALT", "OTHER")  # fmt: skip
+            "CLINICAL", "TRADING_HALT", "RUMOR", "FRAUD", "OTHER")  # fmt: skip
 EVENT_KO = {
     "RIGHTS_ISSUE": "유상증자", "BONUS_ISSUE": "무상증자", "SPLIT": "액면분할",
     "REVERSE_SPLIT": "감자·병합", "BUYBACK": "자사주 매입", "CB_BW": "전환사채·신주인수권",
     "MAJOR_CONTRACT": "대형 계약", "EARNINGS": "실적", "DIVIDEND": "배당", "LAWSUIT": "소송",
     "MA": "합병·인수", "HOLDER_CHANGE": "대주주 지분 변동", "CLINICAL": "임상",
-    "TRADING_HALT": "거래정지·관리", "OTHER": "기타",
+    "TRADING_HALT": "거래정지·관리", "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "OTHER": "기타",
     # 미국 8-K 에만 있는 종류 (us.ITEMS)
     "DEBT": "빚(차입·채권 발행)", "WRITE_DOWN": "구조조정·손상", "RESTATEMENT": "재무제표 정정", "AUDITOR": "회계법인 교체", "EXEC": "최고경영진 교체",
 }  # fmt: skip
 # 주주에게 반가운(+1)/걸리는(−1) 쪽 — 퀀트점프 S7 제목판 부호 그대로. 없으면 0
-DIRECTION = {"RIGHTS_ISSUE": -1, "CB_BW": -1, "LAWSUIT": -1, "TRADING_HALT": -1,
+DIRECTION = {"RIGHTS_ISSUE": -1, "CB_BW": -1, "LAWSUIT": -1, "TRADING_HALT": -1, "FRAUD": -1,
              "BUYBACK": 1, "BONUS_ISSUE": 1, "MAJOR_CONTRACT": 1}  # fmt: skip
 # 제목만 보고 확정되는 공시 — 거래소·금감원 서식 이름 그대로라 AI 에게 묻지 않는다 (공백·가운뎃점 제거 뒤 대조).
 # 순서대로 첫 번째가 이긴다. 여기 없는 제목만 AI 가 분류한다
 TITLE_RULES = (
     (r"최대주주등소유주식변동", "OTHER", 1),
+    # 걸리는 공시 — 예전엔 「기타」로 묻혔다. 그날 바로 보이고 알림이 간다(사용자 10/12). 보도 해명의 재공시는 morning.rumors 가 중요도를 낮춘다
+    (r"횡령|배임", "FRAUD", 3),
+    (r"풍문또는보도", "RUMOR", 2),
     (r"자기주식(취득|소각)|주식소각결정|자기주식취득신탁계약체결", "BUYBACK", 3),
     (r"(?<!무)유상증자결정", "RIGHTS_ISSUE", 3),
     (r"무상증자결정", "BONUS_ISSUE", 3),
@@ -45,7 +48,7 @@ TITLE_RULES = (
     (r"주식병합결정|감자결정", "REVERSE_SPLIT", 3),
     (r"최대주주변경", "HOLDER_CHANGE", 2),
     # 코스닥에 잦은 거래소 경고 — 불성실공시·투자주의환기·상장 유지 심사
-    (r"매매거래정지(?!해제)|관리종목지정|상장폐지|감사의견(거절|부적정|한정)|불성실공시법인|투자주의환기종목|상장적격성실질심사", "TRADING_HALT", 3),
+    (r"매매거래정지(?!해제)|관리종목지정|상장폐지|감사의견(거절|부적정|한정)|불성실공시법인|투자주의환기종목|상장적격성실질심사|회생절차|파산신청|부도발생|영업정지", "TRADING_HALT", 3),
     (r"사업보고서|반기보고서|분기보고서|기업설명회", "OTHER", 1),
 )
 # 공시 제목 → 「무슨 일인지」 쉬운 말 (우리가 쓴 고정 문장, 숫자 없음). 첫 번째로 맞는 것을 쓴다.
@@ -72,6 +75,11 @@ TITLE_PLAIN = (
     (r"새주식판매알림\(8-K", "새 주식을 시장에서 팔아 돈을 모았다고 알렸어요 — 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요"),
     (r"배당알림\(8-K", "주주에게 배당을 주기로 했어요"),
     # 거래소 경고가 먼저 — 「매매거래정지(합병…)」처럼 다른 말이 섞여도 경고를 알린다
+    (r"횡령|배임", "임직원이 회사 돈을 빼돌렸거나(횡령) 회사에 손해를 끼쳤다(배임)는 혐의와 관련된 공시를 냈어요"),
+    (r"회생절차", "법원의 회생 절차(빚을 조정받아 회사를 살리는 절차)와 관련된 공시를 냈어요"),
+    (r"파산신청", "파산 신청과 관련된 공시를 냈어요"),
+    (r"부도발생", "어음이나 수표를 제때 갚지 못해 부도가 났다고 알렸어요"),
+    (r"영업정지", "영업의 일부나 전부가 멈춘다고 알렸어요"),
     (r"매매거래정지해제", "멈췄던 사고팔기가 다시 열렸어요"),
     (r"매매거래정지", "거래소가 이 회사 주식의 사고팔기를 잠시 멈췄어요"),
     (r"관리종목지정", "거래소가 관리종목으로 정했어요 — 상장을 이어 갈 요건을 채우지 못했다는 경고예요"),
@@ -856,6 +864,8 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
         tone = ""
         day = f"{d.month}월 {d.day}일"
         easy = plain(title)
+        if code == "RUMOR":  # 보도 해명은 원문 표에서 꺼낸 문장(morning.rumors)
+            easy = (con.execute("select plain from disclosures where rcept_no = ?", (rno,)).fetchone()[0] or "").rstrip(".")
         if "결산실적공시예고" in re.sub(r"\s", "", title):  # 공시에서 읽어 둔 실제 발표일이 있으면 함께 — 「7월 30일에 실적을 발표하겠다고 미리 알렸어요」
             on = con.execute("select date from events where rcept_no = ? order by date limit 1", (rno,)).fetchone()
             if on:

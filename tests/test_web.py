@@ -568,7 +568,7 @@ def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     assert con.execute("select ticker from holdings order by ticker").fetchall()[-1] == ("247540",)
     assert "첫 노트" in call(app, "/", cookie=ck)[2]  # 바로 받기가 끝났거나(실패) 만드는 중
     js = call(app, "/stocks.js")[2]
-    assert js.index("삼성전자") < js.index("에코프로비엠") and "/stocks.js?v=2-1" in call(app, "/", cookie=ck)[2]
+    assert js.index("삼성전자") < js.index("에코프로비엠") and re.search(r"/stocks\.js\?v=[0-9a-f]{10}\"", call(app, "/", cookie=ck)[2])  # 주소의 v 는 목록 내용의 지문 — 내용이 바뀌면 브라우저가 새로 받는다
 
 
 def test_repeated_numbers_and_paragraphs():
@@ -859,6 +859,7 @@ def test_notices_this_week():
     con.execute("insert into holdings values (2, '005930', ?)", (now,))
     assert "많이 담은 종목" not in app.this_week()  # 두 사람뿐이면 서로의 종목이 짐작돼서 드러내지 않는다
     con.execute("insert into holdings values (3, '005930', ?)", (now,))
+    app.memo = {}  # 이번 주 한장은 정각마다 한 번만 센다 — 같은 시각 안에서 다시 세게
     week = app.this_week()
     assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
     assert "NEW" not in week and "올랐어요" in week and "시 업데이트" in week  # 하루 전보다 담은 사람이 늘었다 — NEW 는 쓰지 않는다
@@ -1146,6 +1147,8 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     for mod, name in ((daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
     monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
+    monkeypatch.setattr(daily.morning, "rumors", lambda con: ran.append("보도 해명") or 0)
+    monkeypatch.setattr(daily, "watch", lambda today: ran.append("바로 알림") or 0)
     monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
     monkeypatch.setattr(daily.db, "connect", lambda: None)  # 진짜 DB 를 열지 않는다
     monkeypatch.setattr(daily.db, "tidy", lambda con, today: {})
@@ -1166,10 +1169,10 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
 
     up[0] = True
     daily.main(monday)  # 19시 — DART 가 돌아왔다: 받기·ETF·큰손까지, 월요일이라 노트 전부와 안내 메일도
-    assert ran == ["백업", "받기:True", "미국", "미국 읽기", "노트:전부=True:읽기=True", "ETF", "기사", "아침", "큰손", "유명", "국민연금", "안내 메일"]
+    assert ran == ["백업", "받기:True", "미국", "미국 읽기", "보도 해명", "노트:전부=True:읽기=True", "ETF", "기사", "아침", "큰손", "유명", "국민연금", "안내 메일", "바로 알림"]
     ran.clear()
-    daily.main(monday)  # 끝까지 돈 날은 다시 불러도 아무것도 안 한다 (메일도 한 번만)
-    assert ran == []
+    daily.main(monday)  # 끝까지 돈 날은 다시 불러도 낮에 나온 걸리는 공시만 살핀다 (안내 메일은 한 번만)
+    assert ran == ["바로 알림"]
 
 
 def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
@@ -1193,6 +1196,24 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
     assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
     h = ask(1000, "5.5.5.5")["headers"]
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
+
+
+def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
+    """앱 심사자는 메일을 받을 수 없다 — .env 에 정해 둔 주소는 메일 없이 정해 둔 코드로 들어온다. 다른 주소에는 그 코드가 통하지 않는다."""
+    app, _ = _app()
+    mails = []
+    monkeypatch.setattr(mail, "send", lambda to, *a, **k: mails.append(to))
+    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
+    assert "만료" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")[2]  # 먼저 이메일을 넣어야 한다(요청 한도를 거친다)
+    assert 'name="code"' in call(app, "/login", "POST", "email=review%40hanjang.test&agree=1")[2] and mails == []
+    assert "4번 남음" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=000000")[2]
+    s, h, _ = call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")
+    assert s.startswith("303") and "s=" in h["Set-Cookie"]
+    call(app, "/login", "POST", "email=a%40b.c&agree=1")
+    assert mails == ["a@b.c"] and "맞지 않아요" in call(app, "/login/code", "POST", "email=a%40b.c&code=482913")[2]
+    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
+    call(app, "/login", "POST", "email=r%40hanjang.test&agree=1")
+    assert mails[-1] == "r@hanjang.test"
 
 
 def test_login_with_six_digit_code_from_the_mail(monkeypatch):
@@ -1425,7 +1446,7 @@ def test_others_see_my_tree_unless_private():
     con.commit()
     a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
     p = call(app, "/u/1", cookie=b)[2]
-    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" not in p  # 나무와 날 수만 — 잔디는 본인만
+    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" in p and "까지 " not in p[p.index("가가의 나무"):p.index("최근 석 달")].replace("지금까지", "")  # 나무·날 수·잔디 — 「다음 단계까지」만 본인에게
     call(app, "/me/private", "POST", "", a)
     assert "가가의 나무" not in call(app, "/u/1", cookie=b)[2]  # 비공개 — 승인 전엔 안 보인다
     call(app, "/follow", "POST", "u=1", b)
@@ -1449,9 +1470,9 @@ def test_line_tree_on_notice_error_and_offline_pages():
     assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body
 
 
-def test_for_you_ranks_my_stocks_events_by_score():
-    """오늘의 내 종목 — 담은 종목의 공시·다가오는 일정·큰손 움직임만, 가까운 것·무거운 것 먼저. 남의 종목은 안 나온다."""
-    from datetime import date
+def test_my_stock_card_shows_what_happened_to_it():
+    """내 종목 카드 — 그 종목의 공시·다가오는 일정·큰손 움직임 가운데 점수가 가장 큰 것을 노트 첫 줄 대신. 남의 종목 일은 안 나온다."""
+    from datetime import date, timedelta
 
     from hanjang import sources
 
@@ -1459,21 +1480,29 @@ def test_for_you_ranks_my_stocks_events_by_score():
     ck = _login(app)
     call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     (uid,) = con.execute("select id from users").fetchone()
-    today = date(2026, 10, 11)
-    assert "오늘은 내 종목에 새로 생긴 일이 없어요" in app.for_you(uid, today)
-    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", date(2026, 10, 10), "주요사항보고서(자기주식취득결정)"),
-                                   sources.Disclosure("20261001000009", "005930", date(2026, 10, 1), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
+    today = date.today()
+    assert app.my_events(uid, today) == []
+    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", today - timedelta(days=1), "주요사항보고서(자기주식취득결정)"),
+                                   sources.Disclosure("20261001000009", "005930", today - timedelta(days=10), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
     con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
-    con.execute("insert into events values ('005930', '2026-10-14', 'EARNINGS', '실적 발표', 'r1')")
-    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-08', 'r2')")
-    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', '2026-10-09', '임원', '상무', -100)")
+    con.execute("insert into events values ('005930', ?, 'EARNINGS', '실적 발표', 'r1')", ((today + timedelta(days=3)).isoformat(),))
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, ?, 'r2')", ((today - timedelta(days=3)).isoformat(),))
+    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', ?, '임원', '상무', -100)", ((today - timedelta(days=2)).isoformat(),))
     con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
-    con.execute("insert into events values ('000660', '2026-10-12', 'EARNINGS', '남의 종목 실적', 'r4')")
-    h = app.for_you(uid, today)
-    order = [h.index(x) for x in ("자기주식취득결정", "실적 발표", "국민연금이 지분을 늘렸어요", "임원 주식 거래 보고 1건")]
-    assert order == sorted(order) and ">어제<" in h and ">D-3<" in h and "판 쪽이 많아요" in h
-    assert "남의 종목 실적" not in h and "공급계약" not in h and "오늘은 여기까지예요" in h
-    assert "오늘의 내 종목" in call(app, "/feed", cookie=ck)[2]
+    con.execute("insert into events values ('000660', ?, 'EARNINGS', '남의 종목 실적', 'r4')", ((today + timedelta(days=1)).isoformat(),))
+    con.commit()
+    heads = [c[5] for c in app.my_events(uid, today)]
+    assert [h for h in heads if "공급계약" in h or "남의" in h] == [] and len(heads) == 4
+    assert "자기주식취득결정" in heads[0] and heads[1] == "실적 발표" and heads[2] == "국민연금이 지분을 늘렸어요" and heads[3] == "임원 주식 거래 보고 1건"
+    home = call(app, "/", cookie=ck)[2]
+    assert "자기주식취득결정" in home and "어제 · 소식 3건 더" in home  # 맨 위 것 하나 + 몇 건 더
+    assert "오늘의 내 종목" not in call(app, "/feed", cookie=ck)[2]  # 피드에서는 뺐다
+    card = home[home.index('data-stock-id="005930"'):]
+    assert 'href="/n/005930"><p' in card and 'href="/calendar"' not in card[:card.index("노트 읽기")]  # 글자를 누르면 노트로
+    assert "매출이 늘었어요." in card[:card.index("노트 읽기")] and 'href="/n/005930#recent"' in card  # 노트 핵심 한 줄도 함께 · 생긴 일은 노트의 그 자리로
+    note = call(app, "/n/005930", cookie=ck)[2]
+    assert 'id="recent"' in note and 'href="#who"' in note  # 임원·큰손 줄은 노트의 그 대목으로
+    assert "요즘 생긴 일" in note and "국민연금이 지분을 늘렸어요" in note and "임원 주식 거래 보고 1건" in note and "회사 사정은 어떤가요?" in note  # 맨 위에 그 일들, 아래에 원래 노트
 
 
 def test_cookie_of_a_deleted_account_goes_to_login_not_error():
@@ -1482,3 +1511,184 @@ def test_cookie_of_a_deleted_account_goes_to_login_not_error():
     con.execute("delete from users")
     s, h, _ = call(app, "/feed", cookie=ck)  # 다른 기기에서 탈퇴한 뒤 남은 쿠키
     assert s.startswith("303") and h["Location"] == "/" and "Max-Age=0" in h["Set-Cookie"]
+
+
+def test_things_found_by_clicking_through_every_screen(monkeypatch):
+    """화면을 하나씩 눌러 보며 찾은 것들 (10/11) — 글자만 보는 테스트로는 안 보이던 쓰임새 문제."""
+    app, con = _app()
+    monkeypatch.setattr(mail, "send", lambda *a, **k: None)
+    assert "autofocus" in re.search(r'<input[^>]*name="code"[^>]*>', call(app, "/login", "POST", "email=a%40b.c&agree=1")[2])[0]  # 코드 칸이 화면 아래로 밀려 있었다
+    _, h, _ = call(app, "/auth?t=" + quote(web.login_token("new@b.c", SECRET, 1_000_000.0)))
+    ck = h["Set-Cookie"].split(";")[0]
+    body = call(app, "/welcome", "POST", "nickname=" + quote("리딩방장") + "&rules=1", ck)[2]
+    assert "쓸 수 없는 말" in body and re.search(r'name="rules"[^>]* checked', body)  # 오류로 다시 떠도 동의 체크는 그대로
+    assert "checked" not in call(app, "/welcome", "POST", "nickname=" + quote("새사람"), ck)[2].split('name="rules"')[1].split(">")[0]
+    call(app, "/welcome", "POST", "nickname=" + quote("새사람") + "&rules=1", ck)
+    home = call(app, "/", cookie=ck)[2]
+    assert "가진 종목을 담아 보세요" in home  # 종목이 없을 때 빈 화면만 보이던 것
+    assert re.search(r'<a[^>]*href="/me"[^>]*>.*?새', home, re.S)  # 위쪽 동그라미는 닉네임 첫 글자
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    assert "가진 종목을 담아 보세요" not in call(app, "/", cookie=ck)[2]
+    # 자동완성 — 많이 담긴 종목이 목록 앞에, 그리고 이름이 그 글자로 시작하는 종목 먼저
+    con.executemany("insert into stocks (ticker, name) values (?, ?)", [("000001", "가나삼성"), ("000002", "삼성가나")])
+    con.commit()
+    js = app._stocks_js()
+    assert js.index("삼성전자") < js.index("삼성가나") and "all.filter(first)" in home
+    # 차단한 사람 화면에 돌아갈 길
+    con.execute("insert into users (id, email, created_at, nickname) values (50, 'o@b.c', '2026-10-01', '남남')")
+    con.commit()
+    call(app, "/block", "POST", "u=50", ck)
+    assert "피드로 돌아가기" in call(app, "/u/50", cookie=ck)[2]
+
+
+def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
+    """아침 소식 메일 — 내 종목에 새 공시가 있거나 오늘·내일 일정이 있는 사람에게만 한 통. 끈 사람은 빼고."""
+    from datetime import date
+
+    from hanjang import daily, mail, sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text, html)) or True)
+    today = date(2026, 10, 14)  # 수요일
+    assert daily.brief(con, today) == 0 and not sent  # 새 소식 없음 — 보내지 않는다
+    collect.save_disclosures(con, [sources.Disclosure("20261013000001", "005930", date(2026, 10, 13), "주요사항보고서(자기주식취득결정)")])
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    assert daily.brief(con, today) == 1
+    to, subject, text, html = sent[0]
+    assert subject == "[한장] 오늘 내 종목 소식 — 삼성전자" and "삼성전자" in text and "안내 메일」을 끄면" in text
+    assert "오늘 내 종목 소식" in html and "한장에서 보기" in html and "사고팔라는 뜻이 아니에요" in html
+    con.execute("update users set mail_on = 0")
+    assert daily.brief(con, today) == 0  # 안내 메일을 끈 사람
+    con.execute("update users set mail_on = 1")
+    con.execute("delete from disclosures")
+    con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
+    assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
+    con.execute("delete from events")
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-13', 'r2')")
+    assert daily.brief(con, today) == 1  # 큰손 움직임만 있어도 — 아침 한 장과 메일에 같은 문장
+    assert sent[-1][1] == "[한장] 내 종목 큰손 움직임 — 국민연금이 삼성전자 지분을 늘렸어요(지분 7.76%)" and "국민연금이 삼성전자 지분을 늘렸어요" in sent[-1][3]
+
+
+def test_smoke_draws_real_pages_without_writing_to_the_db(tmp_path, monkeypatch):
+    """올린 뒤 확인(hanjang.smoke · deploy/check.sh)이 꺼내는 화면 — 진짜 DB 에는 아무것도 쓰지 않는다."""
+    import sqlite3
+
+    from hanjang import smoke
+
+    path = tmp_path / "h.db"
+    con = db.connect(path)
+    collect.save_universe(con, [("005930", "삼성전자")], {})
+    con.execute("insert into users (id, email, created_at, nickname, rules_at) values (1, 'a@b.c', '2026-10-01', '가가', 'x')")
+    con.execute("insert into holdings values (1, '005930', '2026-10-01')")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(smoke.db, "PATH", path)
+    got = smoke.pages()
+    assert got["로그인"][0] == "200" and 'name="code"' in got["로그인(메일 보냄)"][1] and got["/"][0] == "200" and "삼성전자" in got["/"][1]
+    assert {"/sw.js", "/stocks.js", "/me/settings", "/calendar"} <= set(got) and all(s in ("200", "404", "503") for s, _ in got.values())
+    assert sqlite3.connect(path).execute("select count(*) from views").fetchone() == (0,)  # 열어본 기록이 진짜 DB 에 남지 않는다
+
+
+def test_feed_news_is_newest_first_not_my_stocks_pinned():
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
+    body = json.dumps({"title": "옛 내 종목 기사", "paragraphs": [{"text": "가"}]}, ensure_ascii=False)
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r1', '005930', '2026-09-01', 'BUYBACK', ?, 'x')", (body,))
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r2', '000660', '2026-10-10', 'BUYBACK', ?, 'x')", (body.replace("옛 내 종목 기사", "새 남의 종목 기사"),))
+    con.commit()
+    feed = call(app, "/feed", cookie=ck)[2]
+    assert feed.index("새 남의 종목 기사") < feed.index("옛 내 종목 기사")  # 날짜가 먼저 — 내 종목이라고 옛 기사가 맨 위에 있지 않다
+
+
+def test_rumor_disclosure_becomes_one_sentence_and_repeats_are_demoted():
+    from hanjang import morning
+
+    fresh = ("x{a:b} 1. 풍문 또는 보도의 내용 [단독] LG전자 美자회사 베어로보틱스, 나스닥 상장 도전 2. 풍문 또는 보도의 매체 한국경제"
+             " 3. 풍문 또는 보도의 발생일자 2026-09-07 4. 풍문 또는 보도의 내용에 대한 해명내용 - 결정된 바가 없습니다. 3개월 이내 재공시 하겠습니다.")
+    s, old = morning.rumor(fresh, "풍문또는보도에대한해명(미확정)", "2026-09-07")
+    assert s == "「LG전자 美자회사 베어로보틱스, 나스닥 상장 도전」 보도(한국경제)에 대해 아직 정해진 것은 없다고 답했어요." and not old
+    assert morning.rumor(fresh, "풍문또는보도에대한해명(미확정)", "2026-10-06")[1]  # 한 달 뒤 같은 보도 — 되풀이
+    again = "1. 제목 HD현대중공업(주),「미 서·남부 조선소 2~3곳 인수 후보로 압축」보도에 대한 조회공시 답변(재공시) 2. 내용 확정된 사항은 없습니다."
+    s, old = morning.rumor(again, "조회공시요구(풍문또는보도)에대한답변(미확정)", "2026-09-18")
+    assert s.startswith("「미 서·남부 조선소 2~3곳 인수 후보로 압축」 보도에 대해") and old
+    asked = "한화시스템(주), 보도에 대한 조회공시 요구 1. 조회공시요구내용 UAE 에지그룹과 합작법인 설립 추진 보도에 대한 사실 여부 및 구체적인 내용 2. 공시시한 2026-09-17 18:00"
+    assert morning.rumor(asked, "조회공시요구(풍문또는보도)", "2026-09-17") == ("「UAE 에지그룹과 합작법인 설립 추진」 보도가 사실인지 거래소의 물음을 받았어요 — 회사가 곧 답해야 해요.", False)
+    assert morning.rumor("", "풍문또는보도에대한해명", "2026-09-17")[0] == "언론 보도에 대해 회사가 해명 공시를 냈어요."  # 원문을 못 읽어도 말은 된다
+    assert notes.by_rule("횡령ㆍ배임혐의발생") == ("FRAUD", 3) and notes.by_rule("풍문또는보도에대한해명(미확정)") == ("RUMOR", 2)
+
+
+def test_watch_mails_holders_once_on_the_day_of_an_alarming_disclosure(monkeypatch):
+    from hanjang import daily, morning, sources
+
+    _, con = _app()
+    today = date(2026, 10, 13)
+    con.execute("insert into users (id, email, created_at, nickname, mail_on) values (1, 'a@b.c', '2026-10-01', '가가', 1), (2, 'off@b.c', '2026-10-01', '나나', 0)")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('042660', '한화오션', 'x', 1)")
+    con.execute("insert into holdings values (1, '042660', '2026-10-01'), (2, '042660', '2026-10-01')")
+    con.commit()
+
+    class Dart:
+        def disclosures(self, a, b, tickers):
+            return [sources.Disclosure(rcept_no=r, ticker="042660", day=today, title=t)
+                    for r, t in (("1", "횡령ㆍ배임혐의발생"), ("2", "풍문또는보도에대한해명(미확정)"), ("3", "기업설명회(IR)개최"))]
+
+        def doc_text(self, rno):
+            return "1. 풍문 또는 보도의 내용 한화오션, 무언가 추진 2. 풍문 또는 보도의 매체 어느신문 3. 풍문 또는 보도의 발생일자 2026-10-13 4. 풍문"
+
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text)))
+    assert daily.watch(today, con, Dart()) == 2 and daily.watch(today, con, Dart()) == 0  # 공시마다 한 번 · 메일 끈 사람·기업설명회는 빼고
+    assert {s[0] for s in sent} == {"a@b.c"} and any("횡령·배임" in s[1] for s in sent) and any("한화오션, 무언가 추진" in s[2] for s in sent)
+    m = morning.build(con, ["042660"], today, 1)  # 화면에도 그날 바로, 빨간 꼬리표로
+    assert m["news"][0]["warn"] and "꼭 확인" in morning.html(m)
+
+
+def test_morning_has_market_line_and_same_industry_news():
+    from hanjang import morning
+
+    _, con = _app()
+    today = date(2026, 10, 13)
+    con.execute("insert into stocks (ticker, name, corp_code, active, induty_code) values ('000660', 'SK하이닉스', 'y', 1, '2612'), ('005380', '현대차', 'z', 1, '30121')")
+    con.execute("update stocks set induty_code = '2611' where ticker = '005930'")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '000660', '2026-10-12', '자기주식취득결정', 'BUYBACK', 3, 1), ('2', '005380', '2026-10-12', '자기주식취득결정', 'BUYBACK', 3, 1)")
+    con.executemany("insert into macro values (?, ?, ?)", [("ECOS:731Y003:0000003", "2026-10-08", 1400.0), ("ECOS:731Y003:0000003", "2026-10-12", 1403.5),
+                                                          ("ECOS:817Y002:010200000", "2026-10-08", 2.85), ("ECOS:817Y002:010200000", "2026-10-12", 2.83)])
+    con.commit()
+    m = morning.build(con, ["005930"], today)
+    assert m["market"] == "원/달러 환율은 1,403.5원으로 앞 거래일보다 3.5원 올랐어요(10월 12일). 국고채 3년 금리는 2.83%로 앞 거래일보다 0.02%p 내렸어요(10월 12일)."
+    assert [x["name"] for x in m["peers"]] == ["SK하이닉스"]  # 같은 업종만 — 현대차는 안 나온다
+    assert "시장 · 같은 업종" in morning.html(m) and "원/달러 환율은" in morning.text(m)
+    assert "원/달러 환율은" in mail.morning_mail(m, morning.text(m))[2]
+
+
+def test_learn_quiz_daily_question_and_path_stamps():
+    from hanjang import learn, quiz
+
+    assert all(len(qs) == 3 and all(len(c) == 3 and 0 <= a < 3 for _, c, a, _ in qs) for qs in quiz.QUIZ.values())
+    assert set(quiz.QUIZ) <= set(learn.BY_SLUG) and set(learn.BY_SLUG) - set(quiz.QUIZ) == {"rates", "long-short"}  # 숫자를 DB 로 채우는 두 글만 문제가 없다
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    (uid,) = con.execute("select id from users").fetchone()
+    con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, equity, liabilities, rcept_no) values ('005930', 2025, 300, 30, 400, 100, 'a'), ('005930', 2024, 250, 20, 350, 90, 'b')")
+    con.commit()
+    mine = quiz.mine(con, uid)
+    assert mine["statements"][2] == 0 and "삼성전자" in mine["statements"][0]  # 매출 250 → 300, 늘었다
+    assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
+    assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
+    top = call(app, "/learn", cookie=ck)[2]
+    assert "오늘의 한 문제" in top and "배움 길" in top and f"도장 0 / {len(learn.ARTICLES)}" in top and "다음에 읽을 글" in top
+    art = call(app, "/learn/statements", cookie=ck)[2]
+    assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
+    call(app, "/learn/done", "POST", "slug=statements", ck)
+    call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
+    call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
+    assert quiz.done(con, uid) == {"statements", "rates"}
+    top = call(app, "/learn", cookie=ck)[2]
+    assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
