@@ -799,13 +799,15 @@ EVENT_EXPLAIN = {
     "HOLDER_CHANGE": "큰 주주의 지분이 바뀌었어요.",
     "CLINICAL": "신약 임상 시험 소식이에요.",
     "TRADING_HALT": "거래가 멈추거나 관리 대상이 됐어요.",
+    "RUMOR": "언론 보도나 소문에 대해 회사가 답했어요.",
+    "FRAUD": "임직원의 횡령·배임 혐의와 관련된 공시예요.",
     "SPLIT": "주식 한 주를 여러 주로 쪼개기로 했어요.",
     "REVERSE_SPLIT": "여러 주를 한 주로 합치거나 자본을 줄이기로 했어요.",
 }
 EVENT_SHORT = {"BUYBACK": "자사주", "DIVIDEND": "배당", "EARNINGS": "실적", "MAJOR_CONTRACT": "계약",
                "RIGHTS_ISSUE": "증자", "BONUS_ISSUE": "무상증자", "CB_BW": "전환사채", "LAWSUIT": "소송",
                "MA": "합병·인수", "HOLDER_CHANGE": "대주주", "CLINICAL": "임상", "TRADING_HALT": "거래정지·관리",
-               "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
+               "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
 TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종류에 맞춰
     "BUYBACK": ("자사주 취득 공시는 소각 여부까지 함께 확인해요", "사둔 주식을 없애야(소각) 시중에 도는 주식 수가 실제로 줄어요."),
     "DIVIDEND": ("배당 공시는 기준일을 함께 확인해요", "기준일에 주식을 갖고 있어야 배당을 받아요."),
@@ -2307,7 +2309,7 @@ class App:
         track = "bg-primary" if mail_on else "bg-surface-container-highest"
         switch = (f'<form method="post" action="/me/mail" class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
                   '<span class="material-symbols-outlined text-primary text-[18px]">mark_email_unread</span><span class="flex flex-col"><span>안내 메일</span>'
-                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 내 종목에 새 소식이 있는 날 아침 한 통</span></span></span>'
+                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 새 소식이 있는 날 아침 한 통 · 꼭 확인할 공시는 그날 바로</span></span></span>'
                   f'<button aria-label="안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip

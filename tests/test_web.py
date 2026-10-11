@@ -1147,6 +1147,8 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
     for mod, name in ((daily.etf, "ETF"), (daily.articles, "기사"), (daily.holders, "큰손"), (daily.gurus, "유명"), (daily.nps, "국민연금")):
         monkeypatch.setattr(mod, "main", lambda today, name=name: ran.append(name))
     monkeypatch.setattr(daily.morning, "prepare", lambda con, today: ran.append("아침") or 0)
+    monkeypatch.setattr(daily.morning, "rumors", lambda con: ran.append("보도 해명") or 0)
+    monkeypatch.setattr(daily, "watch", lambda today: ran.append("바로 알림") or 0)
     monkeypatch.setattr(daily, "notify", lambda con, week: ran.append("안내 메일") or 3)
     monkeypatch.setattr(daily.db, "connect", lambda: None)  # 진짜 DB 를 열지 않는다
     monkeypatch.setattr(daily.db, "tidy", lambda con, today: {})
@@ -1167,10 +1169,10 @@ def test_daily_keeps_going_when_dart_is_down_and_finishes_later(tmp_path, monkey
 
     up[0] = True
     daily.main(monday)  # 19시 — DART 가 돌아왔다: 받기·ETF·큰손까지, 월요일이라 노트 전부와 안내 메일도
-    assert ran == ["백업", "받기:True", "미국", "미국 읽기", "노트:전부=True:읽기=True", "ETF", "기사", "아침", "큰손", "유명", "국민연금", "안내 메일"]
+    assert ran == ["백업", "받기:True", "미국", "미국 읽기", "보도 해명", "노트:전부=True:읽기=True", "ETF", "기사", "아침", "큰손", "유명", "국민연금", "안내 메일", "바로 알림"]
     ran.clear()
-    daily.main(monday)  # 끝까지 돈 날은 다시 불러도 아무것도 안 한다 (메일도 한 번만)
-    assert ran == []
+    daily.main(monday)  # 끝까지 돈 날은 다시 불러도 낮에 나온 걸리는 공시만 살핀다 (안내 메일은 한 번만)
+    assert ran == ["바로 알림"]
 
 
 def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
@@ -1601,3 +1603,65 @@ def test_feed_news_is_newest_first_not_my_stocks_pinned():
     con.commit()
     feed = call(app, "/feed", cookie=ck)[2]
     assert feed.index("새 남의 종목 기사") < feed.index("옛 내 종목 기사")  # 날짜가 먼저 — 내 종목이라고 옛 기사가 맨 위에 있지 않다
+
+
+def test_rumor_disclosure_becomes_one_sentence_and_repeats_are_demoted():
+    from hanjang import morning
+
+    fresh = ("x{a:b} 1. 풍문 또는 보도의 내용 [단독] LG전자 美자회사 베어로보틱스, 나스닥 상장 도전 2. 풍문 또는 보도의 매체 한국경제"
+             " 3. 풍문 또는 보도의 발생일자 2026-09-07 4. 풍문 또는 보도의 내용에 대한 해명내용 - 결정된 바가 없습니다. 3개월 이내 재공시 하겠습니다.")
+    s, old = morning.rumor(fresh, "풍문또는보도에대한해명(미확정)", "2026-09-07")
+    assert s == "「LG전자 美자회사 베어로보틱스, 나스닥 상장 도전」 보도(한국경제)에 대해 아직 정해진 것은 없다고 답했어요." and not old
+    assert morning.rumor(fresh, "풍문또는보도에대한해명(미확정)", "2026-10-06")[1]  # 한 달 뒤 같은 보도 — 되풀이
+    again = "1. 제목 HD현대중공업(주),「미 서·남부 조선소 2~3곳 인수 후보로 압축」보도에 대한 조회공시 답변(재공시) 2. 내용 확정된 사항은 없습니다."
+    s, old = morning.rumor(again, "조회공시요구(풍문또는보도)에대한답변(미확정)", "2026-09-18")
+    assert s.startswith("「미 서·남부 조선소 2~3곳 인수 후보로 압축」 보도에 대해") and old
+    asked = "한화시스템(주), 보도에 대한 조회공시 요구 1. 조회공시요구내용 UAE 에지그룹과 합작법인 설립 추진 보도에 대한 사실 여부 및 구체적인 내용 2. 공시시한 2026-09-17 18:00"
+    assert morning.rumor(asked, "조회공시요구(풍문또는보도)", "2026-09-17") == ("「UAE 에지그룹과 합작법인 설립 추진」 보도가 사실인지 거래소의 물음을 받았어요 — 회사가 곧 답해야 해요.", False)
+    assert morning.rumor("", "풍문또는보도에대한해명", "2026-09-17")[0] == "언론 보도에 대해 회사가 해명 공시를 냈어요."  # 원문을 못 읽어도 말은 된다
+    assert notes.by_rule("횡령ㆍ배임혐의발생") == ("FRAUD", 3) and notes.by_rule("풍문또는보도에대한해명(미확정)") == ("RUMOR", 2)
+
+
+def test_watch_mails_holders_once_on_the_day_of_an_alarming_disclosure(monkeypatch):
+    from hanjang import daily, morning, sources
+
+    _, con = _app()
+    today = date(2026, 10, 13)
+    con.execute("insert into users (id, email, created_at, nickname, mail_on) values (1, 'a@b.c', '2026-10-01', '가가', 1), (2, 'off@b.c', '2026-10-01', '나나', 0)")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('042660', '한화오션', 'x', 1)")
+    con.execute("insert into holdings values (1, '042660', '2026-10-01'), (2, '042660', '2026-10-01')")
+    con.commit()
+
+    class Dart:
+        def disclosures(self, a, b, tickers):
+            return [sources.Disclosure(rcept_no=r, ticker="042660", day=today, title=t)
+                    for r, t in (("1", "횡령ㆍ배임혐의발생"), ("2", "풍문또는보도에대한해명(미확정)"), ("3", "기업설명회(IR)개최"))]
+
+        def doc_text(self, rno):
+            return "1. 풍문 또는 보도의 내용 한화오션, 무언가 추진 2. 풍문 또는 보도의 매체 어느신문 3. 풍문 또는 보도의 발생일자 2026-10-13 4. 풍문"
+
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text)))
+    assert daily.watch(today, con, Dart()) == 2 and daily.watch(today, con, Dart()) == 0  # 공시마다 한 번 · 메일 끈 사람·기업설명회는 빼고
+    assert {s[0] for s in sent} == {"a@b.c"} and any("횡령·배임" in s[1] for s in sent) and any("한화오션, 무언가 추진" in s[2] for s in sent)
+    m = morning.build(con, ["042660"], today, 1)  # 화면에도 그날 바로, 빨간 꼬리표로
+    assert m["news"][0]["warn"] and "꼭 확인" in morning.html(m)
+
+
+def test_morning_has_market_line_and_same_industry_news():
+    from hanjang import morning
+
+    _, con = _app()
+    today = date(2026, 10, 13)
+    con.execute("insert into stocks (ticker, name, corp_code, active, induty_code) values ('000660', 'SK하이닉스', 'y', 1, '2612'), ('005380', '현대차', 'z', 1, '30121')")
+    con.execute("update stocks set induty_code = '2611' where ticker = '005930'")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '000660', '2026-10-12', '자기주식취득결정', 'BUYBACK', 3, 1), ('2', '005380', '2026-10-12', '자기주식취득결정', 'BUYBACK', 3, 1)")
+    con.executemany("insert into macro values (?, ?, ?)", [("ECOS:731Y003:0000003", "2026-10-08", 1400.0), ("ECOS:731Y003:0000003", "2026-10-12", 1403.5),
+                                                          ("ECOS:817Y002:010200000", "2026-10-08", 2.85), ("ECOS:817Y002:010200000", "2026-10-12", 2.83)])
+    con.commit()
+    m = morning.build(con, ["005930"], today)
+    assert m["market"] == "원/달러 환율은 1,403.5원으로 앞 거래일보다 3.5원 올랐어요(10월 12일). 국고채 3년 금리는 2.83%로 앞 거래일보다 0.02%p 내렸어요(10월 12일)."
+    assert [x["name"] for x in m["peers"]] == ["SK하이닉스"]  # 같은 업종만 — 현대차는 안 나온다
+    assert "시장 · 같은 업종" in morning.html(m) and "원/달러 환율은" in morning.text(m)
+    assert "원/달러 환율은" in mail.morning_mail(m, morning.text(m))[2]
