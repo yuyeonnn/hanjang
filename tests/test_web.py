@@ -859,6 +859,7 @@ def test_notices_this_week():
     con.execute("insert into holdings values (2, '005930', ?)", (now,))
     assert "많이 담은 종목" not in app.this_week()  # 두 사람뿐이면 서로의 종목이 짐작돼서 드러내지 않는다
     con.execute("insert into holdings values (3, '005930', ?)", (now,))
+    app.memo = {}  # 이번 주 한장은 정각마다 한 번만 센다 — 같은 시각 안에서 다시 세게
     week = app.this_week()
     assert "많이 담은 종목" in week and "삼성전자" in week and "명이" not in week  # 몇 명인지는 적지 않는다
     assert "NEW" not in week and "올랐어요" in week and "시 업데이트" in week  # 하루 전보다 담은 사람이 늘었다 — NEW 는 쓰지 않는다

@@ -1772,8 +1772,8 @@ class App:
 
     def _stocks_js(self) -> str:
         rows = [{"t": t, "n": n, "l": "미국" if m == "US" else "ETF" if t.startswith("ETF") else industry_label(c) or ""} for t, n, c, m in
-                self.con.execute("select ticker, name, induty_code, market from stocks s order by active desc,"
-                                 " (select count(*) from holdings h where h.ticker = s.ticker) desc, market, name")]  # 많이 담긴 종목 먼저 — 시가총액은 쓸 권리가 없어 모른다  # fmt: skip
+                self.con.execute("select ticker, name, induty_code, market from stocks s left join (select ticker, count(*) n from holdings group by ticker) h"
+                                 " using (ticker) order by active desc, coalesce(n, 0) desc, market, name")]  # 많이 담긴 종목 먼저 — 시가총액은 쓸 권리가 없어 모른다. 담은 수는 한 번에 센다(종목마다 세면 3,000명에서 4초)  # fmt: skip
         return "window.STOCKS=" + json.dumps(rows, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c") + ";"
 
     def match(self, q: str) -> str | None:
@@ -2871,6 +2871,9 @@ class App:
         하루 전보다 담은 사람·조회수가 조금이라도 늘면 ▲, 줄면 ▼, 같으면 – (NEW 는 쓰지 않는다, 사용자 10/10).
         3명 이상일 때만 순위에 — 사람이 적을 때 누가 무엇을 담았는지 짐작되지 않게."""
         now = datetime.now().replace(minute=0, second=0, microsecond=0)
+        return self.cached(f"week:{now.isoformat()}", lambda: self._this_week(now))  # 정각마다 한 번만 센다 — 피드를 열 때마다 세면 열람 30만 줄에서 70ms 가 모두의 기다림 (규모 점검 10/11)
+
+    def _this_week(self, now: datetime) -> str:
         cur, prev = self.tally(now), self.tally(now - timedelta(days=1))
         up = '<span class="text-[#E5534B] text-[12px]" aria-label="올랐어요">▲</span>'
         down = '<span class="text-[#3B7DDD] text-[12px]" aria-label="내렸어요">▼</span>'

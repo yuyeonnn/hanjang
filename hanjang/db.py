@@ -187,6 +187,7 @@ MIGRATIONS = (
     "create index if not exists disclosures_stock on disclosures (ticker, date)",
     "create index if not exists regrams_ref on regrams (kind, ref, week)",
     "create index if not exists likes_note on likes (ticker, week)",
+    "create index if not exists views_week on views (page, at)",  # 피드 「이번 주 한장」 — 지난 7일 열람을 센다. 열람 30만 줄에서 35ms → 범위만 (규모 점검 10/11)
 )
 
 
