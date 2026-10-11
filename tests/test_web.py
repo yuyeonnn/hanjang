@@ -4,7 +4,6 @@ import re
 import io
 from datetime import date, datetime, timedelta
 import json
-from pathlib import Path
 from urllib.parse import quote, unquote
 
 from hanjang import collect, db, learn, mail, notes, sources, web
