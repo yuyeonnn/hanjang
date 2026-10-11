@@ -776,3 +776,7 @@ def test_article_numbers_written_differently_are_the_same_number():
     assert not articles.strange("8월 3일 기준으로 319만 7,793주를 더 보유했고 비율은 6.88%예요. 9월 말까지의 실적이에요.", doc)
     assert articles.strange("320만 7,793주를 더 보유했어요.", doc) == {"320", "7793"}  # 끊어 읽은 값이 원문과 다르면 봐주지 않는다
     assert articles.strange("7월 3일에 보고했어요.", doc) == {"7"}
+    assert articles.readable("보유 주식을 6,830,344주 줄였고 발행주식은 196,000,000주, 금액은 164,500,200,000원이에요. 1,234주는 그대로.") == \
+        "보유 주식을 683만 344주 줄였고 발행주식은 1억 9,600만주, 금액은 1,645억 20만원이에요. 1,234주는 그대로."
+    assert not articles.strange(articles.readable("6,830,344주"), notes.numbers("6,830,344"))  # 끊어 읽은 뒤에도 같은 수로 본다
+    assert notes.llm.model_of("writer", "article") == notes.llm.BY_TASK["article"]
