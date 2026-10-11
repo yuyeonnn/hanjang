@@ -1484,3 +1484,30 @@ def test_cookie_of_a_deleted_account_goes_to_login_not_error():
     con.execute("delete from users")
     s, h, _ = call(app, "/feed", cookie=ck)  # 다른 기기에서 탈퇴한 뒤 남은 쿠키
     assert s.startswith("303") and h["Location"] == "/" and "Max-Age=0" in h["Set-Cookie"]
+
+
+def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
+    """아침 소식 메일 — 내 종목에 새 공시가 있거나 오늘·내일 일정이 있는 사람에게만 한 통. 끈 사람은 빼고."""
+    from datetime import date
+
+    from hanjang import daily, mail, sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text, html)) or True)
+    today = date(2026, 10, 14)  # 수요일
+    assert daily.brief(con, today) == 0 and not sent  # 새 소식 없음 — 보내지 않는다
+    collect.save_disclosures(con, [sources.Disclosure("20261013000001", "005930", date(2026, 10, 13), "주요사항보고서(자기주식취득결정)")])
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    assert daily.brief(con, today) == 1
+    to, subject, text, html = sent[0]
+    assert subject == "[한장] 오늘 내 종목 소식 — 삼성전자" and "삼성전자" in text and "안내 메일」을 끄면" in text
+    assert "오늘 내 종목 소식" in html and "한장에서 보기" in html and "사고팔라는 뜻이 아니에요" in html
+    con.execute("update users set mail_on = 0")
+    assert daily.brief(con, today) == 0  # 안내 메일을 끈 사람
+    con.execute("update users set mail_on = 1")
+    con.execute("delete from disclosures")
+    con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
+    assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
