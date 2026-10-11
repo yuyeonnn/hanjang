@@ -1543,3 +1543,23 @@ def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
     con.execute("delete from disclosures")
     con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
     assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
+
+
+def test_smoke_draws_real_pages_without_writing_to_the_db(tmp_path, monkeypatch):
+    """올린 뒤 확인(hanjang.smoke · deploy/check.sh)이 꺼내는 화면 — 진짜 DB 에는 아무것도 쓰지 않는다."""
+    import sqlite3
+
+    from hanjang import smoke
+
+    path = tmp_path / "h.db"
+    con = db.connect(path)
+    collect.save_universe(con, [("005930", "삼성전자")], {})
+    con.execute("insert into users (id, email, created_at, nickname, rules_at) values (1, 'a@b.c', '2026-10-01', '가가', 'x')")
+    con.execute("insert into holdings values (1, '005930', '2026-10-01')")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(smoke.db, "PATH", path)
+    got = smoke.pages()
+    assert got["로그인"][0] == "200" and 'name="code"' in got["로그인(메일 보냄)"][1] and got["/"][0] == "200" and "삼성전자" in got["/"][1]
+    assert {"/sw.js", "/stocks.js", "/me/settings", "/calendar"} <= set(got) and all(s in ("200", "404", "503") for s, _ in got.values())
+    assert sqlite3.connect(path).execute("select count(*) from views").fetchone() == (0,)  # 열어본 기록이 진짜 DB 에 남지 않는다

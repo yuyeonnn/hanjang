@@ -1,0 +1,18 @@
+#!/bin/sh
+# 올린 뒤 확인 — 내 컴퓨터에서: sh deploy/check.sh   (node 가 있어야 한다)
+# 서버가 실제로 만드는 화면 20여 개를 꺼내 상태와 스크립트 문법을 보고, 바깥 주소로도 한 번 열어 본다. 문제가 있으면 실패로 끝난다.
+# 왜: 테스트는 화면의 글자만 본다 — 스크립트 하나가 깨진 채 올라가 검색 자동완성·캡처 올리기가 멈춘 적이 있다(2026-10-11).
+set -eu
+HOST="${HANJANG_SSH:-hanjang-deploy@34.44.40.196}"
+KEY="${HANJANG_KEY:-$HOME/.ssh/hanjang-deploy}"
+URL="${HANJANG_URL:-https://34-44-40-196.sslip.io}"
+HERE="$(dirname "$0")"
+
+ssh -i "$KEY" -o BatchMode=yes "$HOST" 'cd /srv/hanjang && sudo -u hanjang /srv/hanjang/.venv/bin/python -X utf8 -m hanjang.smoke' | node "$HERE/check.js"
+
+for p in / /privacy /health; do
+	code=$(curl -s -o /dev/null -w "%{http_code}" "$URL$p")
+	echo "바깥에서 $p → $code"
+	[ "$code" = 200 ] || [ "$p" = /health ] || exit 1
+done
+ssh -i "$KEY" -o BatchMode=yes "$HOST" 'systemctl is-active hanjang-web >/dev/null && echo "화면 서버 켜짐" || { echo "화면 서버 꺼짐"; exit 1; }; n=$(sudo journalctl -u hanjang-web --since "-5 min" --no-pager -o cat | grep -c "Traceback" || true); echo "최근 5분 오류 기록 ${n}건"; [ "$n" = 0 ]'
