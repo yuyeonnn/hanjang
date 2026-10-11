@@ -1687,3 +1687,17 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
     assert top.count('aria-label="도장 받음"') == 2 and "도장 1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
+
+
+def test_web_main_block_only_uses_names_that_exist():
+    """`python -m hanjang.web` 의 시작 코드 — 테스트는 모듈만 가져오고 이 블록은 돌리지 않는다. 10/12 에 이름 하나(env)가 빠져 서버가 켜지지 않았다."""
+    import ast
+    import builtins
+
+    tree = ast.parse(Path(web.__file__).read_text(encoding="utf-8"))
+    main = next(n for n in tree.body if isinstance(n, ast.If))
+    local = {x.id for x in ast.walk(main) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store)}
+    local |= {(a.asname or a.name).split(".")[0] for n in ast.walk(main) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    local |= {n.name for n in ast.walk(main) if isinstance(n, ast.ClassDef)}
+    used = {x.id for x in ast.walk(main) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load)}
+    assert not [n for n in used if n not in local and not hasattr(web, n) and not hasattr(builtins, n)]

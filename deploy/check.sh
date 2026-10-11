@@ -10,6 +10,8 @@ HERE="$(dirname "$0")"
 
 ssh -i "$KEY" -o BatchMode=yes "$HOST" 'cd /srv/hanjang && sudo -u hanjang /srv/hanjang/.venv/bin/python -X utf8 -m hanjang.smoke' | node "$HERE/check.js"
 
+# 화면 서버가 켜질 때까지 기다린다 — 다시 켠 직후 curl 을 하면 502 가 나와 헷갈린다. 20초 안에 안 켜지면 실패(10/12: 시작 코드의 이름 하나가 빠져 켜지지 못한 적이 있다)
+ssh -i "$KEY" -o BatchMode=yes "$HOST" 'for i in 1 2 3 4 5 6 7 8 9 10; do systemctl is-active --quiet hanjang-web && exit 0; sleep 2; done; echo "화면 서버가 20초 안에 켜지지 않았다:"; sudo journalctl -u hanjang-web --since "-2 min" --no-pager -o cat | grep -A3 Traceback | tail -8; exit 1'
 for p in / /privacy /health; do
 	code=$(curl -s -o /dev/null -w "%{http_code}" "$URL$p")
 	echo "바깥에서 $p → $code"
