@@ -6,7 +6,8 @@ from datetime import date, datetime, timedelta
 import json
 from urllib.parse import quote, unquote
 
-from hanjang import collect, db, learn, mail, notes, web
+from hanjang import collect, db, learn, mail, notes, sources, web
+from hanjang.pages import home
 
 SECRET = "test-secret"
 
@@ -462,9 +463,9 @@ def test_industry_bars():
 
 def test_demo_browse_without_email_is_read_only(monkeypatch):
     app, con = _app()
-    monkeypatch.setattr(web, "env", lambda: {})
+    monkeypatch.setattr(sources, "env", lambda: {})
     assert call(app, "/demo")[0].startswith("404")  # 꺼져 있으면 없다
-    monkeypatch.setattr(web, "env", lambda: {"DEMO": "1"})
+    monkeypatch.setattr(sources, "env", lambda: {"DEMO": "1"})
     s, h, _ = call(app, "/demo")
     ck = h["Set-Cookie"].split(";")[0]
     assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
@@ -635,7 +636,7 @@ def test_adding_a_stock_without_note_starts_first_note_now(monkeypatch):
     con.execute("insert or ignore into stocks (ticker, name, active) values ('036620', '감성코퍼레이션', 0)")
     con.commit()
     started, gate = [], threading.Event()
-    monkeypatch.setattr(web, "FIRST", lambda t: (started.append(t), gate.wait(2)))
+    monkeypatch.setattr(home, "FIRST", lambda t: (started.append(t), gate.wait(2)))
     ck = _login(app)
     call(app, "/add", "POST", "q=036620", ck)
     assert started == ["036620"] and "036620" in app.making
@@ -724,7 +725,7 @@ def test_installable_app_pieces_are_public(monkeypatch):
     assert "/offline" in call(app, "/sw.js")[2] and "연결이 끊겼어요" in call(app, "/offline")[2]
     assert 'rel="manifest"' in call(app, "/")[2]
     assert call(app, "/.well-known/assetlinks.json")[0].startswith("404")  # 지문을 넣기 전엔 닫혀 있다
-    monkeypatch.setattr(web, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
+    monkeypatch.setattr(sources, "env", lambda: {"TWA_PACKAGE": "kr.hanjang.app", "TWA_SHA256": "AA:BB"})
     s, _, body = call(app, "/.well-known/assetlinks.json")
     assert json.loads(body)[0]["target"] == {"namespace": "android_app", "package_name": "kr.hanjang.app", "sha256_cert_fingerprints": ["AA:BB"]}
 
@@ -1203,7 +1204,7 @@ def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
     app, _ = _app()
     mails = []
     monkeypatch.setattr(mail, "send", lambda to, *a, **k: mails.append(to))
-    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
+    monkeypatch.setattr(sources, "env", lambda: {"REVIEW_EMAIL": "Review@hanjang.test", "REVIEW_CODE": "482913"})
     assert "만료" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=482913")[2]  # 먼저 이메일을 넣어야 한다(요청 한도를 거친다)
     assert 'name="code"' in call(app, "/login", "POST", "email=review%40hanjang.test&agree=1")[2] and mails == []
     assert "4번 남음" in call(app, "/login/code", "POST", "email=review%40hanjang.test&code=000000")[2]
@@ -1211,7 +1212,7 @@ def test_reviewer_logs_in_without_a_mailbox(monkeypatch):
     assert s.startswith("303") and "s=" in h["Set-Cookie"]
     call(app, "/login", "POST", "email=a%40b.c&agree=1")
     assert mails == ["a@b.c"] and "맞지 않아요" in call(app, "/login/code", "POST", "email=a%40b.c&code=482913")[2]
-    monkeypatch.setattr(web, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
+    monkeypatch.setattr(sources, "env", lambda: {"REVIEW_EMAIL": "r@hanjang.test", "REVIEW_CODE": "12"})  # 6자리 숫자가 아니면 끈 것 — 보통 메일 로그인
     call(app, "/login", "POST", "email=r%40hanjang.test&agree=1")
     assert mails[-1] == "r@hanjang.test"
 
@@ -1256,7 +1257,7 @@ def test_report_block_rules_and_ban(monkeypatch):
     app, con = _app()
     mails = []
     monkeypatch.setattr(mail, "send", lambda to, subject, text, *a, **k: mails.append((subject, text)))
-    monkeypatch.setattr(web, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
+    monkeypatch.setattr(sources, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
     con.execute("insert into users (id, email, created_at, nickname, bio) values (1, 'a@b.c', '2026-10-01', '가가', '소개'), (2, 'b@b.c', '2026-10-01', '나나', null), (3, 'c@b.c', '2026-10-01', '다다', null)")
     con.commit()
     a, b, c = (f"s={web.sign(str(i), SECRET)}" for i in (1, 2, 3))
