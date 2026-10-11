@@ -1013,8 +1013,11 @@ def figure(f: dict | None) -> str:
     return ""
 
 
-def chapter(title: str, body: str, extra: str = "") -> str:
-    return ('<article class="mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+WHO_ICONS = ("badge", "account_balance")  # 임원 거래·기관 지분 — 노트의 「임원·큰손은 어떻게 움직였나요?」(#who)로 간다. 그 밖은 「요즘 생긴 일」(#recent)
+
+
+def chapter(title: str, body: str, extra: str = "", anchor: str = "") -> str:
+    return (f'<article {f"""id="{anchor}" """ if anchor else ""}class="scroll-mt-20 mb-12 flex flex-col gap-space-sm"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
             f'<h3 class="font-headline-md text-headline-md text-on-surface">{e(title)}</h3></div>'
             f'<div class="font-body-reading text-body-reading text-on-surface leading-loose">{body}</div>{extra}</article>')  # fmt: skip
 
@@ -1192,16 +1195,17 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
-    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 노트 본문(원래 내용)은 그 아래 그대로 (사용자 10/11)
+    recent = ""
+    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 「좋게 볼 점과 주의해서 볼 점」 아래에 놓는다 (사용자 10/11)
         rows = "".join(
-            f'<a href="{e(href)}" class="py-3 flex items-start gap-2.5"><span class="material-symbols-outlined text-[18px] mt-0.5 {tint}">{icon}</span>'
+            f'<a href="{"#who" if icon in WHO_ICONS else e(href)}" class="py-3 flex items-start gap-2.5"><span class="material-symbols-outlined text-[18px] mt-0.5 {tint}">{icon}</span>'
             f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(what)}</span>'
             f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(sub)}</span></span>'
             f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
             for _, icon, tint, _, _, what, sub, when, href, _ in report["events"][:5])  # fmt: skip
-        parts.append('<section class="mb-12"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
-                     '<h3 class="font-headline-md text-headline-md text-on-surface">요즘 생긴 일</h3></div>'
-                     f'<div class="mt-1 flex flex-col divide-y divide-surface-container-high/70">{rows}</div></section>')  # fmt: skip
+        recent = ('<section id="recent" class="scroll-mt-20 mb-12"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+                  '<h3 class="font-headline-md text-headline-md text-on-surface">요즘 생긴 일</h3></div>'
+                  f'<div class="mt-1 flex flex-col divide-y divide-surface-container-high/70">{rows}</div></section>')  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
         parts.append('<section class="mb-12 pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
@@ -1229,7 +1233,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         elif sec["title"].startswith("임원·큰손"):
             extra = ('<p class="font-label-micro text-label-micro text-outline leading-normal">임원 보고에는 회사에서 받은 주식(보상)도 들어가요. '
                      "누가 늘리고 줄였는지는 사실일 뿐, 따라 사고팔라는 뜻이 아니에요.</p>")  # fmt: skip
-        parts.append(chapter(sec["title"], text, extra))
+        parts.append(chapter(sec["title"], text, extra, "who" if sec["title"].startswith("임원·큰손") else ""))
         if sec["title"].startswith(NEWS_TITLES):
             parts.append(dividend_block(report.get("divs", []), report.get("fin"), report.get("buys")))
     if not any(s["title"].startswith(NEWS_TITLES) for s in body["sections"]):
@@ -1251,6 +1255,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
                      + side("좋게 볼 점", body.get("good_title", ""), filled("good"), "border-secondary/60", "bg-secondary-container text-on-secondary-container", "text-secondary")
                      + side("주의해서 볼 점", body.get("concern_title", ""), filled("concern"), "border-tertiary/60", "bg-tertiary-fixed text-on-tertiary-fixed-variant", "text-tertiary")
                      + '<span class="font-label-micro text-label-micro text-outline leading-normal pt-1">좋게 볼 점·주의해서 볼 점은 코드가 정한 기준으로 나눴어요. 좋고 나쁨의 결론이 아니라 살펴볼 거리예요. 기준은 매출·영업이익 증감, 부채비율, ROE, 공시 종류. <a class="underline" href="/method">기준 보기</a></span></section>')  # fmt: skip
+    parts.append(recent)
     src = "기사·공시·재무" if any(f["id"][0] == "N" for f in facts) else "공시·재무"
     how = (f"{src}에서 코드가 뽑은 사실을 바탕으로 AI가 문장을 다듬었어요. 숫자는 코드가 원문과 대조했어요."
            if writer.startswith("llm") else f"{src}에서 코드가 뽑은 사실을 그대로 옮겼어요.")  # fmt: skip
@@ -1878,18 +1883,17 @@ class App:
             b = json.loads(body) if body else {}
             head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
-            sub, status = "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
-            if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 첫 줄 대신 (사용자 10/11: 딱딱한 요약 말고 이 문구로)
-                _, icon, tint, _, _, head, sub, when, _, _ = evs[0]  # 누르면 원문 화면이 아니라 이 종목 노트로 — 같은 내용이 노트 맨 위에 있다
-                head = f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(head)}'
+            event, status = "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
+            if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 핵심 한 줄 아래에. 누르면 노트의 그 대목으로 (임원·큰손은 #who, 그 밖은 #recent)
+                _, icon, tint, _, _, what, sub, when, _, _ = evs[0]
+                event = (f'<a href="/n/{e(t)}#{"who" if icon in WHO_ICONS else "recent"}" class="mt-2 block"><p class="text-[15px] leading-[22px] font-semibold text-on-surface">'
+                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p>'
+                         f'<p class="mt-0.5 text-[14px] leading-[22px] text-on-surface-variant">{e(sub)}</p></a>')  # fmt: skip
                 status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
-            else:
-                head = e(head)
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
-                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{head}</p>'
-                       + (f'<p class="mt-1 text-[14px] leading-[22px] text-on-surface-variant">{e(sub)}</p>' if sub else "") + '</a>'
+                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p></a>{event}'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full flex-1">'
@@ -2268,7 +2272,7 @@ class App:
 
     def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
         """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
-        nick 을 주면 남의 프로필에 보이는 모양 — 나무와 날 수만(언제 들어왔는지 보이는 잔디·다음 단계는 본인만). 비공개 계정은 부르는 쪽이 거른다."""
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무·날 수·잔디(「다음 단계까지 며칠」만 본인에게). 비공개 계정은 부르는 쪽이 거른다 (사용자 10/11: 잔디도 보이게)."""
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         if nick is None:
@@ -2280,7 +2284,9 @@ class App:
                     f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
                     f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                     f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
-                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p></section>')  # fmt: skip
+                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p>'
+                    f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {tree.grass(counts, today)[1]}일 들어왔어요</p>'
+                    f'{tree.grass(counts, today)[0]}</section>')  # fmt: skip
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
         return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
