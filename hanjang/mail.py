@@ -266,7 +266,7 @@ def weekly_mail(week: str, stocks: list[dict], events=(), holidays=()) -> tuple[
             f'<div style="margin-top:2px;font-size:56px;font-weight:900;letter-spacing:-2px;line-height:1.1;color:{GREEN}">한장</div></td></tr>',
             f'<tr><td style="padding:28px 28px 0;font-size:16px;line-height:1.85;color:{INK}">'
             f'안녕하세요! 이번 주 <b>{e(head)}</b>의 노트가 올라왔어요. 회사 사정을 쉬운 글로 한 장씩 정리했어요.</td></tr>']  # fmt: skip
-    rows += [_wave(), f'<tr><td style="padding:8px 28px 16px">'
+    rows += [_wave(), '<tr><td style="padding:8px 28px 16px">'
              + _label("", "📅 CALENDAR")
              + "</td></tr>", _week(mon, events, holidays)]  # fmt: skip
     for k, s in enumerate(stocks, 1):
@@ -284,7 +284,7 @@ def weekly_mail(week: str, stocks: list[dict], events=(), holidays=()) -> tuple[
                      + "".join(f'<div style="margin-bottom:16px">{_chip(label, tone)} <b style="font-size:15px;color:{TINT[tone][1]}">{e(title)}</b>'
                                f'<div style="margin-top:6px;font-size:16px;line-height:1.85;color:{INK}">{" ".join(_sentence(x, urls) for x in items)}</div></div>'
                                for label, tone, title, items in sides))  # fmt: skip
-        rows += [_wave(), f'<tr><td style="padding:8px 28px 8px">'
+        rows += [_wave(), '<tr><td style="padding:8px 28px 8px">'
                  + _label(f"내 종목 {k:02d}", f'{e(s["name"])} <span style="font-size:13px;font-weight:400;color:{MUTE};letter-spacing:1px">{e(s["ticker"])}</span>')
                  + f"{body}</td></tr>"]  # fmt: skip
     rows += [

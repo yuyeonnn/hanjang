@@ -506,7 +506,7 @@ def quarter_facts(con: sqlite3.Connection, ticker: str, us: dict | None = None, 
         qname, months = span_label(ps, pe), f"회사 기준 {q}분기"
         ytd = span_label(con.execute("select min(period_start) from quarters where ticker = ? and year = ?", (ticker, y)).fetchone()[0], pe)
     else:
-        (name, months), qname, ytd = QLABEL[q], f"{y}년 {QLABEL[q][0]}", f"{y}년 1~{q * 3}월"
+        (_, months), qname, ytd = QLABEL[q], f"{y}년 {QLABEL[q][0]}", f"{y}년 1~{q * 3}월"
     url, out = link(rno), []
     if parts := [x for x in (_change("매출", rev, rp, "1년 전 같은 분기"), _change("영업이익", op, opp, "1년 전 같은 분기")) if x]:
         slots = {"분기": qname, "달": months} | _slots("매출", rev, rp) | _slots("이익", op, opp) | relation(rev, rp, op, opp)

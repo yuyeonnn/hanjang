@@ -351,6 +351,34 @@ def test_article_check_rules():
         with pytest.raises(ValueError):
             articles.check(ok | bad, fs)
     assert "1,645억" in articles.clean_doc(".x{a:b} 한화/공시 | 금액 | 164,500,200,000 ※ 관련공시 | 뒤")  # 큰 숫자 읽기
+def test_article_event_paragraphs_need_a_number_and_man_eok_reads_as_jo(tmp_path):
+    """27편 읽기(10/12): 사건 문단에 날짜 말고 숫자가 없으면 무슨 일인지 설명하지 못한 글 — 새 글은 검사에서, 옛 글은 drop_thin 으로 뺀다.
+    「9만 6,434억 원」은 억 원 단위 표를 그대로 읽은 모양 — 「9조 6,434억 원」으로."""
+    import json
+
+    from hanjang import articles, db
+
+    fs = [{"id": "E1", "text": "10월 7일 합병·인수 공시 「주식교환·이전결정」", "url": "u", "tone": 0, "doc": "교환비율 | 1 : 0.5 | 금액 | 96,434 || 큰 숫자 읽기: 96,434 → 9만 6,434"},
+          {"id": "F1", "text": "2025년 매출 10조원", "url": "u", "tone": 1}]  # fmt: skip
+    s = lambda t, r=("E1",): {"text": t, "refs": list(r)}  # noqa: E731
+    long = "자회사가 주식을 교환하기로 했다고 해요. 무슨 일이 있었던 걸까요? " * 30
+    thin = {"title": "자회사, 주식 교환으로 새 판을 짠다고?", "paragraphs": [s("10월 7일에 공시를 냈어요."), s(long), s("2025년 매출은 10조원이에요.", ("F1",))]}
+    with pytest.raises(ValueError, match="숫자가 없음"):
+        articles.check(thin, fs)
+    full = thin | {"paragraphs": [s("10월 7일에 공시를 냈어요. 금액은 9만 6,434억 원이에요."), s(long), s("2025년 매출은 10조원이에요.", ("F1",))]}
+    assert articles.check(full, fs)["paragraphs"][0]["text"] == "10월 7일에 공시를 냈어요. 금액은 9조 6,434억 원이에요."
+    assert articles.units("1,234만 5,678주 · 3만 명") == "1,234만 5,678주 · 3만 명"  # 억 앞의 만만 바꾼다
+    con = db.connect(tmp_path / "a.db")
+    con.execute("insert into stocks (ticker, name) values ('005930', '삼성전자')")
+    con.execute("insert into users (id, email, created_at) values (1, 'a@b.c', '2026-10-01')")
+    for i, ps in ((1, thin["paragraphs"]), (2, full["paragraphs"])):
+        con.execute("insert into articles (id, ref, ticker, date, kind, body, made_at) values (?, ?, '005930', '2026-10-07', 'MA', ?, 'x')",
+                    (i, f"r{i}", json.dumps({"title": "t", "paragraphs": ps, "links": {}})))  # fmt: skip
+    con.execute("insert into regrams (user_id, kind, ref, week, at) values (1, 'article', '1', '', 'x')")
+    assert articles.drop_thin(con) == 1 and articles.drop_thin(con) == 0
+    assert con.execute("select id from articles").fetchall() == [(2,)] and con.execute("select count(*) from regrams").fetchone() == (0,)
+
+
 def test_quoting_a_news_title_is_rejected():
     fs = [{"id": "N1", "text": "10월 8일 연합뉴스 소식 「삼성 실적 신기록」 — 영업이익 107조", "tone": 0, "url": "https://n",
            "slots": {"날짜": "10월 8일", "매체": "연합뉴스", "제목": "「삼성 실적 신기록」"}}]

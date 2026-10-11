@@ -5,9 +5,9 @@ from datetime import date, datetime
 from hanjang import quiz
 
 from hanjang import learn, policy, sources
-from hanjang.charts import groups, index_chart, loss_bars, rate_chart, rate_ladder
-from hanjang.notepage import figure, paras
-from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, mark, page, top_bar
+from hanjang.charts import index_chart, loss_bars, rate_chart, rate_ladder
+from hanjang.notepage import figure
+from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, page, top_bar
 
 
 class LearnPages:
@@ -92,7 +92,8 @@ class LearnPages:
                      + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
-                     + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
+                     + '<div class="relative overflow-hidden">' + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
+                     + quiz.stamp(slug in stamps) + "</div>"  # 다 맞힌 글엔 본문 오른쪽 아래에 도장 — 가장자리에 걸쳐 조금 잘리게 (사용자 10/12)
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
@@ -100,13 +101,13 @@ class LearnPages:
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
-        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 도장(다 맞힘) · 옅은 체크(읽음) · 빈 동그라미 (사용자 10/12: 따로 떼지 말고 글 옆에)
+        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 동그라미 하나: 세 문제를 다 맞히면 도장, 아니면 빈 동그라미
+        # (읽기만 한 글의 옅은 체크는 뺐다 — 사용자 10/12: 뜻이 헷갈린다, 다 동그라미로)
         stamps = quiz.done(self.con, uid)
-        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
 
         def mark(sl: str) -> str:
             cls, icon, label = (("bg-primary text-on-primary", "verified", "도장 받음") if sl in stamps else
-                                ("bg-primary-fixed text-primary", "check", "읽음") if sl in read else ("border border-outline-variant text-outline-variant", "circle", "아직 안 읽음"))  # fmt: skip
+                                ("border border-outline-variant text-outline-variant", "circle", "아직 도장 없음"))  # fmt: skip
             return f'<span aria-label="{label}" title="{label}" class="mt-0.5 w-7 h-7 shrink-0 rounded-full flex items-center justify-center {cls}"><span class="material-symbols-outlined text-[16px]">{icon}</span></span>'
 
         groups = "".join(

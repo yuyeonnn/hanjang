@@ -20,13 +20,13 @@ from urllib.parse import parse_qs, quote
 from hanjang import db, notes, sources, tree
 from hanjang.auth import check_login, read_session, session_cookie
 from hanjang.pwa import MANIFEST, OFFLINE, SW
-from hanjang.ui import BIG_AT_ONCE, BIG_POSTS, BODY_MAX, CSP, FORM_MAX, Me, PEOPLE, STATIC, e, page, photo_url, row
+from hanjang.ui import BIG_AT_ONCE, BIG_POSTS, BODY_MAX, CSP, FORM_MAX, Me, PEOPLE, STATIC, e, page, photo_url
 # 테스트·smoke 가 web.X 로 닿는 이름 — 여기서 다시 내보낸다 (화면 코드는 쓰지 않는다)
-from hanjang.auth import CODE_TRIES, LEGACY_UNTIL, LINK_TTL, LOGIN_ALL_HOURLY, LOGIN_IP_HOURLY, SESSION_TTL, login_token, sign
-from hanjang.charts import bars, ind_tag, pie
-from hanjang.notepage import business_block, dividend_block, figure, metrics, money_blocks, owners_block, paras, redone, render_note, risk_block, safe_url, sentence, soften
-from hanjang.ui import BOOK_FACE, CSS_TAG, FIRST, PHOTO, Photos, book_face, guru_face, industry_chip, logo, mark, photo_for, sector
-from hanjang.pages import login, home, calendar as calendar_pages, profile, social, feed, big, learn as learn_pages
+from hanjang.auth import CODE_TRIES, LEGACY_UNTIL, LINK_TTL, LOGIN_ALL_HOURLY, LOGIN_IP_HOURLY, SESSION_TTL, login_token, sign  # noqa: F401
+from hanjang.charts import bars, ind_tag, pie  # noqa: F401
+from hanjang.notepage import business_block, dividend_block, figure, metrics, money_blocks, owners_block, paras, redone, render_note, risk_block, safe_url, sentence, soften  # noqa: F401
+from hanjang.ui import BOOK_FACE, CSS_TAG, FIRST, PHOTO, Photos, book_face, guru_face, industry_chip, logo, mark, photo_for, sector  # noqa: F401
+from hanjang.pages import login, home, calendar as calendar_pages, profile, social, feed, big, learn as learn_pages  # noqa: F401
 
 
 class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profile.ProfilePages, social.SocialPages, feed.FeedPages, big.BigPages, learn_pages.LearnPages):
@@ -38,8 +38,6 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
         self.local = threading.local()
         self.making: set[str] = set()  # 지금 첫 노트를 만드는 종목 (담자마자 바로 받기)
         self.making_lock = threading.Lock()  # 화면 서버는 여러 실에서 돈다 — 같은 종목을 두 번 받지 않게
-        self.sent: dict[str, list[float]] = {}  # ponytail: 링크 요청 시각을 메모리에 — 서버를 다시 켜면 비워진다. 여러 대면 DB 로
-        self.codes: dict[str, list] = {}  # 이메일 → [코드, 만료 시각, 틀린 횟수]
         self.uploads = threading.Semaphore(BIG_AT_ONCE)
         self.memo: dict = {}  # cached() — 매일 실행 뒤에만 바뀌는 큰 조각(종목 목록 186KB · 국민연금·유명 투자자 페이지)
         self.scans: dict[int, list[float]] = {}  # ponytail: 캡처 읽기 시각 — 메모리에. 여러 대면 DB 로
@@ -374,7 +372,7 @@ if __name__ == "__main__":
     if len(cfg.get("SECRET", "")) < 32:  # 짧거나 없는 키로는 로그인 링크·쿠키를 위조당한다 — 켜지 않는다
         sys.exit("SECRET 이 없거나 짧아요(32자 이상). 만들기: python -c \"import secrets; print(secrets.token_hex(32))\"")
     db.connect().close()
-    app = App(db.tune(sqlite3.connect(db.PATH, timeout=30, check_same_thread=False)), cfg["SECRET"])
+    app = App(db.connect(threads=True), cfg["SECRET"])  # 표·색인·구조 변경(migrate)도 여기서 — 올린 직후 매일 실행보다 먼저 켜진다
     host, port = cfg.get("HOST", "127.0.0.1"), int(os.environ.get("PORT") or cfg.get("PORT", "8000"))  # 서버에선 127.0.0.1 그대로 두고 앞의 Caddy 가 https 를 맡는다
     print(f"한장 — http://{host}:{port}", file=sys.stderr)
     make_server(host, port, app, server_class=Server).serve_forever()

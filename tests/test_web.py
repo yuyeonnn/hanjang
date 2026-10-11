@@ -4,7 +4,6 @@ import re
 import io
 from datetime import date, datetime, timedelta
 import json
-from pathlib import Path
 from urllib.parse import quote, unquote
 
 from hanjang import collect, db, learn, mail, notes, sources, web
@@ -14,7 +13,7 @@ SECRET = "test-secret"
 
 
 def _app(now=1_000_000.0):
-    con = db.connect(":memory:")
+    con = db.connect(":memory:", threads=True)  # 화면 서버와 같게 — 여러 실에서 연결 하나
     # 테스트가 표에 바로 넣는 사람(닉네임 있음)은 이용 규칙에 동의한 것으로 — 동의 관문 자체는 닉네임 테스트가 본다
     con.execute("create trigger agreed after insert on users when new.nickname is not null begin update users set rules_at = 'x' where id = new.id; end")
     collect.save_universe(con, [("005930", "삼성전자")], {})
@@ -156,7 +155,7 @@ def test_learn_tab_lists_and_opens_articles():
     assert '<strong class="font-semibold text-primary' in body and "**" not in body
     assert call(app, "/learn/nope", cookie=ck)[0].startswith("404")
     for a in learn.ARTICLES:  # 읽기 팁에도 권유·예측 말은 없다
-        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "")
+        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "").replace("수요예측", "")  # 「수요예측」은 공모 절차의 정식 이름
         assert not notes.FORBIDDEN.search(text), a["slug"]
 
 
@@ -1679,10 +1678,13 @@ def test_learn_quiz_daily_question_and_path_stamps():
     (uid,) = con.execute("select id from users").fetchone()
     assert quiz.questions("statements") == quiz.QUIZ["statements"] and quiz.daily(date(2026, 10, 12))[0] == "daily:2026-10-12"
     top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 안 읽음" in top
+    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 도장 없음" in top and "읽음\"" not in top
     art = call(app, "/learn/statements", cookie=ck)[2]
     assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
+    assert 'id="stamp"' in art and "display:none" in art[art.index('id="stamp"'):art.index('id="stamp"') + 400]  # 도장은 숨겨져 있다가
     call(app, "/learn/done", "POST", "slug=statements", ck)
+    after = call(app, "/learn/statements", cookie=ck)[2]
+    assert "display:block" in after[after.index('id="stamp"'):after.index('id="stamp"') + 400]  # 다 맞히면 본문 오른쪽 아래에 찍힌다
     call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
