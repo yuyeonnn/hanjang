@@ -151,6 +151,7 @@ JS = ("<script>document.querySelectorAll('[data-quiz]').forEach(box=>{const qs=[
       "if(String(i)===q.dataset.a){q.dataset.ok=1;b.style.background='#bceddc';b.style.borderColor='#154539';b.style.fontWeight='600';"
       "q.querySelector('[data-why]').hidden=false;ok++;"
       "if(ok===qs.length){box.querySelector('[data-end]').style.display='flex';"
+      "const st=document.getElementById('stamp');if(st&&box.dataset.quiz.indexOf('daily:')!==0)st.style.display='block';"
       "fetch('/learn/done',{method:'POST',body:new URLSearchParams({slug:box.dataset.quiz})});}}"
       "else{b.disabled=true;b.style.opacity='.45';b.style.textDecoration='line-through';}}));});</script>")
 
@@ -177,3 +178,16 @@ def block(key: str, qs: list[tuple], stamped: bool, title: str, end: str) -> str
             f'<span class="material-symbols-outlined text-primary text-[20px]">quiz</span>{e(title)}</h2>{mark}</div>'
             f'<div class="divide-y divide-surface-container-high/70">{items}</div>'
             f'<p data-end style="display:none" class="mt-1 items-center gap-1 text-[14px] font-semibold text-primary"><span class="material-symbols-outlined text-[18px]">verified</span>{e(end)}</p></section>')  # fmt: skip
+
+
+def stamp(shown: bool) -> str:
+    """글 본문 오른쪽 아래에 찍는 도장 — 붉은 인주 빛, 살짝 기울고 글 뒤로 비친다. 오른쪽 가장자리에 걸쳐 조금 잘린다.
+    아직 못 받은 글에도 숨겨 넣어 두었다가, 세 문제를 다 맞히는 순간 스크립트가 보여 준다."""
+    ring = "".join(f'<circle cx="90" cy="90" r="{r}" fill="none" stroke="#933625" stroke-width="{w}"/>' for r, w in ((82, 5), (72, 1.5), (46, 1.5)))
+    ticks = "".join(f'<circle cx="{90 + 59 * c:.1f}" cy="{90 + 59 * sn:.1f}" r="2" fill="#933625"/>' for c, sn in ((1, 0), (-1, 0)))
+    return (f'<svg id="stamp" aria-hidden="true" viewBox="0 0 180 180" width="250" height="250" '
+            f'style="position:absolute;pointer-events:none;right:-70px;bottom:0;opacity:.2;transform:rotate(-14deg);display:{"block" if shown else "none"}">{ring}{ticks}'
+            '<path id="stamp-top" d="M 34 90 A 56 56 0 0 1 146 90" fill="none"/><path id="stamp-bottom" d="M 28 90 A 62 62 0 0 0 152 90" fill="none"/>'
+            '<text font-size="13" font-weight="700" fill="#933625" letter-spacing="3"><textPath href="#stamp-top" startOffset="50%" text-anchor="middle">HANJANG · 읽기 팁</textPath></text>'
+            '<text font-size="13" font-weight="700" fill="#933625" letter-spacing="3"><textPath href="#stamp-bottom" startOffset="50%" text-anchor="middle">세 문제 다 맞힘</textPath></text>'
+            '<text x="90" y="101" text-anchor="middle" font-size="30" font-weight="800" fill="#933625">한장</text></svg>')  # fmt: skip

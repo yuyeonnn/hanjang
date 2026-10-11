@@ -1681,7 +1681,10 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 도장 없음" in top and "읽음\"" not in top
     art = call(app, "/learn/statements", cookie=ck)[2]
     assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
+    assert 'id="stamp"' in art and "display:none" in art[art.index('id="stamp"'):art.index('id="stamp"') + 400]  # 도장은 숨겨져 있다가
     call(app, "/learn/done", "POST", "slug=statements", ck)
+    after = call(app, "/learn/statements", cookie=ck)[2]
+    assert "display:block" in after[after.index('id="stamp"'):after.index('id="stamp"') + 400]  # 다 맞히면 본문 오른쪽 아래에 찍힌다
     call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
