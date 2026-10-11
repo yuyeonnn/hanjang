@@ -1,6 +1,6 @@
 """읽기 팁 퀴즈 — 글 끝의 세 문제 · 오늘의 한 문제 · 다 맞히면 도장 (사용자 10/12).
 
-문제의 답은 모두 글에 적힌 사실이거나 코드가 계산한 내 종목의 숫자다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1·2).
+문제의 답은 모두 그 글에 적힌 사실이다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1).
 글은 잠그지 않는다. 틀려도 다시 고를 수 있고, 세 문제를 다 맞히면 그 글에 도장이 찍힌다. AI 는 쓰지 않는다.
 QUIZ[slug] = [(물음, [보기 셋], 정답 번호(0부터), 풀이)]. 숫자를 DB 로 채우는 글(rates·long-short)은 문제가 없다 — 읽으면 도장.
 """
@@ -10,7 +10,6 @@ import zlib
 from datetime import date
 from html import escape as e
 
-from . import notes
 
 QUIZ = {
     "start": [
@@ -131,47 +130,15 @@ QUIZ = {
 }
 
 
-def mine(con: sqlite3.Connection, uid: int) -> dict[str, tuple]:
-    """내 종목 숫자로 내는 문제 — 글마다 하나(세 번째 문제 자리). 국내 종목의 최근 두 해 재무에서 코드가 만든다.
-    {글 slug: (물음, 보기, 정답, 풀이)} — 낼 수 없으면(재무가 없거나 적자·금융) 그 글은 빠진다."""
-    out = {}
-    rows = con.execute("select s.ticker, s.name from holdings h join stocks s using(ticker) where h.user_id = ? and s.market = 'KR' order by h.added_at", (uid,)).fetchall()
-    for t, name in rows:
-        fin = con.execute("select fiscal_year, revenue, operating_income, equity, liabilities from financials where ticker = ? order by fiscal_year desc limit 2", (t,)).fetchall()
-        if len(fin) < 2 or not fin[0][1] or not fin[1][1]:
-            continue
-        (y, rev, op, eq, li), (_, rev0, *_rest) = fin
-        nun = notes.josa(name, "은")
-        if "statements" not in out and rev != rev0:
-            out["statements"] = (f"내 종목 {name}의 {y}년 매출은 한 해 전보다 늘었을까요, 줄었을까요?", ["늘었어요", "줄었어요", "똑같아요"], 0 if rev > rev0 else 1,
-                                 f"{y}년 매출은 {notes.won(rev)}, 한 해 전은 {notes.won(rev0)}이었어요. 노트의 「회사 사정은 어떤가요?」에 나와요.")  # fmt: skip
-        if "sector-margin" not in out and op and op > 0:
-            m = round(op / rev * 100)
-            wrong = sorted({max(1, m // 3), m * 2 + 5} - {m})
-            if m >= 1 and len(wrong) == 2:
-                picks = sorted([m, *wrong])
-                out["sector-margin"] = (f"내 종목 {name}{nun} {y}년에 100원어치를 팔아 본업으로 몇 원쯤 남겼을까요?", [f"{x}원" for x in picks], picks.index(m),
-                                        f"영업이익 {notes.won(op)} ÷ 매출 {notes.won(rev)} = 100원당 약 {m}원이에요. 노트의 「100원 팔면 얼마 남았나」에 나와요.")  # fmt: skip
-        if "ratios" not in out and eq and eq > 0 and li and li != eq:
-            out["ratios"] = (f"내 종목 {name}의 {y}년 말 빚은 자기 돈(자본)보다 많을까요, 적을까요?", ["많아요(부채비율 100% 넘음)", "적어요(부채비율 100% 아래)", "빚이 없어요"], 0 if li > eq else 1,
-                             f"빚 {notes.won(li)}, 자기 돈 {notes.won(eq)} — 부채비율 {li / eq * 100:.0f}%예요. 업종마다 보통 수준이 달라요.")  # fmt: skip
-    return out
+def questions(slug: str) -> list[tuple]:
+    """그 글의 세 문제 — 모두 그 글에 적힌 내용에서(내 종목 숫자로 내는 문제는 뺐다: 공시 숫자를 외우고 있어야 풀 수 있었다, 사용자 10/12)."""
+    return list(QUIZ.get(slug, []))
 
 
-def questions(con: sqlite3.Connection, uid: int, slug: str) -> list[tuple]:
-    """그 글의 세 문제 — 내 종목 문제를 낼 수 있으면 세 번째 자리에."""
-    qs = list(QUIZ.get(slug, []))
-    if qs and (m := mine(con, uid).get(slug)):
-        qs[2] = m
-    return qs
-
-
-def daily(con: sqlite3.Connection, uid: int, today: date) -> tuple[str, tuple]:
-    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 짝수 날은 내 종목 문제(있으면), 그 밖엔 모든 글의 문제를 날마다 차례로."""
-    n = today.toordinal()
-    own = list(mine(con, uid).values())
+def daily(today: date) -> tuple[str, tuple]:
+    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 모든 글의 문제를 날마다 차례로."""
     pool = [q for qs in QUIZ.values() for q in qs]
-    return f"daily:{today.isoformat()}", (own[n // 2 % len(own)] if own and n % 2 == 0 else pool[n * 7 % len(pool)])
+    return f"daily:{today.isoformat()}", pool[today.toordinal() * 7 % len(pool)]
 
 
 def done(con: sqlite3.Connection, uid: int) -> set[str]:
