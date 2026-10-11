@@ -1449,9 +1449,9 @@ def test_line_tree_on_notice_error_and_offline_pages():
     assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body
 
 
-def test_for_you_ranks_my_stocks_events_by_score():
-    """오늘의 내 종목 — 담은 종목의 공시·다가오는 일정·큰손 움직임만, 가까운 것·무거운 것 먼저. 남의 종목은 안 나온다."""
-    from datetime import date
+def test_my_stock_card_shows_what_happened_to_it():
+    """내 종목 카드 — 그 종목의 공시·다가오는 일정·큰손 움직임 가운데 점수가 가장 큰 것을 노트 첫 줄 대신. 남의 종목 일은 안 나온다."""
+    from datetime import date, timedelta
 
     from hanjang import sources
 
@@ -1459,21 +1459,23 @@ def test_for_you_ranks_my_stocks_events_by_score():
     ck = _login(app)
     call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
     (uid,) = con.execute("select id from users").fetchone()
-    today = date(2026, 10, 11)
-    assert "오늘은 내 종목에 새로 생긴 일이 없어요" in app.for_you(uid, today)
-    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", date(2026, 10, 10), "주요사항보고서(자기주식취득결정)"),
-                                   sources.Disclosure("20261001000009", "005930", date(2026, 10, 1), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
+    today = date.today()
+    assert app.my_events(uid, today) == []
+    collect.save_disclosures(con, [sources.Disclosure("20261010000001", "005930", today - timedelta(days=1), "주요사항보고서(자기주식취득결정)"),
+                                   sources.Disclosure("20261001000009", "005930", today - timedelta(days=10), "단일판매ㆍ공급계약체결")])  # 열흘 전 — 7일 밖
     con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
-    con.execute("insert into events values ('005930', '2026-10-14', 'EARNINGS', '실적 발표', 'r1')")
-    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-08', 'r2')")
-    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', '2026-10-09', '임원', '상무', -100)")
+    con.execute("insert into events values ('005930', ?, 'EARNINGS', '실적 발표', 'r1')", ((today + timedelta(days=3)).isoformat(),))
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, ?, 'r2')", ((today - timedelta(days=3)).isoformat(),))
+    con.execute("insert into insiders (rcept_no, ticker, date, kind, who, change) values ('r3', '005930', ?, '임원', '상무', -100)", ((today - timedelta(days=2)).isoformat(),))
     con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
-    con.execute("insert into events values ('000660', '2026-10-12', 'EARNINGS', '남의 종목 실적', 'r4')")
-    h = app.for_you(uid, today)
-    order = [h.index(x) for x in ("자기주식취득결정", "실적 발표", "국민연금이 지분을 늘렸어요", "임원 주식 거래 보고 1건")]
-    assert order == sorted(order) and ">어제<" in h and ">D-3<" in h and "판 쪽이 많아요" in h
-    assert "남의 종목 실적" not in h and "공급계약" not in h and "오늘은 여기까지예요" in h
-    assert "오늘의 내 종목" in call(app, "/feed", cookie=ck)[2]
+    con.execute("insert into events values ('000660', ?, 'EARNINGS', '남의 종목 실적', 'r4')", ((today + timedelta(days=1)).isoformat(),))
+    con.commit()
+    heads = [c[5] for c in app.my_events(uid, today)]
+    assert [h for h in heads if "공급계약" in h or "남의" in h] == [] and len(heads) == 4
+    assert "자기주식취득결정" in heads[0] and heads[1] == "실적 발표" and heads[2] == "국민연금이 지분을 늘렸어요" and heads[3] == "임원 주식 거래 보고 1건"
+    home = call(app, "/", cookie=ck)[2]
+    assert "자기주식취득결정" in home and "어제 · 소식 3건 더" in home  # 맨 위 것 하나 + 몇 건 더
+    assert "오늘의 내 종목" not in call(app, "/feed", cookie=ck)[2]  # 피드에서는 뺐다
 
 
 def test_cookie_of_a_deleted_account_goes_to_login_not_error():
@@ -1510,3 +1512,30 @@ def test_things_found_by_clicking_through_every_screen(monkeypatch):
     con.commit()
     call(app, "/block", "POST", "u=50", ck)
     assert "피드로 돌아가기" in call(app, "/u/50", cookie=ck)[2]
+
+
+def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
+    """아침 소식 메일 — 내 종목에 새 공시가 있거나 오늘·내일 일정이 있는 사람에게만 한 통. 끈 사람은 빼고."""
+    from datetime import date
+
+    from hanjang import daily, mail, sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text, html)) or True)
+    today = date(2026, 10, 14)  # 수요일
+    assert daily.brief(con, today) == 0 and not sent  # 새 소식 없음 — 보내지 않는다
+    collect.save_disclosures(con, [sources.Disclosure("20261013000001", "005930", date(2026, 10, 13), "주요사항보고서(자기주식취득결정)")])
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    assert daily.brief(con, today) == 1
+    to, subject, text, html = sent[0]
+    assert subject == "[한장] 오늘 내 종목 소식 — 삼성전자" and "삼성전자" in text and "안내 메일」을 끄면" in text
+    assert "오늘 내 종목 소식" in html and "한장에서 보기" in html and "사고팔라는 뜻이 아니에요" in html
+    con.execute("update users set mail_on = 0")
+    assert daily.brief(con, today) == 0  # 안내 메일을 끈 사람
+    con.execute("update users set mail_on = 1")
+    con.execute("delete from disclosures")
+    con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
+    assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
