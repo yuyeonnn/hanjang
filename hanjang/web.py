@@ -2267,7 +2267,7 @@ class App:
 
     def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
         """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
-        nick 을 주면 남의 프로필에 보이는 모양 — 나무와 날 수만(언제 들어왔는지 보이는 잔디·다음 단계는 본인만). 비공개 계정은 부르는 쪽이 거른다."""
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무·날 수·잔디(「다음 단계까지 며칠」만 본인에게). 비공개 계정은 부르는 쪽이 거른다 (사용자 10/11: 잔디도 보이게)."""
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         if nick is None:
@@ -2279,7 +2279,9 @@ class App:
                     f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
                     f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                     f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
-                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p></section>')  # fmt: skip
+                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p>'
+                    f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {tree.grass(counts, today)[1]}일 들어왔어요</p>'
+                    f'{tree.grass(counts, today)[0]}</section>')  # fmt: skip
         grass, came = tree.grass(counts, today)
         nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
         return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'

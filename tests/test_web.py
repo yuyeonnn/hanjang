@@ -1425,7 +1425,7 @@ def test_others_see_my_tree_unless_private():
     con.commit()
     a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
     p = call(app, "/u/1", cookie=b)[2]
-    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" not in p  # 나무와 날 수만 — 잔디는 본인만
+    assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" in p and "까지 " not in p[p.index("가가의 나무"):p.index("최근 석 달")].replace("지금까지", "")  # 나무·날 수·잔디 — 「다음 단계까지」만 본인에게
     call(app, "/me/private", "POST", "", a)
     assert "가가의 나무" not in call(app, "/u/1", cookie=b)[2]  # 비공개 — 승인 전엔 안 보인다
     call(app, "/follow", "POST", "u=1", b)
