@@ -27,6 +27,20 @@ VERSION = 2  # 기사 쓰는 규칙이 크게 바뀌면 올린다 — 그 전 �
 GIVE_UP = 2  # 한 사건을 쓰려고 AI 를 부른 실행 횟수 — 넘으면 그만둔다. 검사에 떨어진 사건을 하루 세 번, 14일 동안 다시 써서 기사 값의 대부분이 여기로 샜다(2026-10-12: 하루 약 $1)
 MAX_PER_RUN = 30  # 한 번에 쓰는 기사 수 상한 (비용) — 담은 종목의 사건부터
 MIN_CHARS = 900  # 본문이 이보다 짧으면 다시 쓰게 한다 (뉴닉 분량 — 사용자 10/8)
+DATE = re.compile(r"\d{4}년|\d{1,2}월(\s*\d{1,2}일)?|\d{1,2}일")
+MAN_EOK = re.compile(r"(\d+)만 (\d{1,3}(?:,\d{3})*)억")
+
+
+def thin(paragraphs: list[dict]) -> bool:
+    """사건(E1) 문단에 날짜 말고 숫자가 하나도 없다 — 무슨 일인지 설명하지 못한 기사
+    (27편 읽기 10/12: 「주식교환으로 새 판을 짠다고?」가 무슨 교환인지 끝까지 안 나왔다 · 자사주 매입 기사에 금액이 없었다)."""
+    text = " ".join(p["text"] for p in paragraphs if "E1" in p["refs"])
+    return not re.search(r"\d", DATE.sub("", text))
+
+
+def units(text: str) -> str:
+    """「9만 6,434억 원」(억 원 단위 표를 그대로 읽은 모양) → 「9조 6,434억 원」 — 값은 같고 숫자 토큰도 같다."""
+    return MAN_EOK.sub(r"\1조 \2억", text)
 
 
 def events(con: sqlite3.Connection, today: date, ref: str | None = None) -> list[dict]:
@@ -97,13 +111,24 @@ def scrub(con: sqlite3.Connection) -> int:
             ok = [x for x in ss if not judging(x)]
             n += len(ss) - len(ok)
             if ok:
-                text = " ".join(ok)
+                text = units(" ".join(ok))
                 keep.append(p | {"text": text} | ({"marks": [m for m in p["marks"] if m in text]} if "marks" in p else {}))
         if keep and keep != b["paragraphs"]:
             b["paragraphs"] = keep
             con.execute("update articles set body = ? where id = ?", (json.dumps(b, ensure_ascii=False), aid))
     con.commit()
     return n
+
+
+def drop_thin(con: sqlite3.Connection) -> int:
+    """사건 설명이 빈 옛 기사를 뺀다(리그램·저장도 함께) — 그 사건은 다시 쓸 수 있게 된다. 검사(thin)가 막으면 기사 없이 넘어간다."""
+    gone = [aid for aid, body in con.execute("select id, body from articles").fetchall() if thin(json.loads(body)["paragraphs"])]
+    for aid in gone:
+        con.execute("delete from regrams where kind = 'article' and ref = ?", (str(aid),))
+        con.execute("delete from saves where kind = 'article' and ref = ?", (str(aid),))
+        con.execute("delete from articles where id = ?", (aid,))
+    con.commit()
+    return len(gone)
 
 
 def clean_doc(raw: str, n: int = 3000) -> str:
@@ -153,6 +178,10 @@ def check(j: dict, fs: list[dict]) -> dict:
         raise ValueError(f"지분 보고를 사고팜으로: {title!r}")
     if not 3 <= len(j["paragraphs"]) <= 10:
         raise ValueError("문단 수")
+    for x in j["paragraphs"]:
+        x["text"] = units(x["text"])
+    if thin(j["paragraphs"]):
+        raise ValueError("사건 문단에 숫자가 없음")
     n_titles = [t for f in fs if f["id"][0] == "N" and (t := re.search(r"「([^」]*)」", f["text"]))]
     years = set(re.findall(r"(?<!\d)(?:19|20)\d\d(?=년)", " ".join(f["text"] + " " + f.get("doc", "") for f in fs)))
     for x in items(j):
@@ -271,6 +300,7 @@ def rewrite(con: sqlite3.Connection, today: date, dart: "sources.Dart", limit: i
 def main(today: date, limit: int = MAX_PER_RUN) -> None:
     con = db.connect()
     made, dart = 0, sources.Dart()
+    gone = drop_thin(con)
     cut = scrub(con)
     again = rewrite(con, today, dart)
     for ev in events(con, today)[:limit]:
@@ -284,7 +314,7 @@ def main(today: date, limit: int = MAX_PER_RUN) -> None:
                         (ev["ref"], ev["ticker"], ev["date"], ev["kind"], json.dumps(a, ensure_ascii=False), datetime.now().isoformat()))  # fmt: skip
             con.commit()
             made += 1
-    print(f"기사 {made}편 · 다시 쓴 기사 {again}편 · 뺀 평가 문장 {cut}개 · 강조 {emphasize(con)}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
+    print(f"기사 {made}편 · 다시 쓴 기사 {again}편 · 뺀 평가 문장 {cut}개 · 뺀 빈 기사 {gone}편 · 강조 {emphasize(con)}편 · AI {llm.spent['calls']}콜 ${llm.spent['usd']:.3f}")
 
 
 if __name__ == "__main__":
