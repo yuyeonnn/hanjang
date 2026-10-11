@@ -705,3 +705,15 @@ def test_this_week_only_for_this_week_dates():
         notes.check_sentence({"text": "실적 공개를 앞두고 외국인과 기관이 주식을 줄였다는 보도가 있었어요.", "refs": ["N1"]}, fs)
     with pytest.raises(ValueError):  # 방향 낱말을 빠뜨린 문장
         notes.check_sentence({"text": "본업으로 남긴 돈은 16.3% 4.8조원어요.", "refs": ["N1"]}, fs + [{"id": "F9", "text": "영업이익 4.8조원(-16.3%)", "url": "u", "tone": 0, "slots": {}}])
+
+
+def test_segment_sentence_needs_segment_numbers():
+    """부문 이야기에 회사 전체 변화율을 붙이면 탈락 — 부문 숫자는 F11 에만 (DB손해보험: 부문 -9.9% 를 -1.7% 로 씀, 2026-10-12)."""
+    fs = [{"id": "F2", "text": "2025년 영업이익 2.4조원(전년보다 -1.7%)", "url": "u", "tone": -1, "slots": {}},
+          {"id": "F11", "text": "2025년 사업부별 영업이익 — 손해보험부문 2.4조원(전년보다 -9.9%) · 생명보험부문 2,675억원(전년보다 +69.9%)", "url": "u", "tone": 0, "slots": {}}]
+    with pytest.raises(ValueError, match="부문에 회사 전체 숫자"):
+        notes.check_sentence({"text": "다만 손해보험부문의 영업이익은 전년보다 줄었어요(-1.7%).", "refs": ["F2", "F11"]}, fs)
+    notes.check_sentence({"text": "손해보험부문의 영업이익은 전년보다 줄었어요(-9.9%).", "refs": ["F11"]}, fs)
+    notes.check_sentence({"text": "본업으로 남긴 돈은 1.7% 줄었어요(2.4조원).", "refs": ["F2"]}, fs)  # 부문 이름이 없으면 그대로
+    with pytest.raises(ValueError, match="끝이 잘린 말"):
+        notes.check_sentence({"text": "회사는 번 돈의 일부를 주주에게 나눠 주기로 했어요를 알렸어요.", "refs": ["F2"]}, fs)

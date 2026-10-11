@@ -658,8 +658,11 @@ def segment_fact(con: sqlite3.Connection, ticker: str) -> list[dict]:
     parts = [f"{r['name']} {won(r['op'])}" + (f"(전년보다 {c})" if (c := trend(r["op"], r.get("op_prev"))[2]).startswith(("+", "-")) else f"({c})" if c else "")
              for r in rows]  # fmt: skip
     yy = seg["year"] if isinstance(seg["year"], str) else f"{seg['year']}년"
-    return [{"id": "F11", "text": f"{yy} 사업부별 영업이익 — " + " · ".join(parts), "url": link(biz[1]), "tone": 0,
-             "slots": {"연도": yy, "첫부문": rows[0]["name"]}}]  # fmt: skip
+    slots = {"연도": yy}
+    for nth, r in zip(("첫", "둘째"), rows):
+        c = trend(r["op"], r.get("op_prev"))[2]
+        slots |= {f"{nth}부문": r["name"], f"{nth}이익": won(r["op"])} | ({f"{nth}변화": c} if c else {})
+    return [{"id": "F11", "text": f"{yy} 사업부별 영업이익 — " + " · ".join(parts), "url": link(biz[1]), "tone": 0, "slots": slots}]
 
 
 AD = re.compile(r"이벤트|캠페인|경품|사은|프로모션|청약 (접수|개시|진행|실시)|청약을 (받|연)|출시 기념|가입 고객|고객 대상|특판")
@@ -1185,6 +1188,13 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
         raise ValueError(f"예측 말투: {text!r}")
     if PRICE_TALK.search(bare):
         raise ValueError(f"주가·수급 이야기: {text!r}")
+    seg = next((f["text"] for f in fs if f["id"] == "F11"), "")
+    if seg and (said := set(re.findall(r"\d+(?:\.\d+)?%", text))):  # 부문 이야기에 회사 전체 변화율을 붙인 문장
+        names = [m[1].strip() for part in seg.split("— ", 1)[-1].split(" · ") if (m := re.match(r"(.+?) -?[\d,.]+(?:조|억|만)?\s?원", part))]
+        whole = set().union(*(set(re.findall(r"\d+(?:\.\d+)?%", f["text"])) for f in fs if f["id"] in ("F1", "F2")))
+        mine = set(re.findall(r"\d+(?:\.\d+)?%", " ".join(f["text"] for f in fs if f["id"] in ("F7", "F11"))))
+        if any(n in text for n in names) and said & whole and not said & mine:
+            raise ValueError(f"부문에 회사 전체 숫자: {text!r}")
     if META.search(bare):
         raise ValueError(f"재료 사정을 드러냄: {text!r}")
     if DAY_ONLY.fullmatch(text.strip()):
@@ -1197,6 +1207,8 @@ def check_sentence(s: dict, fs: list[dict]) -> None:
     if JUDGE.search(outside):
         raise ValueError(f"좋다·나쁘다를 단정: {text!r}")
     if STEM.search(outside):
+        raise ValueError(f"끝이 잘린 말: {text!r}")
+    if re.search(r"(?:어요|해요)[를을]\s", text):  # 「나눠 주기로 했어요를 알렸어요」 — 문장이 든 빈칸 뒤에 토씨를 붙였다
         raise ValueError(f"끝이 잘린 말: {text!r}")
     if re.search(r"\d(?:조|억|만)?원어요|%어요", text):  # 「16.3% 4.8조원어요」 — 방향 낱말(늘었·줄었) 빈칸을 빠뜨리고 금액에 바로 「어요」를 붙였다
         raise ValueError(f"끝이 잘린 말: {text!r}")
@@ -1442,8 +1454,9 @@ def main(tickers: list[str], today: date, only_changed: bool = False, read: bool
                 continue
         if carry and not con.execute("select 1 from notes where ticker = ? and week = ?", (t, week)).fetchone():
             last = con.execute("select facts, body, writer from notes where ticker = ? and week < ? order by week desc limit 1", (t, week)).fetchone()
-            if last and last[2] != "code" and json.loads(last[0]) == json.loads(json.dumps(fs, ensure_ascii=False)):  # 코드 대체 글은 옮기지 않고 다시 써 본다
-                con.execute("insert into notes values (?, ?, ?, ?, ?, ?)", (t, week, last[0], last[1], last[2], datetime.now().isoformat()))
+            key = lambda xs: [(f["id"], f["text"], f.get("body"), f["tone"]) for f in xs]  # noqa: E731 — 글에 보이는 것만 견준다(빈칸 이름이 늘어난 것은 바뀐 게 아니다)
+            if last and last[2] != "code" and key(json.loads(last[0])) == key(fs):  # 코드 대체 글은 옮기지 않고 다시 써 본다
+                con.execute("insert into notes values (?, ?, ?, ?, ?, ?)", (t, week, json.dumps(fs, ensure_ascii=False), last[1], last[2], datetime.now().isoformat()))
                 con.commit()
                 by["carried"] = by.get("carried", 0) + 1
                 continue
