@@ -50,6 +50,7 @@ create table if not exists big_holdings (
   rate_chg real, date text not null, rcept_no text not null, primary key (inst, stock_code));
 create table if not exists holidays (date text primary key, name text not null);
 create table if not exists sics (cik integer primary key, sic text not null);
+create table if not exists alerted (rcept_no text primary key);  -- 그날 바로 알린 공시 — 공시마다 한 번 (daily.watch)
 create table if not exists nps_port (asof text not null, market text not null, name text not null, ticker text, won real not null, stake real);
 create table if not exists nps_meta (asof text primary key, fx real not null, accn text not null);
 create table if not exists guru_holdings (
