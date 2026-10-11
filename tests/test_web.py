@@ -1587,3 +1587,16 @@ def test_smoke_draws_real_pages_without_writing_to_the_db(tmp_path, monkeypatch)
     assert got["로그인"][0] == "200" and 'name="code"' in got["로그인(메일 보냄)"][1] and got["/"][0] == "200" and "삼성전자" in got["/"][1]
     assert {"/sw.js", "/stocks.js", "/me/settings", "/calendar"} <= set(got) and all(s in ("200", "404", "503") for s, _ in got.values())
     assert sqlite3.connect(path).execute("select count(*) from views").fetchone() == (0,)  # 열어본 기록이 진짜 DB 에 남지 않는다
+
+
+def test_feed_news_is_newest_first_not_my_stocks_pinned():
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', '9', 1)")
+    body = json.dumps({"title": "옛 내 종목 기사", "paragraphs": [{"text": "가"}]}, ensure_ascii=False)
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r1', '005930', '2026-09-01', 'BUYBACK', ?, 'x')", (body,))
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('r2', '000660', '2026-10-10', 'BUYBACK', ?, 'x')", (body.replace("옛 내 종목 기사", "새 남의 종목 기사"),))
+    con.commit()
+    feed = call(app, "/feed", cookie=ck)[2]
+    assert feed.index("새 남의 종목 기사") < feed.index("옛 내 종목 기사")  # 날짜가 먼저 — 내 종목이라고 옛 기사가 맨 위에 있지 않다

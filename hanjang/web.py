@@ -2762,10 +2762,12 @@ class App:
         return self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()[0] or img
 
     def latest(self, uid: int, photos: "Photos") -> str:
-        """최근 소식 — 사건마다 쓴 기사. 담은 종목 먼저, 최신 먼저."""
+        """최근 소식 — 사건마다 쓴 기사. 최신 날짜 먼저(내 종목이라고 옛 기사가 맨 위에 붙박이지 않게 — 사용자 10/11), 같은 날 안에선 내 종목 먼저.
+        같은 날·같은 무게의 기사끼리는 12시간마다 차례를 섞는다 — 새 기사는 하루 한 번(07:00) 들어와서, 그 사이에도 화면이 달라 보이게."""
+        slot = int(self.clock() // (12 * 3600))
         rows = self.con.execute(
             "select a.id, a.kind, a.date, a.body, s.name, s.induty_code, a.ticker in (select ticker from holdings where user_id = ?) mine"
-            " from articles a join stocks s using(ticker) order by mine desc, a.date desc, a.id desc limit 30", (uid,)).fetchall()  # fmt: skip
+            " from articles a join stocks s using(ticker) order by a.date desc, mine desc, (a.id * 7919 + ?) % 97, a.id desc limit 30", (uid, slot)).fetchall()  # fmt: skip
         if not rows:
             return ""
         items = "".join(
