@@ -1605,33 +1605,6 @@ def test_feed_news_is_newest_first_not_my_stocks_pinned():
     assert feed.index("새 남의 종목 기사") < feed.index("옛 내 종목 기사")  # 날짜가 먼저 — 내 종목이라고 옛 기사가 맨 위에 있지 않다
 
 
-<<<<<<< HEAD
-def test_learn_quiz_daily_question_and_path_stamps():
-    from hanjang import learn, quiz
-
-    assert all(len(qs) == 3 and all(len(c) == 3 and 0 <= a < 3 for _, c, a, _ in qs) for qs in quiz.QUIZ.values())
-    assert set(quiz.QUIZ) <= set(learn.BY_SLUG) and set(learn.BY_SLUG) - set(quiz.QUIZ) == {"rates", "long-short"}  # 숫자를 DB 로 채우는 두 글만 문제가 없다
-    app, con = _app()
-    ck = _login(app)
-    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
-    (uid,) = con.execute("select id from users").fetchone()
-    con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, equity, liabilities, rcept_no) values ('005930', 2025, 300, 30, 400, 100, 'a'), ('005930', 2024, 250, 20, 350, 90, 'b')")
-    con.commit()
-    mine = quiz.mine(con, uid)
-    assert mine["statements"][2] == 0 and "삼성전자" in mine["statements"][0]  # 매출 250 → 300, 늘었다
-    assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
-    assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
-    top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" in top and f"도장 0 / {len(learn.ARTICLES)}" in top and "다음에 읽을 글" in top
-    art = call(app, "/learn/statements", cookie=ck)[2]
-    assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
-    call(app, "/learn/done", "POST", "slug=statements", ck)
-    call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
-    call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
-    assert quiz.done(con, uid) == {"statements", "rates"}
-    top = call(app, "/learn", cookie=ck)[2]
-    assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
-=======
 def test_rumor_disclosure_becomes_one_sentence_and_repeats_are_demoted():
     from hanjang import morning
 
@@ -1692,4 +1665,30 @@ def test_morning_has_market_line_and_same_industry_news():
     assert [x["name"] for x in m["peers"]] == ["SK하이닉스"]  # 같은 업종만 — 현대차는 안 나온다
     assert "시장 · 같은 업종" in morning.html(m) and "원/달러 환율은" in morning.text(m)
     assert "원/달러 환율은" in mail.morning_mail(m, morning.text(m))[2]
->>>>>>> origin/main
+
+
+def test_learn_quiz_daily_question_and_path_stamps():
+    from hanjang import learn, quiz
+
+    assert all(len(qs) == 3 and all(len(c) == 3 and 0 <= a < 3 for _, c, a, _ in qs) for qs in quiz.QUIZ.values())
+    assert set(quiz.QUIZ) <= set(learn.BY_SLUG) and set(learn.BY_SLUG) - set(quiz.QUIZ) == {"rates", "long-short"}  # 숫자를 DB 로 채우는 두 글만 문제가 없다
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    (uid,) = con.execute("select id from users").fetchone()
+    con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, equity, liabilities, rcept_no) values ('005930', 2025, 300, 30, 400, 100, 'a'), ('005930', 2024, 250, 20, 350, 90, 'b')")
+    con.commit()
+    mine = quiz.mine(con, uid)
+    assert mine["statements"][2] == 0 and "삼성전자" in mine["statements"][0]  # 매출 250 → 300, 늘었다
+    assert mine["sector-margin"][1][mine["sector-margin"][2]] == "10원" and mine["ratios"][2] == 1  # 30/300 = 10원 · 빚 100 < 자기 돈 400
+    assert quiz.questions(con, uid, "statements")[2] == mine["statements"]  # 세 번째 자리에 내 종목 문제
+    top = call(app, "/learn", cookie=ck)[2]
+    assert "오늘의 한 문제" in top and "배움 길" in top and f"도장 0 / {len(learn.ARTICLES)}" in top and "다음에 읽을 글" in top
+    art = call(app, "/learn/statements", cookie=ck)[2]
+    assert "세 문제로 확인하기" in art and "내 종목 삼성전자의 2025년 매출" in art
+    call(app, "/learn/done", "POST", "slug=statements", ck)
+    call(app, "/learn/done", "POST", "slug=nope", ck)  # 없는 글은 안 찍힌다
+    call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
+    assert quiz.done(con, uid) == {"statements", "rates"}
+    top = call(app, "/learn", cookie=ck)[2]
+    assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
