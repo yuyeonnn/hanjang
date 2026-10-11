@@ -1192,6 +1192,16 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
+    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 노트 본문(원래 내용)은 그 아래 그대로 (사용자 10/11)
+        rows = "".join(
+            f'<a href="{e(href)}" class="py-3 flex items-start gap-2.5"><span class="material-symbols-outlined text-[18px] mt-0.5 {tint}">{icon}</span>'
+            f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(what)}</span>'
+            f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(sub)}</span></span>'
+            f'<span class="shrink-0 pt-0.5 text-[12px] text-outline tabular-nums">{e(when)}</span></a>'
+            for _, icon, tint, _, _, what, sub, when, href, _ in report["events"][:5])  # fmt: skip
+        parts.append('<section class="mb-12"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary"></span>'
+                     '<h3 class="font-headline-md text-headline-md text-on-surface">요즘 생긴 일</h3></div>'
+                     f'<div class="mt-1 flex flex-col divide-y divide-surface-container-high/70">{rows}</div></section>')  # fmt: skip
     seen: set = set()  # 이 노트에서 이미 보인 숫자 — 뒤에서 같은 괄호를 되풀이하지 않게
     if body.get("summary"):
         parts.append('<section class="mb-12 pl-space-md py-1 border-l-2 border-primary/60"><div class="flex items-center gap-1.5 mb-1"><span class="material-symbols-outlined text-primary text-[18px]">auto_stories</span><span class="font-label-micro text-label-micro uppercase tracking-wider text-primary font-bold">한 장 요약</span></div>'
@@ -1863,9 +1873,9 @@ class App:
             b = json.loads(body) if body else {}
             head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
-            href, sub, status = f"/n/{t}", "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
+            sub, status = "", "<span></span>"  # status = 「노트 읽기 →」를 오른쪽에 두는 왼쪽 자리
             if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 첫 줄 대신 (사용자 10/11: 딱딱한 요약 말고 이 문구로)
-                _, icon, tint, _, _, head, sub, when, href, _ = evs[0]
+                _, icon, tint, _, _, head, sub, when, _, _ = evs[0]  # 누르면 원문 화면이 아니라 이 종목 노트로 — 같은 내용이 노트 맨 위에 있다
                 head = f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(head)}'
                 status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
             else:
@@ -1873,7 +1883,7 @@ class App:
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'
                        f'<form method="post" action="/remove"><input type="hidden" name="t" value="{e(t)}"><button aria-label="{e(name)} 삭제" class="w-6 h-6 rounded-full flex items-center justify-center text-outline hover:text-tertiary hover:bg-surface-container transition-colors" type="submit"><span class="material-symbols-outlined text-[16px]">close</span></button></form></div>'
-                       f'<a href="{e(href)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{head}</p>'
+                       f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{head}</p>'
                        + (f'<p class="mt-1 text-[14px] leading-[22px] text-on-surface-variant">{e(sub)}</p>' if sub else "") + '</a>'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
@@ -1989,7 +1999,7 @@ class App:
                                          self.initial(uid), self.survey(uid, ticker, week, thanks), made, home, (views, likes, liked),
                                          self.regram_form(uid, "note", ticker, week),
                                          prices=self.con.execute("select date, close from prices where ticker = ? order by date", (ticker,)).fetchall()
-                                         if sources.price_dev() else None, report=self.report(ticker) | {"owners": self.owners(ticker)})  # fmt: skip
+                                         if sources.price_dev() else None, report=self.report(ticker) | {"owners": self.owners(ticker), "events": self.my_events(uid, ticker=ticker)})  # fmt: skip
 
     def report(self, ticker: str) -> dict:
         if self.con.execute("select 1 from stocks where ticker = ? and market = 'US'", (ticker,)).fetchone():
@@ -2871,7 +2881,7 @@ class App:
                 f'<div class="mt-space-sm"><p class="text-[13px] text-outline mb-2">{when}</p>'
                 f'<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-14 gap-y-4">{body}</div></div></section>') if body else ""
 
-    def my_events(self, uid: int, today: date | None = None) -> list[tuple]:
+    def my_events(self, uid: int, today: date | None = None, ticker: str | None = None) -> list[tuple]:
         """담은 종목에 생긴 일 — 점수 큰 순. 「내 종목」 카드가 종목마다 맨 위 것을 보여 준다(피드의 「오늘의 내 종목」을 옮김, 사용자 10/11).
         재료: ① 최근 7일 큰 공시 ② 앞으로 14일 일정(실적 발표·주총·배당) ③ 큰손 움직임(기관 5% 지분 변화 30일 · 임원 거래 14일).
         점수 = 종류의 무게 − 날짜가 먼 만큼. 내 종목만 — 남의 글·추천이 아니라 사실만 모은다.
@@ -2880,6 +2890,8 @@ class App:
         iso = today.isoformat()
         back = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
         mine = "join holdings h on h.ticker = s.ticker and h.user_id = ?"
+        if ticker:  # 노트 화면 — 담았든 아니든 그 종목 하나의 일
+            mine, uid = "join (select ? as tk) x on x.tk = s.ticker", ticker
         cards = []  # (점수, 아이콘, 색, 종목 이름, 홈페이지, 한 줄, 작은 글, 날짜 표시, 링크)
 
         def ago(d: str) -> str:

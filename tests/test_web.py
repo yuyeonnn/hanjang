@@ -1476,6 +1476,10 @@ def test_my_stock_card_shows_what_happened_to_it():
     home = call(app, "/", cookie=ck)[2]
     assert "자기주식취득결정" in home and "어제 · 소식 3건 더" in home  # 맨 위 것 하나 + 몇 건 더
     assert "오늘의 내 종목" not in call(app, "/feed", cookie=ck)[2]  # 피드에서는 뺐다
+    card = home[home.index('data-stock-id="005930"'):]
+    assert 'href="/n/005930"><p' in card and 'href="/calendar"' not in card[:card.index("노트 읽기")]  # 글자를 누르면 노트로
+    note = call(app, "/n/005930", cookie=ck)[2]
+    assert "요즘 생긴 일" in note and "국민연금이 지분을 늘렸어요" in note and "임원 주식 거래 보고 1건" in note and "회사 사정은 어떤가요?" in note  # 맨 위에 그 일들, 아래에 원래 노트
 
 
 def test_cookie_of_a_deleted_account_goes_to_login_not_error():
