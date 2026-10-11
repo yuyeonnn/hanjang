@@ -24,6 +24,7 @@ DULL = re.compile(r"^(\d{4}년 ?)?(\d{1,2}월 ?)?(\d{1,2}일)?$|^(\d{4}년 ?)?(�
                   r"|^(계약|공급) ?(기간|상대방?|금액)$|하락|상승|급등|급락|주가")
 PRESS = re.compile(r"언론|보도(가|도|했|에 따르면)|기사(가|에)")  # 남의 보도를 말하려면 소식(N) 근거가 있어야 한다
 VERSION = 2  # 기사 쓰는 규칙이 크게 바뀌면 올린다 — 그 전 규칙으로 쓴 기사는 매일 실행이 같은 번호로 다시 쓴다(rewrite). 2 = 원문 없이는 안 씀 · 평가·근거 없는 언론 이야기 탈락 (10/10)
+GIVE_UP = 2  # 한 사건을 쓰려고 AI 를 부른 실행 횟수 — 넘으면 그만둔다. 검사에 떨어진 사건을 하루 세 번, 14일 동안 다시 써서 기사 값의 대부분이 여기로 샜다(2026-10-12: 하루 약 $1)
 MAX_PER_RUN = 30  # 한 번에 쓰는 기사 수 상한 (비용) — 담은 종목의 사건부터
 MIN_CHARS = 900  # 본문이 이보다 짧으면 다시 쓰게 한다 (뉴닉 분량 — 사용자 10/8)
 
@@ -32,7 +33,8 @@ def events(con: sqlite3.Connection, today: date, ref: str | None = None) -> list
     """아직 기사가 없는 최근 사건 — 담은 종목 먼저, 최신 먼저. 사실 하나(E1)로 만든다.
     ref 를 주면 그 공시 하나만(날짜·이미 쓴 기사와 상관없이) — 옛 기사를 다시 쓸 때(rewrite)."""
     since = (today - timedelta(days=DAYS)).isoformat()
-    which, arg = ("rcept_no = ?", ref) if ref else ("date >= ? and rcept_no not in (select ref from articles)", since)
+    which, arg = ("rcept_no = ?", ref) if ref else (
+        f"date >= ? and rcept_no not in (select ref from articles) and rcept_no not in (select ref from article_tries where n >= {GIVE_UP})", since)
     held = {t for (t,) in con.execute("select distinct ticker from holdings")}
     out = []
     for rno, t, d, raw, code, dr in con.execute(
@@ -272,7 +274,11 @@ def main(today: date, limit: int = MAX_PER_RUN) -> None:
     cut = scrub(con)
     again = rewrite(con, today, dart)
     for ev in events(con, today)[:limit]:
+        before = llm.spent["calls"]
         a = write(con, ev, today, dart)
+        if not a and llm.spent["calls"] > before:  # AI 를 불렀는데 검사에 떨어졌다 — 센다(원문을 못 받아 안 부른 것은 세지 않는다)
+            con.execute("insert into article_tries values (?, 1, ?) on conflict(ref) do update set n = n + 1, at = excluded.at", (ev["ref"], datetime.now().isoformat()))
+            con.commit()
         if a:
             con.execute("insert or ignore into articles (ref, ticker, date, kind, body, made_at) values (?, ?, ?, ?, ?, ?)",
                         (ev["ref"], ev["ticker"], ev["date"], ev["kind"], json.dumps(a, ensure_ascii=False), datetime.now().isoformat()))  # fmt: skip

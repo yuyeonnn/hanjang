@@ -98,6 +98,7 @@ create table if not exists quiz_done (
 create table if not exists regrams (
   id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
   week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));
+create table if not exists article_tries (ref text primary key, n integer not null, at text not null);
 create table if not exists saves (
   id integer primary key, user_id integer not null references users, kind text not null, ref text not null,
   week text not null default '', comment text, at text not null, unique (user_id, kind, ref, week));

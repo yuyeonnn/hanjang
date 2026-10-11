@@ -1692,3 +1692,32 @@ def test_learn_quiz_daily_question_and_path_stamps():
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
     assert f"도장 2 / {len(learn.ARTICLES)}" in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]
+
+
+def test_article_gives_up_after_two_failed_runs(monkeypatch):
+    """검사에 떨어진 사건을 실행 때마다 다시 쓰지 않는다 — AI 를 부른 실행이 두 번이면 그만 (하루 약 $1 이 여기로 샜다, 2026-10-12). 원문을 못 받아 안 부른 날은 세지 않는다."""
+    from hanjang import articles, llm
+
+    _, con = _app()
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r1', '005930', '2026-10-09', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    con.commit()
+    today = date(2026, 10, 12)
+    monkeypatch.setattr(articles.db, "connect", lambda: con)
+    monkeypatch.setattr(articles, "rewrite", lambda con, today, dart: 0)
+    monkeypatch.setattr(articles, "emphasize", lambda con: 0)
+    monkeypatch.setattr(articles.sources, "Dart", lambda: None)
+    called = []
+
+    def write(con, ev, today, dart=None, doc=None):  # 부를 때마다 AI 한 콜, 늘 검사에 떨어짐
+        called.append(ev["ref"])
+        llm.spent["calls"] += 1
+        return None
+
+    monkeypatch.setattr(articles, "write", write)
+    for _ in range(4):
+        articles.main(today)
+    assert called == ["r1", "r1"] and con.execute("select n from article_tries where ref = 'r1'").fetchone()[0] == 2
+    monkeypatch.setattr(articles, "write", lambda con, ev, today, dart=None, doc=None: None)  # 원문이 없어 AI 를 안 부른 날
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r2', '005930', '2026-10-10', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    articles.main(today)
+    assert not con.execute("select 1 from article_tries where ref = 'r2'").fetchone()

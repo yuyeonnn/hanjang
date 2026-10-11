@@ -663,7 +663,7 @@ def test_batch_drafts_used_and_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(notes, "finish", lambda note, fs, name="": note)
     sent, asked = [], []
     monkeypatch.setattr(notes.llm, "batch", lambda prompt, task, jobs: (sent.append(sorted(jobs)), {"000001": '{"ok": 1, "headline": "묶음"}', "000002": '{"ok": 0}'})[1])
-    monkeypatch.setattr(notes.llm, "ask", lambda prompt, task, payload, check, schema: (asked.append(payload["name"]), {"ok": 1, "headline": "하나씩"})[1])
+    monkeypatch.setattr(notes.llm, "ask", lambda prompt, task, payload, check, schema, **kw: (asked.append(payload["name"]), {"ok": 1, "headline": "하나씩"})[1])
     notes.main([], date(2026, 10, 12), read=False, batch=True)
     assert sent == [["000001", "000002", "000003", "000004"]] and asked == ["나", "다", "라"]  # 가 는 묶음 답 그대로
     got = dict(real(tmp_path / "x.db").execute("select ticker, body from notes").fetchall())
@@ -717,3 +717,25 @@ def test_segment_sentence_needs_segment_numbers():
     notes.check_sentence({"text": "본업으로 남긴 돈은 1.7% 줄었어요(2.4조원).", "refs": ["F2"]}, fs)  # 부문 이름이 없으면 그대로
     with pytest.raises(ValueError, match="끝이 잘린 말"):
         notes.check_sentence({"text": "회사는 번 돈의 일부를 주주에게 나눠 주기로 했어요를 알렸어요.", "refs": ["F2"]}, fs)
+
+
+def test_cheap_model_first_then_good_model(monkeypatch):
+    """노트는 싼 모델로 먼저(두 번), 검사에 떨어지면 좋은 모델로 — 누가 썼는지 writer 에 남는다 (2026-10-12 전환)."""
+    fs = [{"id": "F1", "text": "2025년 매출 1조원", "url": "u", "tone": 0, "slots": {}}]
+    monkeypatch.setattr(notes, "finish", lambda note, fs, name="": note)
+    monkeypatch.setattr(notes.llm, "BY_TASK", {"writer": "cheap"})
+    monkeypatch.setitem(notes.llm.MODELS, "writer", "good")
+    calls = []
+
+    def ask(prompt, task, payload, check, schema, model=None, tries=3):
+        calls.append((model or notes.llm.model_of(prompt), tries))
+        return {"headline": "좋은 글"} if model == "good" else None
+
+    monkeypatch.setattr(notes.llm, "ask", ask)
+    note, writer = notes.write("가", fs, date(2026, 10, 12))
+    assert calls == [("cheap", 2), ("good", 2)] and writer == "llm:good" and note["headline"] == "좋은 글"
+    calls.clear()
+    monkeypatch.setattr(notes.llm, "ask", lambda *a, model=None, tries=3, **k: (calls.append(model), {"headline": "싼 글"})[1])
+    assert notes.write("가", fs, date(2026, 10, 12))[1] == "llm:cheap" and calls == [None]  # 통과하면 좋은 모델을 부르지 않는다
+    assert notes.llm.body_of("gpt-5.6-luna", "s", "u", None).get("reasoning_effort") == "none" and "temperature" not in notes.llm.body_of("gpt-5.6-luna", "s", "u", None)
+    assert notes.llm.body_of("gpt-4.1", "s", "u", None)["temperature"] == 0
