@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote
 
-from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, sources, tree
+from hanjang import db, gurus, holders, learn, llm, mail, morning, notes, personas, policy, quiz, sources, tree
 
 
 def FIRST(ticker: str) -> bool:  # 새 종목 바로 받기 — 테스트에서 바꿔 끼운다
@@ -799,13 +799,15 @@ EVENT_EXPLAIN = {
     "HOLDER_CHANGE": "큰 주주의 지분이 바뀌었어요.",
     "CLINICAL": "신약 임상 시험 소식이에요.",
     "TRADING_HALT": "거래가 멈추거나 관리 대상이 됐어요.",
+    "RUMOR": "언론 보도나 소문에 대해 회사가 답했어요.",
+    "FRAUD": "임직원의 횡령·배임 혐의와 관련된 공시예요.",
     "SPLIT": "주식 한 주를 여러 주로 쪼개기로 했어요.",
     "REVERSE_SPLIT": "여러 주를 한 주로 합치거나 자본을 줄이기로 했어요.",
 }
 EVENT_SHORT = {"BUYBACK": "자사주", "DIVIDEND": "배당", "EARNINGS": "실적", "MAJOR_CONTRACT": "계약",
                "RIGHTS_ISSUE": "증자", "BONUS_ISSUE": "무상증자", "CB_BW": "전환사채", "LAWSUIT": "소송",
                "MA": "합병·인수", "HOLDER_CHANGE": "대주주", "CLINICAL": "임상", "TRADING_HALT": "거래정지·관리",
-               "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
+               "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "SPLIT": "분할", "REVERSE_SPLIT": "병합", "OTHER": "기타"}  # fmt: skip
 TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종류에 맞춰
     "BUYBACK": ("자사주 취득 공시는 소각 여부까지 함께 확인해요", "사둔 주식을 없애야(소각) 시중에 도는 주식 수가 실제로 줄어요."),
     "DIVIDEND": ("배당 공시는 기준일을 함께 확인해요", "기준일에 주식을 갖고 있어야 배당을 받아요."),
@@ -1592,7 +1594,7 @@ class App:
         if path == "/me/delete" and method == "POST":
             # 탈퇴 — 이 사용자의 모든 행을 지운다 (되돌릴 수 없음, 화면에서 한 번 더 확인)
             for table, col in (("holdings", "user_id"), ("views", "user_id"), ("feedback", "user_id"), ("likes", "user_id"),
-                               ("regrams", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
+                               ("regrams", "user_id"), ("quiz_done", "user_id"), ("saves", "user_id"), ("highlights", "user_id"), ("follows", "follower_id"), ("follows", "followee_id"),
                                ("blocks", "user_id"), ("blocks", "blocked_id"), ("reports", "user_id"), ("reports", "target_id"), ("users", "id")):  # fmt: skip
                 self.con.execute(f"delete from {table} where {col} = ?", (uid,))
             self.con.commit()
@@ -1606,6 +1608,12 @@ class App:
             return "200 OK", [], self.profile(uid)
         if path == "/me/settings":
             return "200 OK", [], self.settings(uid, query.get("msg"))
+        if path == "/learn/done" and method == "POST":  # 문제를 다 맞혔다 — 도장 한 줄. 글의 세 문제 또는 오늘의 한 문제만
+            slug = form.get("slug", "")
+            if slug in quiz.QUIZ or slug == f"daily:{date.today().isoformat()}":
+                self.con.execute("insert or ignore into quiz_done values (?, ?, ?)", (uid, slug, datetime.now().isoformat()))
+                self.con.commit()
+            return "200 OK", [("Content-Type", "application/json; charset=utf-8")], "{}"
         if path == "/learn" or path.startswith("/learn/"):
             slug = path[7:]
             self.log(uid, "learn", slug or None)
@@ -2307,7 +2315,7 @@ class App:
         track = "bg-primary" if mail_on else "bg-surface-container-highest"
         switch = (f'<form method="post" action="/me/mail" class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
                   '<span class="material-symbols-outlined text-primary text-[18px]">mark_email_unread</span><span class="flex flex-col"><span>안내 메일</span>'
-                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 내 종목에 새 소식이 있는 날 아침 한 통</span></span></span>'
+                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 새 소식이 있는 날 아침 한 통 · 꼭 확인할 공시는 그날 바로</span></span></span>'
                   f'<button aria-label="안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
@@ -3274,6 +3282,13 @@ class App:
                           '<span class="material-symbols-outlined text-primary text-[18px]">chevron_right</span></a>' for x in items)
                 + "</div></section>")  # fmt: skip
 
+    def learn_top(self, uid: int) -> str:
+        """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) · 배움 길(단계마다 도장) (사용자 10/12)."""
+        stamps = quiz.done(self.con, uid)
+        key, q = quiz.daily(self.con, uid, date.today())
+        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
+        return (quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS + quiz.path(stamps, read))
+
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
         end = ('<p class="font-label-micro text-label-micro text-outline text-center py-space-lg">설명을 위한 글이에요. 특정 종목이나 상품을 추천하지 않아요.</p></div></main>'
@@ -3290,6 +3305,11 @@ class App:
         if slug and not a:
             return "404 Not Found", [], self.simple("없음", "없는 글이에요. <a class='text-primary underline' href='/learn'>읽기 팁</a>")
         if a:
+            stamps = quiz.done(self.con, uid)
+            qs = quiz.questions(self.con, uid, slug)
+            if not qs and slug not in stamps:  # 숫자를 DB 로 채우는 글(금리·오래 들기)은 문제가 없다 — 읽으면 도장
+                self.con.execute("insert or ignore into quiz_done values (?, ?, ?)", (uid, slug, datetime.now().isoformat()))
+                self.con.commit()
             more_label, more_url = a["more"]
             face, credit = book_face(slug)
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
@@ -3304,6 +3324,7 @@ class App:
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
+                     + quiz.block(slug, qs, slug in stamps, "세 문제로 확인하기", "다 맞혔어요. 이 글에 도장이 찍혔어요.") + quiz.JS
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
@@ -3314,7 +3335,8 @@ class App:
                       f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
                       for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>' + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
+                 '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>'
+                 + self.learn_top(uid) + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
