@@ -1693,6 +1693,7 @@ def test_web_main_block_only_uses_names_that_exist():
     """`python -m hanjang.web` 의 시작 코드 — 테스트는 모듈만 가져오고 이 블록은 돌리지 않는다. 10/12 에 이름 하나(env)가 빠져 서버가 켜지지 않았다."""
     import ast
     import builtins
+    from pathlib import Path
 
     tree = ast.parse(Path(web.__file__).read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.If))
