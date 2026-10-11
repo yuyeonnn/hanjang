@@ -133,36 +133,75 @@ def connect(path=PATH) -> sqlite3.Connection:
     tune(con)
     con.execute("pragma foreign_keys = on")
     con.executescript(SCHEMA)
-    # ponytail: 열 추가는 이렇게 한 줄씩. 늘어나면 번호 붙인 마이그레이션으로
-    for table, col, typ in (("financials", "basis", "text"), ("stocks", "induty_code", "text"),
-                            ("disclosures", "amount", "integer"),
-                            ("disclosures", "plain", "text"),  # 아침 한 장 — 코드 풀이가 없는 공시의 AI 한 문장(공시마다 한 번). 빈 칸 = 물어봤지만 못 씀
-                            ("articles", "photo", "text"),
-                            ("users", "notices_seen", "text"),  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
-                            ("users", "mail_on", "integer not null default 1"),
-                            ("users", "days", "integer"), ("users", "last_day", "text"),  # 내 나무 — 들어온 날 수(누적)·마지막으로 센 날. 열어본 기록(views)은 180일 뒤 지워져도 나무는 줄지 않게
-                            ("users", "private", "integer not null default 0"), ("follows", "ok", "integer not null default 1"),  # 비공개 계정 — 팔로우는 요청(ok 0) → 수락하면 1 (사용자 10/10)  # 주간 안내 메일 켜짐(1)/꺼짐(0)
-                            ("users", "nickname", "text"), ("users", "bio", "text"),
-                            ("users", "rules_at", "text"),  # 이용 규칙에 동의한 때 — 남에게 보이는 프로필(닉네임·소개·사진)을 만들기 전에 (앱 마켓의 사용자 콘텐츠 요구, 10/11)
-                            ("users", "banned", "integer not null default 0"),  # 운영자가 막은 계정 (python -m hanjang.moderate ban)
-                            ("users", "photo", "blob"), ("users", "photo_at", "text"),
-                            ("stocks", "homepage", "text"), ("big_holdings", "induty_code", "text"), ("guru_holdings", "sic", "text"),
-                            ("news", "summary", "text"),
-                            # 미국 주식 (docs/stage3-us.md 1주차) — 시장·SEC 번호·업종·회계연도 끝 · 기간·통화·주당순이익 · 임원 거래의 계획 표시·단가
-                            ("stocks", "market", "text not null default 'KR'"), ("stocks", "cik", "integer"), ("stocks", "sic", "text"), ("stocks", "fye", "text"),
-                            ("financials", "period_start", "text"), ("financials", "period_end", "text"), ("financials", "currency", "text"), ("financials", "eps", "real"),
-                            ("quarters", "period_start", "text"), ("quarters", "period_end", "text"), ("quarters", "currency", "text"), ("quarters", "eps", "real"),
-                            ("insiders", "planned", "integer"), ("insiders", "price", "real")):  # RSS 요약문 — 기사 본문이 아니다  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다  # 프로필 사진(256px JPEG) · 바꾼 때(캐시 무효화)  # 남에게 보이는 이름·자기소개 (이메일은 안 보인다)  # fmt: skip
-        if col not in {r[1] for r in con.execute(f"pragma table_info({table})")}:
-            con.execute(f"alter table {table} add column {col} {typ}")
-    con.execute("create unique index if not exists users_nickname on users (nickname collate nocase)")
-    # 화면이 자주 묻는 조회 — 색인이 없으면 표 전체를 훑는다. 요청을 한 번에 하나씩 처리하니 훑는 시간이 곧 모두의 기다림이다 (DB 점검 10/11)
-    for name, on in (("views_note", "views (page, ticker, at)"), ("views_user", "views (user_id, at)"),  # 이 주 노트를 연 횟수 · 시험 판정
-                     ("follows_to", "follows (followee_id, ok)"), ("highlights_page", "highlights (user_id, page)"),
-                     ("news_stock", "news (ticker, date)"), ("disclosures_stock", "disclosures (ticker, date)"),
-                     ("regrams_ref", "regrams (kind, ref, week)"), ("likes_note", "likes (ticker, week)")):
-        con.execute(f"create index if not exists {name} on {on}")
+    migrate(con)
     return con
+
+
+# 표 구조 변경 — 번호 순서로 한 번씩만. 몇 번까지 적용했는지는 DB 파일 안(pragma user_version)에 남는다.
+# 새 열·색인이 필요하면 **맨 끝에** 한 줄 더한다(앞 줄은 고치지 않는다 — 이미 적용된 DB 에는 다시 돌지 않는다).
+# 번호 없이 열을 더하던 때의 DB(2026-10-11 이전)는 이미 있는 열을 건너뛰며 번호를 맞춘다.
+MIGRATIONS = (
+    "alter table financials add column basis text",
+    "alter table stocks add column induty_code text",
+    "alter table disclosures add column amount integer",
+    "alter table disclosures add column plain text",  # 아침 한 장 — 코드 풀이가 없는 공시의 AI 한 문장(공시마다 한 번). 빈 칸 = 물어봤지만 못 씀
+    "alter table articles add column photo text",  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
+    "alter table users add column notices_seen text",  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점
+    "alter table users add column mail_on integer not null default 1",  # 주간 안내 메일 켜짐(1)/꺼짐(0)
+    "alter table users add column days integer",  # 내 나무 — 들어온 날 수(누적). 열어본 기록(views)은 180일 뒤 지워져도 나무는 줄지 않게
+    "alter table users add column last_day text",  # 내 나무 — 마지막으로 센 날
+    "alter table users add column private integer not null default 0",  # 비공개 계정 (사용자 10/10)
+    "alter table follows add column ok integer not null default 1",  # 비공개 계정 팔로우는 요청(ok 0) → 수락하면 1
+    "alter table users add column nickname text",  # 남에게 보이는 이름 (이메일은 안 보인다)
+    "alter table users add column bio text",  # 자기소개
+    "alter table users add column rules_at text",  # 이용 규칙에 동의한 때 — 남에게 보이는 프로필을 만들기 전에 (앱 마켓의 사용자 콘텐츠 요구, 10/11)
+    "alter table users add column banned integer not null default 0",  # 운영자가 막은 계정 (python -m hanjang.moderate ban)
+    "alter table users add column photo blob",  # 프로필 사진(256px JPEG)
+    "alter table users add column photo_at text",  # 사진 바꾼 때(캐시 무효화)
+    "alter table stocks add column homepage text",  # 회사 홈페이지 도메인 — 로고(Brandfetch)를 찾는다
+    "alter table big_holdings add column induty_code text",
+    "alter table guru_holdings add column sic text",
+    "alter table news add column summary text",  # RSS 요약문 — 기사 본문이 아니다
+    # 미국 주식 (docs/stage3-us.md 1주차) — 시장·SEC 번호·업종·회계연도 끝 · 기간·통화·주당순이익 · 임원 거래의 계획 표시·단가
+    "alter table stocks add column market text not null default 'KR'",
+    "alter table stocks add column cik integer",
+    "alter table stocks add column sic text",
+    "alter table stocks add column fye text",
+    "alter table financials add column period_start text",
+    "alter table financials add column period_end text",
+    "alter table financials add column currency text",
+    "alter table financials add column eps real",
+    "alter table quarters add column period_start text",
+    "alter table quarters add column period_end text",
+    "alter table quarters add column currency text",
+    "alter table quarters add column eps real",
+    "alter table insiders add column planned integer",
+    "alter table insiders add column price real",
+    "create unique index if not exists users_nickname on users (nickname collate nocase)",
+    # 화면이 자주 묻는 조회 — 색인이 없으면 표 전체를 훑는다. 요청을 한 번에 하나씩 처리하니 훑는 시간이 곧 모두의 기다림이다 (DB 점검 10/11)
+    "create index if not exists views_note on views (page, ticker, at)",  # 이 주 노트를 연 횟수 · 시험 판정
+    "create index if not exists views_user on views (user_id, at)",
+    "create index if not exists follows_to on follows (followee_id, ok)",
+    "create index if not exists highlights_page on highlights (user_id, page)",
+    "create index if not exists news_stock on news (ticker, date)",
+    "create index if not exists disclosures_stock on disclosures (ticker, date)",
+    "create index if not exists regrams_ref on regrams (kind, ref, week)",
+    "create index if not exists likes_note on likes (ticker, week)",
+)
+
+
+def migrate(con: sqlite3.Connection) -> int:
+    """아직 적용하지 않은 번호부터 끝까지 — 적용한 수를 돌려준다. 화면 서버·매일 실행·테스트가 DB 를 열 때마다 부른다(이미 끝났으면 0)."""
+    (done,) = con.execute("pragma user_version").fetchone()
+    for n, sql in enumerate(MIGRATIONS[done:], done + 1):
+        try:
+            con.execute(sql)
+        except sqlite3.OperationalError as err:
+            if "duplicate column" not in str(err):  # 번호 없이 열을 더하던 때의 DB — 이미 있는 열은 건너뛴다
+                raise
+        con.execute(f"pragma user_version = {n}")
+    con.commit()
+    return len(MIGRATIONS) - done
 
 
 VIEWS_DAYS, NEWS_DAYS = 180, 60  # 열어본 기록 · 뉴스룸 소식을 두는 날 수 (개인정보 처리방침 3항과 같게)

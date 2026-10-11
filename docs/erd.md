@@ -279,3 +279,8 @@ UNIQUE `(user_id, kind, ref, week)`. 피드 = 내가 팔로우한 사람 + 나�
 | AI 호출 기록 | `disclosures.read_*` · `notes.writer` 로 충분 | 비용을 종목별로 따져야 할 때 |
 | 수급 | 데이터 사용권 없음 | 데이터 계약 후 |
 | 용어 사전 | 코드 안 상수 dict | 100개 넘거나 사람이 고치게 될 때 |
+
+
+## 표 구조 바꾸기 (2026-10-11)
+
+새 열·색인은 `hanjang/db.py` 의 `MIGRATIONS` **맨 끝에** 한 줄 더한다. 번호 순서로 한 번씩만 돌고, 몇 번까지 적용했는지는 DB 파일 안(`pragma user_version`)에 남는다. 앞 줄은 고치지 않는다 — 이미 적용된 DB 에는 다시 돌지 않는다. 열을 지우거나 이름을 바꾸는 일은 아직 없다(SQLite 는 `alter table … drop column` 이 되니 그때도 한 줄이면 된다).

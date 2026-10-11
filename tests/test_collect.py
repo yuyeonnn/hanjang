@@ -121,3 +121,22 @@ def test_corps_keeps_yesterday_list_when_dart_sends_no_zip(tmp_path, monkeypatch
     d._corps, d.calls, d.LIMIT = None, 0, 10
     monkeypatch.setattr(d, "_call", lambda path, **k: type("R", (), {"content": b"<result><status>800</status></result>"})())
     assert d.corps() == {"005930": "00126380"}  # zip 이 아니어도 어제 목록으로 계속
+
+
+def test_migrations_run_once_in_order_and_old_dbs_catch_up(tmp_path):
+    """표 구조 변경은 번호 순서로 한 번씩 — 적용한 번호는 DB 파일 안(user_version)에 남는다. 번호 없이 열을 더하던 때의 DB 도 따라잡는다."""
+    import sqlite3
+
+    from hanjang import db
+
+    con = db.connect(tmp_path / "a.db")
+    assert con.execute("pragma user_version").fetchone() == (len(db.MIGRATIONS),) and db.migrate(con) == 0  # 새 DB — 끝까지 적용, 다시 열면 할 일 없음
+    assert {"nickname", "banned", "photo"} <= {r[1] for r in con.execute("pragma table_info(users)")}
+    con.close()
+    old = sqlite3.connect(tmp_path / "old.db")  # 옛 DB — 열은 이미 있는데 번호는 0
+    old.executescript(db.SCHEMA)
+    old.execute("alter table users add column nickname text")
+    old.close()
+    con = db.connect(tmp_path / "old.db")
+    assert con.execute("pragma user_version").fetchone() == (len(db.MIGRATIONS),)
+    assert {"nickname", "banned"} <= {r[1] for r in con.execute("pragma table_info(users)")}
