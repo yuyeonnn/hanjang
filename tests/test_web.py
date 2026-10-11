@@ -155,7 +155,7 @@ def test_learn_tab_lists_and_opens_articles():
     assert '<strong class="font-semibold text-primary' in body and "**" not in body
     assert call(app, "/learn/nope", cookie=ck)[0].startswith("404")
     for a in learn.ARTICLES:  # 읽기 팁에도 권유·예측 말은 없다
-        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "")
+        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "").replace("수요예측", "")  # 「수요예측」은 공모 절차의 정식 이름
         assert not notes.FORBIDDEN.search(text), a["slug"]
 
 

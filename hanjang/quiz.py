@@ -130,6 +130,11 @@ QUIZ = {
 }
 
 
+from hanjang import learn_more  # noqa: E402
+
+QUIZ.update(learn_more.QUIZ)  # 둘째 묶음 21편의 문제
+
+
 def questions(slug: str) -> list[tuple]:
     """그 글의 세 문제 — 모두 그 글에 적힌 내용에서(내 종목 숫자로 내는 문제는 뺐다: 공시 숫자를 외우고 있어야 풀 수 있었다, 사용자 10/12)."""
     return list(QUIZ.get(slug, []))

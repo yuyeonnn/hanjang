@@ -271,6 +271,9 @@ ARTICLES = [
      "points": ["숫자 너머 회사가 일하는 방식 보기", "고객·거래처·경쟁사의 이야기", "경영진이 나쁜 일도 솔직하게 알리나"],
      "more": ("국립중앙도서관에서 책 찾기", "https://www.nl.go.kr")},
 ]
+from hanjang import learn_more  # noqa: E402 — 둘째 묶음(공시 읽기·미국 주식·시장 일정 …) 21편은 파일을 나눴다
+
+ARTICLES += learn_more.NEW
 BY_SLUG = {a["slug"]: a for a in ARTICLES}
 
 # --- 더 풀어 쓴 문단 — 기존 글이 짧다는 말에 (사용자 10/10). 같은 원칙: 뜻과 구조만, 사라·팔라 없음 ---
@@ -605,7 +608,9 @@ def rates(con) -> dict | None:
     return BY_SLUG["rates"] | {"body": body, "rates": got, "now": now, "month": month}
 
 
-CATS = list(dict.fromkeys(a["cat"] for a in ARTICLES))
+# 묶음의 차례 = 읽는 차례 (목록 화면이 이 순서로 보여 준다)
+CATS = ["처음 시작", "상품 이해", "회사 읽기", "공시 읽기", "업종별로 읽기", "시장 일정", "미국 주식", "생각 정리", "책에서 배우기"]
+assert set(CATS) == {a["cat"] for a in ARTICLES}
 # 캘린더의 「주주를 위한 읽기 팁」에서 이어 줄 글 — 공시 종류별
-FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "statements",
-             "RIGHTS_ISSUE": "disclosure", "CB_BW": "disclosure"}  # fmt: skip
+FOR_EVENT = {"BUYBACK": "buyback", "DIVIDEND": "dividend", "EARNINGS": "earnings-read", "MAJOR_CONTRACT": "contract",
+             "RIGHTS_ISSUE": "rights-issue", "CB_BW": "cb", "BONUS_ISSUE": "bonus-split", "TRADING_HALT": "warnings"}  # fmt: skip
