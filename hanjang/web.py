@@ -3282,12 +3282,10 @@ class App:
                           '<span class="material-symbols-outlined text-primary text-[18px]">chevron_right</span></a>' for x in items)
                 + "</div></section>")  # fmt: skip
 
-    def learn_top(self, uid: int) -> str:
-        """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) · 배움 길(단계마다 도장) (사용자 10/12)."""
-        stamps = quiz.done(self.con, uid)
+    def learn_top(self, uid: int, stamps: set) -> str:
+        """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) (사용자 10/12)."""
         key, q = quiz.daily(self.con, uid, date.today())
-        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
-        return (quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS + quiz.path(stamps, read))
+        return quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS
 
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
@@ -3328,15 +3326,25 @@ class App:
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
+        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 도장(다 맞힘) · 옅은 체크(읽음) · 빈 동그라미 (사용자 10/12: 따로 떼지 말고 글 옆에)
+        stamps = quiz.done(self.con, uid)
+        read = {r[0] for r in self.con.execute("select distinct ticker from views where user_id = ? and page = 'learn' and ticker is not null", (uid,))}
+
+        def mark(sl: str) -> str:
+            cls, icon, label = (("bg-primary text-on-primary", "verified", "도장 받음") if sl in stamps else
+                                ("bg-primary-fixed text-primary", "check", "읽음") if sl in read else ("border border-outline-variant text-outline-variant", "circle", "아직 안 읽음"))  # fmt: skip
+            return f'<span aria-label="{label}" title="{label}" class="mt-0.5 w-7 h-7 shrink-0 rounded-full flex items-center justify-center {cls}"><span class="material-symbols-outlined text-[16px]">{icon}</span></span>'
+
         groups = "".join(
-            f'<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><div class="flex items-center justify-between mb-space-sm"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">{e(c)}</h2></div>'
+            f'<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><div class="flex items-center justify-between mb-space-sm"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">{e(c)}</h2>'
+            f'<span class="text-[12px] text-on-surface-variant">도장 {sum(x["slug"] in stamps for x in arts)} / {len(arts)}</span></div>'
             f'<div class="flex flex-col divide-y divide-surface-container-high/80">'
             + "".join(f'<a href="/learn/{e(x["slug"])}" class="py-3.5 flex items-start justify-between gap-space-sm"><div class="flex flex-col gap-0.5"><span class="font-body-reading-strong text-body-reading-strong text-on-surface">{e(x["title"])}</span>'
-                      f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div><span class="material-symbols-outlined text-primary text-[18px] mt-1">chevron_right</span></a>'
-                      for x in learn.ARTICLES if x["cat"] == c) + "</div></section>" for c in learn.CATS)  # fmt: skip
+                      f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div>{mark(x["slug"])}</a>'
+                      for x in arts) + "</div></section>" for c in learn.CATS for arts in [[x for x in learn.ARTICLES if x["cat"] == c]])  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>'
-                 + self.learn_top(uid) + self.cached("learn", lambda: groups + self.guru_list() + self.big_list()) + end)  # fmt: skip
+                 + self.learn_top(uid, stamps) + groups + self.cached("learn", lambda: self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
 
