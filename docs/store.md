@@ -6,8 +6,18 @@
 
 - 꾸러미 이름: `com.hanjangapp` (한 번 올리면 못 바꾼다)
 - 만드는 곳: `C:\hanjang-android\` (저장소 밖) — `app/` 프로젝트 · `keys/` 올리기용 서명 열쇠와 비밀번호 · `jdk/` `sdk/` 도구
-- 다시 만들기(아이콘·이름을 바꿨을 때만 — 화면·기능은 서버에 올리면 바로 바뀐다):
-  `app/twa-manifest.json` 의 `appVersionCode` 를 1 올리고, `tool/gen.js` → `bubblewrap build --skipPwaValidation`
+- **만든 것 (10/12)**: `out/hanjang-1.0.0.aab`(플레이에 올리는 파일) · `out/hanjang-1.0.0.apk`(폰에 바로 깔아 보는 파일) · `store/`(그래픽 이미지·스크린샷 4장·아이콘). 권한 없음 · 안드로이드 7 이상 · 대상 SDK 36.
+- 다시 만들기(아이콘·이름을 바꿨을 때만 — 화면·기능은 서버에 올리면 바로 바뀐다): `tool/gen.js` 의 `appVersionCode` 를 1 올리고
+
+```bash
+cd /c/hanjang-android && export JAVA_HOME="C:/hanjang-android/jdk/jdk-17.0.20.1+1" PATH="/c/hanjang-android/jdk/jdk-17.0.20.1+1/bin:$PATH" ANDROID_HOME="C:/hanjang-android/sdk"
+(cd tool && node gen.js) && (cd app && ./gradlew.bat bundleRelease assembleRelease --no-daemon -q)
+PW="$(cat keys/password.txt)"; cp app/app/build/outputs/bundle/release/app-release.aab out/hanjang.aab
+jarsigner -keystore keys/hanjang-upload.keystore -storepass "$PW" -keypass "$PW" -sigalg SHA256withRSA -digestalg SHA-256 out/hanjang.aab hanjang
+```
+
+  `bubblewrap build` 는 중간에 묻는 말이 있어 자동으로 못 돌린다 — 위처럼 Gradle 을 바로 부른다. 최소 SDK 는 24(그 아래는 도우미 라이브러리가 빌드를 막는다).
+- 올리기 열쇠 지문(SHA-256): `2D:5E:24:5E:07:B6:AB:91:7B:6C:F1:32:FF:AD:ED:9B:EA:9A:5D:44:B6:16:A0:FD:01:2C:01:7E:5C:AB:19:54` — 서버 `.env` 에 넣어 두었다(10/12). 플레이에 올린 뒤 **구글의 앱 서명 키 지문을 쉼표로 덧붙여야** 스토어에서 받은 앱의 주소창이 사라진다.
 - **서명 열쇠(`keys/`)는 따로 한 부 보관한다.** 잃어도 플레이 콘솔에서 올리기 열쇠를 다시 등록할 수 있지만(플레이 앱 서명), 며칠 걸린다.
 - 앱과 사이트 잇기: 플레이 콘솔 「앱 무결성 → 앱 서명」의 **앱 서명 키 SHA-256** 과 올리기 열쇠 SHA-256 을 서버 `.env` 의 `TWA_SHA256` 에 쉼표로 둘 다, `TWA_PACKAGE=com.hanjangapp`. 그러면 `https://hanjangapp.com/.well-known/assetlinks.json` 이 열리고 앱에서 주소창이 사라진다.
 
