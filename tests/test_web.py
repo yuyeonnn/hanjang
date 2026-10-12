@@ -1328,7 +1328,7 @@ def test_login_cookie_expires_on_the_server_and_old_cookies_are_upgraded():
     new = web.session_cookie(1, SECRET, now[0]).split(";")[0]
     assert "내 종목" in call(app, "/", cookie=new)[2] and "Set-Cookie" not in call(app, "/", cookie=new)[1]
     now[0] += web.SESSION_TTL + 1
-    assert "시작하기" in call(app, "/", cookie=new)[2]  # 90일이 지나면 서버가 받지 않는다 — 다시 로그인
+    assert "시작하기" in call(app, "/", cookie=new)[2]  # 기한(1년)이 지나면 서버가 받지 않는다 — 다시 로그인
     assert "시작하기" in call(app, "/", cookie="s=" + web.sign("1|9999999999999", SECRET).replace("1|", "2|"))[2]  # 번호 바꿔치기
 
     old = f"s={web.sign('1', SECRET)}"  # 날짜 없는 옛 쿠키

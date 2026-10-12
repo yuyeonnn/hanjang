@@ -26,7 +26,7 @@ def unsign(token: str, secret: str) -> str | None:
     return value if value and hmac.compare_digest(sign(value, secret), token) else None
 
 
-SESSION_TTL = 90 * 86400  # 로그인 쿠키는 발급 뒤 90일 — 서버가 센다(브라우저의 Max-Age 는 정직한 브라우저만 지킨다)
+SESSION_TTL = 365 * 86400  # 로그인 쿠키는 발급 뒤 1년(앱으로 내면 한 번 로그인하고 계속 쓴다 — 사용자 10/12, 그 전엔 90일) — 서버가 센다(브라우저의 Max-Age 는 정직한 브라우저만 지킨다)
 # 날짜 없는 옛 쿠키(「사용자 번호」만 서명)는 이날까지만 받고, 그 사이 들어오면 날짜가 든 새 쿠키로 바꿔 준다 — 아무도 갑자기 로그아웃되지 않게.
 # 이날이 지나면 옛 쿠키는 통하지 않는다(새 나간 쿠키가 영영 쓰이던 구멍, 보안 점검 10/11). ponytail: 2026-11-15 뒤엔 이 줄과 legacy 갈래를 지운다
 LEGACY_UNTIL = datetime(2026, 11, 15).timestamp()
@@ -38,7 +38,7 @@ def session_cookie(uid: int, secret: str, now: float, age: int = SESSION_TTL) ->
 
 
 def read_session(token: str, secret: str, now: float) -> tuple[int | None, bool]:
-    """쿠키 → (사용자 번호, 옛 쿠키라 새로 구워 줘야 하나). 서명이 틀리거나 90일이 지났으면 (None, False)."""
+    """쿠키 → (사용자 번호, 옛 쿠키라 새로 구워 줘야 하나). 서명이 틀리거나 SESSION_TTL 이 지났으면 (None, False)."""
     v = unsign(token, secret)
     if not v:
         return None, False
