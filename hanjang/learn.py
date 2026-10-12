@@ -271,6 +271,9 @@ ARTICLES = [
      "points": ["숫자 너머 회사가 일하는 방식 보기", "고객·거래처·경쟁사의 이야기", "경영진이 나쁜 일도 솔직하게 알리나"],
      "more": ("국립중앙도서관에서 책 찾기", "https://www.nl.go.kr")},
 ]
+from hanjang import learn_more  # noqa: E402 — 둘째 묶음(공시 읽기·미국 주식·시장 일정 …) 21편은 파일을 나눴다
+
+ARTICLES += learn_more.NEW
 BY_SLUG = {a["slug"]: a for a in ARTICLES}
 
 # --- 더 풀어 쓴 문단 — 기존 글이 짧다는 말에 (사용자 10/10). 같은 원칙: 뜻과 구조만, 사라·팔라 없음 ---
@@ -364,7 +367,7 @@ PLUS = {
     "fund-etf": "ETF를 볼 때는 **괴리율**도 확인해요. ETF가 거래되는 값과 실제로 담은 자산의 값(순자산가치)의 차이예요. 하루 거래량이 아주 적은 ETF는 이 차이가 커지거나, 원하는 값에 사고팔기 어려울 수 있어요.",
     "index": "지수는 회사의 성적표를 모은 것이라, 지수가 오른 날에도 내 종목은 내릴 수 있어요. 한장 노트는 시장 전체보다 **내가 가진 회사에 무슨 일이 있었는지**에 집중해요. 시장 분위기는 캘린더의 금리·물가 일정에서 함께 볼 수 있어요.",
     "inverse-leverage": "이런 상품은 손실도 빠르게 커질 수 있어서, 설명서에 「단기 투자」「손실 위험」이 크게 적혀 있어요. 상품 이름에 붙은 「2X」「인버스」 같은 표시를 꼭 확인하고, 하루 단위 구조라는 점을 기억해 두면 예상과 다른 결과에 덜 놀라요.",
-    "dividend": "국내 주식 배당에는 **배당소득세 15.4%**가 떼어진 뒤 들어와요. 이자와 배당을 합친 금융소득이 1년에 2천만 원을 넘으면 다른 소득과 합쳐 세금을 다시 계산해요. 미국 주식 배당은 미국에서 먼저 세금이 떼어져요.",
+    "dividend": "국내 주식 배당에는 **배당소득세 15.4%**가 떼어진 뒤 들어와요. 이자와 배당을 합친 금융소득이 1년에 2천만 원을 넘으면 다른 소득과 합쳐 세금을 다시 계산해요. 2026년부터는 배당을 많이 하는 회사(고배당기업)에서 받은 배당을, 신청하면 다른 소득과 합치지 않고 따로 세금을 매기는 제도가 생겼어요(2029년까지). 미국 주식 배당은 미국에서 먼저 세금이 떼어져요.",
     "disclosure": "정기보고서는 마감이 정해져 있어요. **사업보고서는 사업연도가 끝나고 90일 안**, 반기·분기보고서는 **45일 안**이에요. 그래서 12월 결산 회사의 1년치 보고서는 보통 3월에 나오고, 그보다 앞서 잠정실적 공시로 숫자를 먼저 알리는 회사가 많아요.",
     "statements": "처음엔 이 순서로 읽어 보세요 — 무엇을 파는 회사인지(사업의 내용) → 얼마를 벌었나(손익계산서) → 빚은 어떤가(재무상태표) → 번 돈이 실제 현금으로 들어왔나(현금흐름표). 한장 노트의 차례도 이 순서를 따라요.",
     "ratios": "**ROE는 셋으로 나눠 볼 수 있어요.** 100원 팔아 얼마 남기나 × 가진 자산으로 얼마나 많이 파나 × 빚을 얼마나 써서 덩치를 키웠나. 같은 ROE라도 빚을 많이 써서 높아진 것인지, 장사를 잘해서 높아진 것인지에 따라 뜻이 달라요.",
@@ -605,7 +608,9 @@ def rates(con) -> dict | None:
     return BY_SLUG["rates"] | {"body": body, "rates": got, "now": now, "month": month}
 
 
-CATS = list(dict.fromkeys(a["cat"] for a in ARTICLES))
+# 묶음의 차례 = 읽는 차례 (목록 화면이 이 순서로 보여 준다)
+CATS = ["처음 시작", "상품 이해", "회사 읽기", "공시 읽기", "업종별로 읽기", "시장 일정", "미국 주식", "생각 정리", "책에서 배우기"]
+assert set(CATS) == {a["cat"] for a in ARTICLES}
 # 캘린더의 「주주를 위한 읽기 팁」에서 이어 줄 글 — 공시 종류별
-FOR_EVENT = {"BUYBACK": "disclosure", "DIVIDEND": "dividend", "EARNINGS": "statements", "MAJOR_CONTRACT": "statements",
-             "RIGHTS_ISSUE": "disclosure", "CB_BW": "disclosure"}  # fmt: skip
+FOR_EVENT = {"BUYBACK": "buyback", "DIVIDEND": "dividend", "EARNINGS": "earnings-read", "MAJOR_CONTRACT": "contract",
+             "RIGHTS_ISSUE": "rights-issue", "CB_BW": "cb", "BONUS_ISSUE": "bonus-split", "TRADING_HALT": "warnings"}  # fmt: skip

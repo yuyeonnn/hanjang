@@ -155,7 +155,7 @@ def test_learn_tab_lists_and_opens_articles():
     assert '<strong class="font-semibold text-primary' in body and "**" not in body
     assert call(app, "/learn/nope", cookie=ck)[0].startswith("404")
     for a in learn.ARTICLES:  # 읽기 팁에도 권유·예측 말은 없다
-        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "")
+        text = " ".join([a["title"], a["lead"], *a["body"], *a["points"]]).replace("**", "").replace("수요예측", "")  # 「수요예측」은 공모 절차의 정식 이름
         assert not notes.FORBIDDEN.search(text), a["slug"]
 
 
@@ -469,7 +469,11 @@ def test_demo_browse_without_email_is_read_only(monkeypatch):
     s, h, _ = call(app, "/demo")
     ck = h["Set-Cookie"].split(";")[0]
     assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
-    assert "보기만" in call(app, "/add", "POST", "q=005930", ck)[2]  # 바꾸는 것은 막는다
+    add = call(app, "/add", "POST", "q=005930", ck)[2]  # 바꾸는 것은 막는다 — 로그인 화면으로
+    assert "둘러보는 중이에요" in add and 'name="email"' in add
+    for path in ("/me", "/me/settings", "/me/notices"):  # 프로필 쪽을 누르면 로그인 화면
+        assert 'name="email"' in call(app, path, cookie=ck)[2] and "내 나무" not in call(app, path, cookie=ck)[2]
+    assert "피드" in call(app, "/feed", cookie=ck)[2] and "읽기 팁" in call(app, "/learn", cookie=ck)[2]  # 구경은 그대로
     assert "로그인 없이 둘러보기" in call(app, "/")[2]
 
 

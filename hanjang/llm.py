@@ -14,7 +14,8 @@ from hanjang.sources import ROOT, env
 MODELS = {"reader": "gpt-4.1-mini", "writer": "gpt-4.1", "scan": "gpt-4.1-mini"}  # 읽기는 싼 모델, 글은 좋은 모델 · 캡처 읽기(scan)가 빠져 있어 늘 실패하던 것
 # 일감(지시문 파일 이름)마다 다른 모델 — 없으면 MODELS. 노트는 싼 모델로 먼저 쓰고, 검사에 떨어지면 MODELS["writer"] 로 다시 쓴다(notes.write).
 # 2026-10-12 평가: 서버 재료 30편에서 버릇 0.7/100문장(gpt-4.1 3.3) · 정말 틀린 문장 2(gpt-4.1 0~1) · 값 약 1/6. 되돌리려면 이 줄을 비운다
-BY_TASK: dict[str, str] = {"writer": "gpt-5.6-luna"}
+# 피드 기사(article)도 luna — 서버 사건 20건에서 통과 9건(gpt-4.1 5건), 통과한 글에 틀린 숫자 없음, 값 약 1/8. 기사는 좋은 모델로 다시 쓰지 않는다(gpt-4.1 이 더 많이 떨어진다)
+BY_TASK: dict[str, str] = {"writer": "gpt-5.6-luna", "article": "gpt-5.6-luna"}
 # USD / 1M 토큰 (입력, 캐시된 입력, 출력) — 같은 지시문 앞부분은 OpenAI 가 알아서 싸게 받는다(1,024토큰 이상, 75% 할인)
 PRICE = {"gpt-4.1-mini": (0.40, 0.10, 1.60), "gpt-4.1": (2.00, 0.50, 8.00), "gpt-4.1-nano": (0.10, 0.025, 0.40),
          "gpt-5.6-luna": (0.20, 0.02, 1.20), "gpt-6-luna": (0.10, 0.01, 0.50)}

@@ -189,9 +189,9 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return self.demo()
         if uid is None:
             return "200 OK", [], self.login_page(cohort=query.get("c", ""))
-        if method == "POST" and self.is_demo(uid):  # 둘러보기는 보기만 — 여럿이 같이 쓰는 계정이라 바꾸지 않는다
-            return "200 OK", [], self.simple("둘러보기", "둘러보기에서는 보기만 할 수 있어요. 직접 쓰려면 로그인해 주세요. "
-                                             "<a class='text-primary underline' href='javascript:history.back()'>돌아가기</a>")
+        # 둘러보기 = 로그인 없이 구경하는 손님. 프로필·설정·알림을 누르거나 무언가 바꾸려 하면(담기·좋아요·팔로우) 로그인 화면으로 (사용자 10/12)
+        if self.is_demo(uid) and (method == "POST" or path == "/me" or path.startswith("/me/")):
+            return "200 OK", [], self.login_page(error="둘러보는 중이에요. 로그인하면 내 종목을 담고 프로필을 쓸 수 있어요.")
         if path == "/logout":
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)

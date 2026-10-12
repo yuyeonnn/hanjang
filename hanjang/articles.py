@@ -163,6 +163,28 @@ def materials(con: sqlite3.Connection, ev: dict, today: date, doc: str) -> list[
     return fs
 
 
+def strange(text: str, allowed: set[str]) -> set[str]:
+    """글의 숫자 가운데 재료에 없는 것 — 같은 수를 다르게 적은 것은 봐준다 (2026-10-12: 서버 사건 20건 중 gpt-4.1 이 한 편도 못 통과, 대부분 이 까닭).
+    ① 원문의 「08월 03일」「2026-09-30」 ↔ 글의 「8월 3일」「9월」(앞의 0) ② 원문의 「3,197,793」 ↔ 글의 「319만 7,793」(만·억·조로 끊어 읽기)."""
+    allowed = allowed | {n.lstrip("0") or "0" for n in allowed}
+    bad = notes.numbers(text) - allowed
+    for m in re.finditer(r"(?:(\d[\d,]*)조 ?)?(?:(\d[\d,]*)억 ?)?(\d[\d,]*)만(?: ?(\d[\d,]*))?", text):
+        parts = [int(x.replace(",", "")) if x else 0 for x in m.groups()]
+        if str(parts[0] * 10**12 + parts[1] * 10**8 + parts[2] * 10**4 + parts[3]) in allowed:
+            bad -= {x.replace(",", "") for x in m.groups() if x}
+    return bad
+
+
+def readable(text: str) -> str:
+    """자릿수가 긴 숫자를 만·억·조로 끊어 읽는다 — 「6,830,344주」 → 「683만 344주」. 값은 그대로(반올림 없음), 숫자는 코드가 옮긴다.
+    싼 모델이 원문 숫자를 그대로 옮겨 「읽기 힘든 숫자」로 떨어지던 것 (2026-10-12: 20건 중 5건)."""
+    def kor(m):
+        n = int(m[0].replace(",", ""))
+        parts = [(n // 10**12, "조"), (n // 10**8 % 10**4, "억"), (n // 10**4 % 10**4, "만"), (n % 10**4, "")]
+        return " ".join(f"{v:,}{u}" for v, u in parts if v)
+    return notes.LONGNUM.sub(kor, text)
+
+
 def items(j: dict) -> list[dict]:
     return j["paragraphs"]
 
@@ -170,16 +192,16 @@ def items(j: dict) -> list[dict]:
 def check(j: dict, fs: list[dict]) -> dict:
     by = {f["id"]: f for f in fs}
     holder = "대량보유" in fs[0]["text"]  # 지분 보고는 「늘렸·줄였」로만 — 사고판 것인지는 보고서만으로 모른다
-    title = j["title"].strip()
+    title = readable(j["title"].strip())
     e1 = notes.numbers(fs[0]["text"] + " " + fs[0].get("doc", ""))  # 제목 숫자도 사건 원문에 있는 것만
-    if not title or len(title) > 40 or notes.numbers(title) - e1 or notes.FORBIDDEN.search(title) or notes.PREDICT.search(title) or GUESS.search(title):
+    if not title or len(title) > 40 or strange(title, e1) or notes.FORBIDDEN.search(title) or notes.PREDICT.search(title) or GUESS.search(title):
         raise ValueError(f"제목: {title!r}")
     if holder and BUYSELL.search(title):
         raise ValueError(f"지분 보고를 사고팜으로: {title!r}")
     if not 3 <= len(j["paragraphs"]) <= 10:
         raise ValueError("문단 수")
     for x in j["paragraphs"]:
-        x["text"] = units(x["text"])
+        x["text"] = readable(units(x["text"]))
     if thin(j["paragraphs"]):
         raise ValueError("사건 문단에 숫자가 없음")
     n_titles = [t for f in fs if f["id"][0] == "N" and (t := re.search(r"「([^」]*)」", f["text"]))]
@@ -190,7 +212,7 @@ def check(j: dict, fs: list[dict]) -> dict:
             raise ValueError(f"근거 없는 문장: {text!r}")
         # 근거 재료의 숫자 + 사건 원문(E1)의 숫자(같은 금액을 언론은 「6천722억」, 원문은 「6,722억」으로 쓴다) + 연도
         src = set().union(*(notes.numbers(by[r]["text"] + " " + by[r].get("doc", "")) for r in refs)) | e1 | years
-        if bad := notes.numbers(text) - src:
+        if bad := strange(text, src):
             raise ValueError(f"재료에 없는 숫자 {bad}: {text!r}")
         if notes.LONGNUM.search(text):
             raise ValueError(f"읽기 힘든 숫자: {text!r}")
