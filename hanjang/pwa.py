@@ -8,7 +8,7 @@ from hanjang import tree
 # 홈 화면에 추가 · 플레이스토어 포장(TWA) — 앱 정보 한 장과 서비스 워커. 서비스 워커는 화면을 저장해 두지 않는다(노트는 늘 새것):
 # 인터넷이 끊겼을 때만 미리 받아 둔 「연결이 끊겼어요」 화면을 보여 준다 (흰 화면·브라우저 오류 대신 — 앱 심사가 보는 것)
 MANIFEST = json.dumps({
-    "name": "한장 — 내 주식, 쉬운 글 한 장", "short_name": "한장", "lang": "ko", "start_url": "/", "scope": "/", "id": "/",
+    "name": "한장 — 한눈에 읽는 장", "short_name": "한장", "lang": "ko", "start_url": "/", "scope": "/", "id": "/",
     "display": "standalone", "background_color": "#fcf8fb", "theme_color": "#154539",
     "description": "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다.", "categories": ["finance", "education"],
     "icons": [{"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},

@@ -51,7 +51,7 @@ HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale
 
 
 # 카카오톡·문자로 링크를 보낼 때 뜨는 미리보기 카드 — 어느 쪽을 보내도 같은 소개 (로그인 같은 화면 이름은 빼고)
-SHARE_TITLE = "한장 — 내 주식, 쉬운 글 한 장"
+SHARE_TITLE = "한장 — 한눈에 읽는 장"  # 이행시: 한눈에 읽는 / 장(場) — 종이 한 장이면서 주식 시장 (사용자 10/12)
 SHARE_DESC = "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다."
 
 
