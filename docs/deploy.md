@@ -78,7 +78,14 @@ sh deploy/check.sh
 | 시험 판정 숫자 (주차별 재방문 · 돈 내고도 보겠다) | `cd /srv/hanjang && sudo -u hanjang /home/hanjang/.local/bin/uv run python -m hanjang.trial trial-1` |
 | 백업 (최근 14일) | `ls /srv/hanjang/data/backup` |
 | 백업에서 되돌리기 | `sudo systemctl stop hanjang-web && cp data/backup/hanjang-YYYYMMDD.db data/hanjang.db && sudo systemctl start hanjang-web` |
-| 상태 한눈에 | https://34-44-40-196.sslip.io/health — `ok` 면 정상, 아니면 `db` · `daily` · `disk` 중 문제인 것 |
+| 상태 한눈에 | https://hanjangapp.com/health — `ok` 면 정상, 아니면 `db` · `daily` · `disk` 중 문제인 것 |
+
+## 주소 (2026-10-12)
+
+**https://hanjangapp.com** — Cloudflare 에서 등록(1년, 자동 연장 · 사용자 계정). DNS 는 Cloudflare, A 레코드 `@`·`www` → `34.44.40.196`, **Proxy 꺼짐(DNS only)** — 켜면 Caddy 가 인증서를 못 받는다.
+서버 `/etc/caddy/sites/hanjang.caddy`: `hanjangapp.com` 가 화면 서버로, `www.hanjangapp.com` 와 옛 주소 `34-44-40-196.sslip.io` 는 새 주소로 넘긴다(301, 경로 그대로). 옛 설정은 `/etc/caddy/hanjang.caddy.bak-20261012`.
+메일 속 링크는 `.env` 의 `BASE_URL=https://hanjangapp.com`. 로그인 쿠키는 주소마다 따로라, 옛 주소로 로그인해 있던 사람은 새 주소에서 한 번 다시 로그인한다.
+서버 IP 가 바뀌면 Cloudflare 의 A 레코드 두 줄만 고치면 된다(주소는 그대로).
 
 ## 감시와 백업 (2026-10-10)
 

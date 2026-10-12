@@ -5,7 +5,7 @@
 set -eu
 HOST="${HANJANG_SSH:-hanjang-deploy@34.44.40.196}"
 KEY="${HANJANG_KEY:-$HOME/.ssh/hanjang-deploy}"
-URL="${HANJANG_URL:-https://34-44-40-196.sslip.io}"
+URL="${HANJANG_URL:-https://hanjangapp.com}"
 HERE="$(dirname "$0")"
 
 ssh -i "$KEY" -o BatchMode=yes "$HOST" 'cd /srv/hanjang && sudo -u hanjang /srv/hanjang/.venv/bin/python -X utf8 -m hanjang.smoke' | node "$HERE/check.js"
