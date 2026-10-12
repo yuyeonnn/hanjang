@@ -1747,10 +1747,55 @@ def test_morning_lead_shows_what_there_is_on_a_day_without_filings():
     base = {"news": [], "moves": [], "week": [], "peers": [], "today": "2026-10-13"}
     assert morning.lead(base) == "새 공시 없는 조용한 아침이에요."  # 정말 아무것도 없을 때만
     week = [{"date": "2026-10-14", "label": "미국 소비자물가 발표", "tag": "물가", "url": ""}, {"date": "2026-10-15", "label": "삼성전자 실적 발표", "tag": "실적", "url": "u"}]
-    assert morning.lead(base | {"week": week}) == "목요일(10/15) 삼성전자 실적 발표"  # 내 종목 일정이 시장 일정보다 먼저
+    assert morning.lead(base | {"week": week}) == "삼성전자 실적 발표까지 2일"  # 내 종목 일정이 시장 일정보다 먼저 — 며칠 남았는지(날마다 줄어든다)
+    assert morning.lead(base | {"week": [week[1] | {"date": "2026-10-14"}]}) == "내일 삼성전자 실적 발표"
+    facet = {"ticker": "000660", "name": "SK하이닉스", "title": "무엇으로 돈을 버나요?", "sentences": ["메모리 반도체를 만들어요."], "url": "u"}
+    assert morning.lead(base | {"facet": facet, "week": week[:1]}) == "SK하이닉스 · 무엇으로 돈을 버나요?"  # 오늘의 한 면이 시장 일정보다 먼저
+    assert morning.lead(base | {"facet": facet, "week": week}) == "삼성전자 실적 발표까지 2일"  # 내 종목 일정이 있으면 그쪽
+    missed = [{"name": "한화오션", "ticker": "042660", "url": "u", "body": "큰 계약을 맺었다고 알렸어요.", "ago": "4일 전"}]
+    assert morning.lead(base | {"missed": missed, "facet": facet, "week": week}) == "4일 전 한화오션은 큰 계약을 맺었다고 알렸어요."  # 놓친 소식엔 며칠 전인지 꼭
     assert morning.lead(base | {"week": week[:1]}) == "수요일(10/14) 미국 소비자물가 발표"
     assert morning.lead(base | {"week": [week[1] | {"date": "2026-10-13"}]}) == "오늘 삼성전자 실적 발표"
     peers = [{"name": "SK하이닉스", "label": "반도체", "body": "큰 계약을 맺었다고 알렸어요.", "url": "u", "tag": "계약"}]
     assert morning.lead(base | {"peers": peers}) == "같은 업종 SK하이닉스는 큰 계약을 맺었다고 알렸어요."
     assert morning.lead(base | {"week": week, "peers": peers, "moves": ["국민연금이 삼성전자 지분을 늘렸어요(지분 7.76%)."]}).startswith("국민연금이")  # 내 종목 큰손이 맨 먼저
     assert morning.lead(base | {"moves": ["x"], "news": [{"text": "삼성전자는 실적을 알렸어요."}]}) == "삼성전자는 실적을 알렸어요."  # 공시가 있으면 공시
+
+
+def test_daily_facet_rotates_and_missed_news_goes_away_once_read():
+    """내용이 날마다 바뀌게(사용자 10/13) — ① 놓친 소식은 그 노트를 열면 사라진다 ③ 오늘의 한 면은 종목이 하루에 하나씩 돌고 한 바퀴마다 다음 면. AI 를 부르지 않는다."""
+    from datetime import timedelta
+
+    from hanjang import facets, morning
+
+    app, con = _app()
+    today = date(2026, 10, 14)  # 수요일
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into stocks (ticker, name, corp_code, active) values ('000660', 'SK하이닉스', 'x', 1)")
+    for t, rev, op in (("005930", 300, 30), ("000660", 100, 40)):
+        con.execute("insert into financials (ticker, fiscal_year, revenue, operating_income, net_income, equity, liabilities, rcept_no, basis) values"
+                    " (?, 2025, ?, ?, 10, 200, 50, 'r25', 'CFS'), (?, 2024, ?, ?, 8, 180, 60, 'r24', 'CFS')", (t, rev * 10**12, op * 10**12, t, rev * 8 * 10**11, op * 5 * 10**11))  # fmt: skip
+    con.execute("insert into business (ticker, rcept_no, body) values ('000660', 'b1', ?)", (json.dumps({"what": ["메모리 반도체를 만들어 팔아요."], "risks": ["회사는 수요 변동을 위험으로 꼽아요."]}),))
+    con.execute("insert into dividends values ('005930', 2025, 1500, 100, 20.0)")
+    con.commit()
+    fs = {f["title"]: f for f in facets.of(con, "000660", today)}
+    assert fs["무엇으로 돈을 버나요?"]["sentences"] == ["메모리 반도체를 만들어 팔아요."] and fs["무엇으로 돈을 버나요?"]["url"].endswith("b1")
+    assert fs["지난 한 해 장사는 어땠나요?"]["sentences"][0] == "2025년 매출은 100.0조원으로 1년 전보다 25.0% 늘었어요."
+    assert "100원어치를 팔아 본업으로 40원을 남겼어요(영업이익률 40.0%)." in fs["100원어치 팔면 얼마를 남기나요?"]["sentences"][0]
+    assert "한 주에 1,500원을 배당했어요" in {f["title"]: f for f in facets.of(con, "005930", today)}["배당은 어땠나요?"]["sentences"][0]
+    assert facets.of(con, "999999", today) == []  # 없는 종목
+    seen = [(p["ticker"], p["title"]) for p in (facets.today_pick(con, ["005930", "000660"], today + timedelta(days=i)) for i in range(8))]
+    assert len(set(seen)) == 8 and {t for t, _ in seen[:2]} == {"005930", "000660"}  # 여드레 동안 다 다른 글 · 종목은 하루에 하나씩 돈다
+    assert facets.today_pick(con, ["005930", "000660"], today, skip={"005930"})["ticker"] == "000660"  # 오늘 소식이 있는 종목은 건너뛴다
+    assert facets.today_pick(con, [], today) is None
+
+    con.execute("insert into holdings values (1, '005930', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('9', '005930', '2026-10-08', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
+    con.commit()
+    m = morning.build(con, ["005930"], today, 1)
+    assert not m["news"] and m["missed"][0]["ago"] == "6일 전" and m["missed"][0]["name"] == "삼성전자" and m["facet"]["ticker"] == "005930"
+    page = morning.html(m)
+    assert "놓친 소식" in page and "6일 전" in page and "오늘의 한 면" in page and "노트 전체 보기" in page and "[놓친 소식]" in morning.text(m)
+    con.execute("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', '2026-10-13T09:00:00')")  # 그 뒤에 노트를 열어 봤다
+    assert morning.build(con, ["005930"], today, 1)["missed"] == []
+    assert morning.build(con, ["005930"], today)["missed"] == []  # 누구인지 모르면(시안·메일 미리보기) 놓친 소식은 없다

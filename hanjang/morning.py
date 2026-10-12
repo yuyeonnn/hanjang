@@ -13,7 +13,7 @@ import sys
 from datetime import date, timedelta
 from html import escape as e
 
-from . import holders, learn, notes, sources
+from . import facets, holders, learn, notes, sources
 
 WEEK = "월화수목금토일"
 
@@ -248,6 +248,16 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
               for t, k, net in con.execute(
                   f"select ticker, count(*), sum(change) from insiders where ticker in ({q}) and kind = '임원' and date >= ? group by ticker limit 3",
                   (*tickers, lo.isoformat())).fetchall()]  # fmt: skip
+    # 놓친 소식 — 지난 7일에 나왔는데 그 뒤로 그 종목 노트를 열어 보지 않은 것. 열어 보면 사라진다(같은 글이 몇 주씩 뜨지 않게, 사용자 10/13)
+    missed = []
+    if uid:
+        for t, title, ai, rno, d in con.execute(
+                f"select d.ticker, d.title, d.plain, d.rcept_no, d.date from disclosures d where d.ticker in ({q}) and d.date >= ? and d.date < ? and d.importance >= 2"
+                " and d.code not in ('OTHER', 'RUMOR') and not exists (select 1 from views v where v.user_id = ? and v.page = 'note' and v.ticker = d.ticker and v.at >= d.date)"
+                " order by d.date desc limit 3", (*tickers, (today - timedelta(days=7)).isoformat(), lo.isoformat(), uid)).fetchall():  # fmt: skip
+            if t not in by:
+                ago = (today - date.fromisoformat(d)).days
+                missed.append({"name": name.get(t, t), "ticker": t, "url": src(con, rno), "body": happened(title, ai), "ago": f"{ago}일 전"})
     follows = []
     if uid:
         follows = [f"팔로우한 {n}님은 글 {k}개를 리그램했어요." for n, k in con.execute(
@@ -282,19 +292,29 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
     else:
         a = learn.ARTICLES[today.toordinal() % len(learn.ARTICLES)]
         tip = (a["title"], a["lead"].replace("**", ""), ("이어서 읽기", f"/learn/{a['slug']}"))
-    return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4),
+    facet = facets.today_pick(con, tickers, today, skip=set(by))  # 오늘의 한 면 — 소식이 없는 날에도 날마다 다른 글
+    return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4), "missed": missed, "facet": facet,
             "moves": moves, "follows": follows, "market": market(con, today), "peers": peers, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
 
 
 def lead(m: dict) -> str:
-    """접힌 카드의 한 줄 — 내 종목 공시가 없는 날에도 있는 소식을 앞에 낸다(내 종목 큰손 움직임 > 내 종목의 이번 주 일정 > 같은 업종 > 시장 일정).
+    """접힌 카드의 한 줄 — 내 종목 공시가 없는 날에도 날마다 다른 글이 나오게:
+    공시 > 큰손 움직임 > 놓친 소식(며칠 전) > 내 종목 일정(며칠 남았는지) > 오늘의 한 면 > 시장 일정 > 같은 업종 > 조용한 아침.
     전에는 공시만 없으면 늘 「조용한 아침」이라, 종목 네댓 개를 담은 사람은 열흘에 일곱 날을 그 말만 봤다 (사용자 10/13 · 14일 실측)."""
     if m["news"]:
         return m["news"][0]["text"]
     if m.get("moves"):
         return m["moves"][0]
+    if m.get("missed"):
+        x = m["missed"][0]
+        return f"{x['ago']} {x['name']}{eun(x['name'])} {x['body']}"
     mine = [x for x in m["week"] if x["url"] or x["tag"] in ("실적", "배당", "주총", "회사")]  # 내 종목 일정이 시장 일정보다 먼저
-    for x in mine or m["week"]:
+    for x in mine:  # 며칠 남았는지 — 새 공시가 없어도 숫자가 날마다 줄어든다
+        left = (date.fromisoformat(x["date"]) - date.fromisoformat(m["today"])).days
+        return f"오늘 {x['label']}" if left == 0 else f"내일 {x['label']}" if left == 1 else f"{x['label']}까지 {left}일"
+    if f := m.get("facet"):
+        return f"{f['name']} · {f['title']}"
+    for x in m["week"]:
         d = date.fromisoformat(x["date"])
         when = "오늘" if x["date"] == m["today"] else f"{WEEK[d.weekday()]}요일({d.month}/{d.day})"
         return f"{when} {x['label']}"
@@ -308,6 +328,10 @@ def text(m: dict) -> str:
     out = [m["title"], "", f"[내 종목 소식 · {m['when']}]"]
     out += [x["text"] for x in m["news"]] or ["새로 나온 내 종목 공시는 없어요."]
     out += m.get("moves", []) + m["follows"]
+    if m.get("missed"):
+        out += ["", "[놓친 소식]"] + [f"{x['ago']} · {x['name']}{eun(x['name'])} {x['body']}" for x in m["missed"]]
+    if f := m.get("facet"):
+        out += ["", f"[오늘의 한 면 · {f['name']} — {f['title']}]"] + f["sentences"]
     if m.get("market") or m.get("peers"):
         out += ["", "[시장 · 같은 업종]"] + ([m["market"]] if m.get("market") else []) + [f"#{x['label']} {x['name']}{eun(x['name'])} {x['body']}" for x in m.get("peers", [])]
     out += ["", "[이번 주]"] + [f"{x['date'][5:]}  {x['tag']:<4} {x['label']}" + (f"  ({x['note']})" if x.get("note") else "") for x in m["week"]] + ([m["ipo"]] if m["ipo"] else [])
@@ -347,6 +371,17 @@ def html(m: dict) -> str:
     arts += "".join(f'<p class="text-[13px] text-on-surface-variant">{e(f)}</p>' for f in m.get("moves", []) + m["follows"])
     count = f"{len(m['news']) + m['more']}곳" if m["news"] else ""
     news = f'<section class="flex flex-col">{h3("내 종목 소식 · " + e(m["when"]), count)}<div class="flex flex-col gap-4">{arts}</div></section>'
+    if m.get("missed"):  # 지난 7일에 나왔는데 아직 그 노트를 안 열어 본 소식 — 며칠 전인지 꼭 붙인다(옛 소식을 새 소식처럼 보이지 않게)
+        ms = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface"><span class="text-[12px] text-outline">{e(x["ago"])}</span> '
+                     f'<a class="font-bold hover:underline" href="/n/{e(x["ticker"])}">{e(x["name"])}</a>{e(eun(x["name"]))} {e(x["body"])}</p>' for x in m["missed"])  # fmt: skip
+        news += rule + f'<section class="flex flex-col">{h3("놓친 소식", "노트를 열면 사라져요")}<div class="flex flex-col gap-2.5">{ms}</div></section>'
+    if f := m.get("facet"):  # 오늘의 한 면 — 내 종목 하나의 한 면을 날마다 돌아가며 (hanjang/facets.py)
+        ss = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface">{e(s)}</p>' for s in f["sentences"])
+        news += rule + (f'<section class="flex flex-col">{h3("오늘의 한 면", e(f["name"]))}<h4 class="text-[15px] font-bold text-primary leading-tight">{e(f["title"])}</h4>'
+                        f'<div class="mt-2 flex flex-col gap-1.5">{ss}</div><div class="mt-3 pt-2.5 border-t border-dotted border-primary/20 flex items-center justify-between">'
+                        f'<a class="text-[12px] font-bold text-primary hover:underline inline-flex items-center gap-1" href="/n/{e(f["ticker"])}">{e(f["name"])} 노트 전체 보기'
+                        '<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a>'
+                        f'<a class="text-[11px] text-on-surface-variant hover:underline" href="{e(f["url"])}" target="_blank" rel="noopener">원문</a></div></section>')  # fmt: skip
 
     around = ""
     if m.get("market") or m.get("peers"):
