@@ -1753,7 +1753,8 @@ def test_morning_lead_shows_what_there_is_on_a_day_without_filings():
     assert morning.lead(base | {"facet": facet, "week": week[:1]}) == "SK하이닉스 · 무엇으로 돈을 버나요?"  # 오늘의 한 면이 시장 일정보다 먼저
     assert morning.lead(base | {"facet": facet, "week": week}) == "삼성전자 실적 발표까지 2일"  # 내 종목 일정이 있으면 그쪽
     missed = [{"name": "한화오션", "ticker": "042660", "url": "u", "body": "큰 계약을 맺었다고 알렸어요.", "ago": "4일 전"}]
-    assert morning.lead(base | {"missed": missed, "facet": facet, "week": week}) == "4일 전 한화오션은 큰 계약을 맺었다고 알렸어요."  # 놓친 소식엔 며칠 전인지 꼭
+    assert morning.lead(base | {"missed": [missed[0] | {"ago": "3일 전"}], "facet": facet, "week": week}) == "3일 전 한화오션은 큰 계약을 맺었다고 알렸어요."  # 놓친 소식엔 며칠 전인지 꼭
+    assert morning.lead(base | {"missed": missed, "facet": facet}) == "SK하이닉스 · 무엇으로 돈을 버나요?"  # 나흘째부터는 맨 앞을 내준다(카드 안에는 남는다)
     assert morning.lead(base | {"week": week[:1]}) == "수요일(10/14) 미국 소비자물가 발표"
     assert morning.lead(base | {"week": [week[1] | {"date": "2026-10-13"}]}) == "오늘 삼성전자 실적 발표"
     peers = [{"name": "SK하이닉스", "label": "반도체", "body": "큰 계약을 맺었다고 알렸어요.", "url": "u", "tag": "계약"}]

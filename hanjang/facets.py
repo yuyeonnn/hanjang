@@ -172,7 +172,7 @@ def today_pick(con: sqlite3.Connection, tickers: list[str], today: date, skip: s
         t = pool[(k + step) % len(pool)]
         fs = of(con, t, today)
         if fs:
-            f = fs[(k // len(pool)) % len(fs)]
+            f = fs[(k // len(pool) + (k + step) % len(pool)) % len(fs)]  # 종목마다 한 칸씩 어긋나게 — 이틀 내리 같은 물음(「같은 업종에서…」)이 나오지 않게
             (name,) = con.execute("select name from stocks where ticker = ?", (t,)).fetchone()
             return {"ticker": t, "name": name} | f
     return None

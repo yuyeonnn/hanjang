@@ -305,7 +305,7 @@ def lead(m: dict) -> str:
         return m["news"][0]["text"]
     if m.get("moves"):
         return m["moves"][0]
-    if m.get("missed"):
+    if m.get("missed") and int(m["missed"][0]["ago"].split("일")[0]) <= 3:  # 사흘까지만 맨 앞에 — 안 열어 본 채 일주일 내내 같은 줄이 뜨지 않게(카드 안에는 7일 동안 남는다)
         x = m["missed"][0]
         return f"{x['ago']} {x['name']}{eun(x['name'])} {x['body']}"
     mine = [x for x in m["week"] if x["url"] or x["tag"] in ("실적", "배당", "주총", "회사")]  # 내 종목 일정이 시장 일정보다 먼저
