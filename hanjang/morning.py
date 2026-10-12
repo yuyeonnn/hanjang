@@ -286,6 +286,24 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
             "moves": moves, "follows": follows, "market": market(con, today), "peers": peers, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
 
 
+def lead(m: dict) -> str:
+    """접힌 카드의 한 줄 — 내 종목 공시가 없는 날에도 있는 소식을 앞에 낸다(내 종목 큰손 움직임 > 내 종목의 이번 주 일정 > 같은 업종 > 시장 일정).
+    전에는 공시만 없으면 늘 「조용한 아침」이라, 종목 네댓 개를 담은 사람은 열흘에 일곱 날을 그 말만 봤다 (사용자 10/13 · 14일 실측)."""
+    if m["news"]:
+        return m["news"][0]["text"]
+    if m.get("moves"):
+        return m["moves"][0]
+    mine = [x for x in m["week"] if x["url"] or x["tag"] in ("실적", "배당", "주총", "회사")]  # 내 종목 일정이 시장 일정보다 먼저
+    for x in mine or m["week"]:
+        d = date.fromisoformat(x["date"])
+        when = "오늘" if x["date"] == m["today"] else f"{WEEK[d.weekday()]}요일({d.month}/{d.day})"
+        return f"{when} {x['label']}"
+    if m.get("peers"):
+        x = m["peers"][0]
+        return f"같은 업종 {x['name']}{eun(x['name'])} {x['body']}"
+    return "새 공시 없는 조용한 아침이에요."
+
+
 def text(m: dict) -> str:
     out = [m["title"], "", f"[내 종목 소식 · {m['when']}]"]
     out += [x["text"] for x in m["news"]] or ["새로 나온 내 종목 공시는 없어요."]
@@ -360,14 +378,14 @@ def html(m: dict) -> str:
               f'<span class="material-symbols-outlined text-[14px]">help_outline</span>{e(more[0])}<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a>' if more else "")
            + "</section>")  # fmt: skip
 
-    lead = m["news"][0]["text"] if m["news"] else "새 공시 없는 조용한 아침이에요."
+    first = lead(m)
     # 접힌 카드 — 흰 상자 대신 위아래 두 줄(실선+점선) 사이에 글만, 읽기 팁 머리글과 같은 모양 (사용자 10/10). 누르면 펼침
     top = '<span class="block border-t-2 border-primary"></span><span class="block mt-[3px] border-t-2 border-dotted border-primary"></span>'
     bottom = '<span class="block border-t-2 border-dotted border-primary"></span><span class="block mt-[3px] border-t-2 border-primary"></span>'
     card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" class="group block w-full mt-space-lg mb-space-xl text-center">'
             + top + '<span class="block py-4 px-2"><span class="flex items-center justify-center gap-1 text-[12px] font-semibold text-primary">'
             f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
-            f'<span class="mt-1.5 flex items-center justify-center gap-0.5 text-[17px] font-bold text-primary"><span class="truncate">{e(lead)}</span>'
+            f'<span class="mt-1.5 flex items-center justify-center gap-0.5 text-[17px] font-bold text-primary"><span class="truncate">{e(first)}</span>'
             '<span class="material-symbols-outlined shrink-0 text-[20px] transition-transform group-hover:translate-x-0.5">chevron_right</span></span></span>' + bottom + '</button>')  # fmt: skip
     # 위에 뜨는 카드 — 뒤 화면은 가리지 않고(사용자 10/10) 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '

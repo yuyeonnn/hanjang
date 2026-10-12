@@ -1738,3 +1738,19 @@ def test_article_gives_up_after_two_failed_runs(monkeypatch):
     con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values ('r2', '005930', '2026-10-10', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 2, 1)")
     articles.main(today)
     assert not con.execute("select 1 from article_tries where ref = 'r2'").fetchone()
+
+
+def test_morning_lead_shows_what_there_is_on_a_day_without_filings():
+    """내 종목 공시가 없는 날 — 접힌 카드의 한 줄이 「조용한 아침」으로 굳지 않고, 있는 소식(큰손·이번 주 일정·같은 업종)을 앞에 낸다 (사용자 10/13)."""
+    from hanjang import morning
+
+    base = {"news": [], "moves": [], "week": [], "peers": [], "today": "2026-10-13"}
+    assert morning.lead(base) == "새 공시 없는 조용한 아침이에요."  # 정말 아무것도 없을 때만
+    week = [{"date": "2026-10-14", "label": "미국 소비자물가 발표", "tag": "물가", "url": ""}, {"date": "2026-10-15", "label": "삼성전자 실적 발표", "tag": "실적", "url": "u"}]
+    assert morning.lead(base | {"week": week}) == "목요일(10/15) 삼성전자 실적 발표"  # 내 종목 일정이 시장 일정보다 먼저
+    assert morning.lead(base | {"week": week[:1]}) == "수요일(10/14) 미국 소비자물가 발표"
+    assert morning.lead(base | {"week": [week[1] | {"date": "2026-10-13"}]}) == "오늘 삼성전자 실적 발표"
+    peers = [{"name": "SK하이닉스", "label": "반도체", "body": "큰 계약을 맺었다고 알렸어요.", "url": "u", "tag": "계약"}]
+    assert morning.lead(base | {"peers": peers}) == "같은 업종 SK하이닉스는 큰 계약을 맺었다고 알렸어요."
+    assert morning.lead(base | {"week": week, "peers": peers, "moves": ["국민연금이 삼성전자 지분을 늘렸어요(지분 7.76%)."]}).startswith("국민연금이")  # 내 종목 큰손이 맨 먼저
+    assert morning.lead(base | {"moves": ["x"], "news": [{"text": "삼성전자는 실적을 알렸어요."}]}) == "삼성전자는 실적을 알렸어요."  # 공시가 있으면 공시
