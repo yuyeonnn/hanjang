@@ -1303,7 +1303,7 @@ def test_report_block_rules_and_ban(monkeypatch):
 def test_my_tree_grows_with_days_and_shows_this_month():
     from hanjang import tree
 
-    assert tree.stage(0) == ("씨앗", 1) and tree.stage(3) == ("새싹", 1) and tree.stage(50) == ("잎이 풍성한 나무", 40) and tree.stage(200) == ("분홍빛이 드는 나무", 60) and tree.stage(300)[1] is None
+    assert tree.stage(0) == ("씨앗", 1) and tree.stage(3) == ("새싹", 1) and tree.stage(50) == ("잎이 풍성한 나무", 40) and tree.stage(120) == ("꽃이 핀 나무", 30) and tree.stage(200)[1] is None and tree.svg(150) == tree.svg(400)
     assert all(tree.svg(n).startswith("<svg") for n in (0, 2, 8, 60, 120, 300))
     assert tree.svg(40) == tree.svg(40)  # 같은 날수면 같은 나무
     app, con = _app()
