@@ -197,6 +197,9 @@ MIGRATIONS = (
     "create table if not exists login_hits (key text not null, at real not null)",  # key: 이메일 · ip:주소 · * (전체)
     "create index if not exists login_hits_key on login_hits (key, at)",
     "create table if not exists login_codes (email text primary key, code text not null, expires real not null, tries integer not null default 0)",
+    # 정부 소식 — 정책브리핑 정책뉴스의 제목·주소만(공공누리 제1유형). labels: 걸리는 업종 이름표를 「|반도체|조선|」 모양으로 (data-rights §7, 10/14)
+    "create table if not exists policy_news (id text primary key, date text not null, minister text, title text not null, url text not null, labels text not null)",
+    "create index if not exists policy_news_date on policy_news (date)",
 )
 
 
@@ -224,6 +227,7 @@ def tidy(con: sqlite3.Connection, today) -> dict[str, int]:
     from datetime import timedelta
 
     out = {"views": con.execute("delete from views where at < ?", ((today - timedelta(days=VIEWS_DAYS)).isoformat(),)).rowcount,
-           "news": con.execute("delete from news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount}
+           "news": con.execute("delete from news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount,
+           "policy_news": con.execute("delete from policy_news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount}
     con.commit()
     return out

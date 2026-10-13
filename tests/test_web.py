@@ -1346,7 +1346,7 @@ def test_tidy_drops_old_views_and_news_and_hot_queries_use_indexes():
     con.execute("insert into users (id, email, created_at) values (1, 'a@b.c', '2026-01-01')")
     con.executemany("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', ?)", [("2026-03-01T10:00",), ("2026-10-01T10:00",)])
     con.executemany("insert into news (url, ticker, date, press, title) values (?, '005930', ?, '삼성전자 뉴스룸', 't')", [("u1", "2026-07-01"), ("u2", "2026-10-01")])
-    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1}
+    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1, "policy_news": 0}
     assert con.execute("select at from views").fetchall() == [("2026-10-01T10:00",)] and con.execute("select url from news").fetchall() == [("u2",)]
     for q in ("select count(*) from views where page = 'note' and ticker = '005930' and at >= '2026-10-05'", "select count(*) from follows where followee_id = 1 and ok = 1",
               "select * from highlights where user_id = 1 and page = '/n/005930'", "select * from news where ticker = '005930' and date >= '2026-10-01'",
@@ -1824,3 +1824,34 @@ def test_price_swing_inquiry_leads_and_market_line_points_outside():
     assert "한장은 주가와 지수를 다루지 않아요" in morning.html(morning.build(con, [], today))  # 시장 자료가 없는 날에도 길은 있다
     assert [x["kind"] for x in articles.events(con, today)] == ["MAJOR_CONTRACT"]  # 조회공시는 기사로 키우지 않는다
     assert "시세 보기" in call(app, "/n/005930", cookie=f"s={web.sign('1', SECRET)}")[2]
+
+
+def test_government_news_matched_to_my_industry(monkeypatch):
+    """정부 소식(정책브리핑 정책뉴스 · 공공누리 제1유형) — 내 종목 업종이나 시장에 걸리는 제목만, 제목 그대로 + 원문 주소 + 출처. 주가·언론 기사 없이 전하는 길 (사용자 10/13)."""
+    from hanjang import morning
+
+    item = lambda i, when, group, kogl, title: (  # noqa: E731
+        f"<NewsItem><NewsItemId>{i}</NewsItemId><ApproveDate>{when} 15:00:00</ApproveDate><GroupingCode>{group}</GroupingCode><Title><![CDATA[{title}]]></Title>"
+        f"<MinisterCode>산업통상부</MinisterCode><OriginalUrl>https://www.korea.kr/news/policyNewsView.do?newsId={i}</OriginalUrl><KoglType>{kogl}</KoglType></NewsItem>")
+    xml = "<response><body>" + item(1, "10/13/2026", "policy", 1, "산업부 내 '반도체혁신성장지원단' 신설…서남권 클러스터 등 속도") + item(
+        2, "10/13/2026", "fact", 1, "[사실은 이렇습니다] 반도체 보도 설명") + item(3, "10/13/2026", "policy", 4, "반도체 사진 자료") + item(
+        4, "10/13/2026", "policy", 1, "내년 건강보험료율 동결") + item(5, "10/13/2026", "policy", 1, "정부 \"증시 변동성 확대…시장 상황 점검\"") + "</body></response>"
+    got = sources.parse_policy(xml)
+    assert [r["id"] for r in got] == ["1", "4", "5"] and got[0]["date"] == "2026-10-13"  # 반박 자료(fact)·제1유형이 아닌 글은 뺀다
+    assert sources.policy_labels(got[0]["title"])[0] == "반도체" and sources.policy_labels("내년 건강보험료율 동결") == []
+    assert sources.policy_labels("경주·해운대 '글로벌 관광특구' 선정") == [] and sources.policy_labels("아시안게임 선수단 출정") == []  # 엉뚱하게 걸리던 낱말
+    assert sources.policy_labels(got[2]["title"]) == ["시장"]
+    app, con = _app()
+    monkeypatch.setattr(sources, "policy_news", lambda a, b: got)
+    assert collect.save_policy(con, date(2026, 10, 14)) == 2 and collect.save_policy(con, date(2026, 10, 14)) == 2  # 걸리는 것만 · 다시 받아도 그대로
+    assert con.execute("select count(*) from policy_news").fetchone() == (2,)
+    con.execute("insert into stocks (ticker, name, corp_code, active, induty_code) values ('000660', 'SK하이닉스', 'x', 1, '2612')")
+    assert sources.industry_label("2612") == "반도체"
+    m = morning.build(con, ["000660"], date(2026, 10, 14))
+    assert {g["label"] for g in m["gov"]} == {"반도체", "시장"} and morning.lead(m) in {g["title"] for g in m["gov"]}
+    page = morning.html(m)
+    assert "반도체혁신성장지원단" in page and "policyNewsView.do?newsId=1" in page and "출처: 대한민국 정책브리핑" in page and "[정부 소식 · 정책브리핑]" in morning.text(m)
+    other = morning.build(con, [], date(2026, 10, 14))  # 담은 종목이 없어도 시장 이야기는 모두에게
+    assert [g["label"] for g in other["gov"]] == ["시장"]
+    assert morning.build(con, ["000660"], date(2026, 10, 16))["gov"] == []  # 지난 것은 다시 올리지 않는다 — 날마다 바뀐다
+    assert db.tidy(con, date(2027, 1, 1))["policy_news"] == 2

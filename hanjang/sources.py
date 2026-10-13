@@ -112,6 +112,69 @@ def holidays(year: int) -> list[tuple[date, str]]:
     return parse_holidays(body["response"]["body"])
 
 
+# 정부 소식 — 정책브리핑 정책뉴스 (공공데이터포털 15095335 · 공공누리 제1유형: 출처만 밝히면 자유 이용, 글마다 KoglType 으로 확인 · data-rights §7).
+# 주가·언론 기사를 못 쓰는 한장이 「내 종목 업종에 생긴 나랏일」을 전하는 길. 제목과 원문 주소만 쓴다(본문·사진은 받아 두지 않는다).
+# 제목 낱말 → 한장의 업종 이름표(industry_label). 석 달 치 665편으로 맞춰 봤다(2026-10-14) — 「건강보험」「아시안게임」「해운대」처럼 엉뚱하게 걸리는 낱말은 뺐다.
+# 「시장」은 업종과 상관없이 모두에게(증시·환율·금리 이야기 — 석 달에 2편뿐이라 큰 날에만 나온다).
+POLICY_URL = "https://apis.data.go.kr/1371000/policyNewsService2/policyNewsList2"
+POLICY_TOPICS = (
+    (r"증시|주식시장|금융시장|코스피|코스닥|환율|외환시장|시장상황|시장 상황|변동성|기준금리", ("시장",)),
+    (r"반도체|파운드리", ("반도체", "전자·통신장비", "전자부품", "기계")),
+    (r"이차전지|2차전지|배터리", ("2차전지", "전지")),
+    (r"조선업|조선소|K-조선|조선 산업|조선 M", ("조선",)),
+    (r"전기차|수소차|자율주행|자동차 ?산업|완성차", ("자동차",)),
+    (r"신약|제약|의약품|바이오헬스|바이오 ?산업|임상", ("제약·바이오", "연구개발")),
+    (r"방산|방위산업", ("방위산업", "항공우주")),
+    (r"누리호|위성|우주항공|우주 ?산업", ("항공우주",)),
+    (r"해외건설|건설사|건설산업|주택 공급", ("건설", "엔지니어링")),
+    (r"석유화학", ("화학",)),
+    (r"철강|핵심광물|희토류", ("철강·금속",)),
+    (r"원전|전력망|전기요금|재생에너지", ("전력·가스", "전기장비", "전선·케이블")),
+    (r"북극항로|해운(?!대)", ("해운", "물류")),
+    (r"화장품|K-뷰티", ("화장품",)),
+    (r"K-푸드|식품 수출", ("식료품",)),
+    (r"자본시장|공매도|증권사", ("증권",)),
+    (r"가계부채|가계대출|은행권|금융권", ("은행", "금융서비스")),
+    (r"정유|원유 수급|국제유가", ("석유정제",)),
+    (r"통신사|이동통신|통신요금|6G", ("통신",)),
+    (r"데이터센터|AI 반도체", ("IT 서비스", "반도체")),
+    (r"게임 ?산업|e스포츠", ("게임",)),
+    (r"K-팝|K-콘텐츠|한류", ("엔터테인먼트",)),
+)
+
+
+def policy_labels(title: str) -> list[str]:
+    """정책뉴스 제목 → 걸리는 업종 이름표들(없으면 빈 목록 — 그 글은 받아 두지 않는다)."""
+    out: list[str] = []
+    for pat, labels in POLICY_TOPICS:
+        if re.search(pat, title):
+            out += [x for x in labels if x not in out]
+    return out
+
+
+def parse_policy(xml: str) -> list[dict]:
+    """정책뉴스 응답 → [{"id", "date", "minister", "title", "url"}]. 정책뉴스(policy)만 — 「사실은 이렇습니다」(fact)는 언론 보도에 대한 반박이라 뺀다.
+    공공누리 제1유형이라고 적힌 글만 받는다."""
+    def tag(x: str, t: str) -> str:
+        m = re.search(rf"<{t}>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{t}>", x, re.S)
+        return html.unescape(m[1].strip()) if m else ""
+
+    out = []
+    for x in re.findall(r"<NewsItem>(.*?)</NewsItem>", xml, re.S):
+        ap = tag(x, "ApproveDate")  # MM/DD/YYYY HH24:MI:SS
+        if tag(x, "GroupingCode") != "policy" or tag(x, "KoglType") != "1" or not re.fullmatch(r"\d\d/\d\d/\d{4} .*", ap):
+            continue
+        out.append({"id": tag(x, "NewsItemId"), "date": f"{ap[6:10]}-{ap[:2]}-{ap[3:5]}", "minister": tag(x, "MinisterCode"),
+                    "title": re.sub(r"\s+", " ", tag(x, "Title")), "url": tag(x, "OriginalUrl")})
+    return out
+
+
+def policy_news(start: date, end: date) -> list[dict]:
+    """정책브리핑 정책뉴스 — start~end (창구가 한 번에 사흘까지만 준다). 한 콜."""
+    key = env()["DATA_GO_KR_SERVICE_KEY"]
+    return parse_policy(_get(POLICY_URL, key, serviceKey=key, startDate=start.strftime("%Y%m%d"), endDate=end.strftime("%Y%m%d")).text)
+
+
 def parse_holidays(body: dict) -> list[tuple[date, str]]:
     items = body["items"]["item"] if body.get("totalCount") else []
     items = items if isinstance(items, list) else [items]  # 1건이면 dict 로 온다

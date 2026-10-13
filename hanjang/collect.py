@@ -174,6 +174,17 @@ def first(ticker: str, today: date | None = None) -> bool:
         con.close()
 
 
+def save_policy(con, today: date) -> int:
+    """정책브리핑 정책뉴스 최근 사흘 — 업종이나 시장에 걸리는 제목만 받아 둔다(제목·주소·부처). 같은 글은 덮어쓴다(제목이 고쳐지기도 한다)."""
+    n = 0
+    for r in sources.policy_news(today - timedelta(days=2), today):
+        labels = sources.policy_labels(r["title"])
+        if labels and r["id"] and r["url"].startswith("https://www.korea.kr/"):
+            con.execute("insert or replace into policy_news values (?, ?, ?, ?, ?, ?)", (r["id"], r["date"], r["minister"], r["title"], r["url"], "|" + "|".join(labels) + "|"))
+            n += 1
+    return n
+
+
 def main(today: date, dart_up: bool = True) -> None:
     """dart_up=False (DART 점검) — 국내 공시·재무 받기는 건너뛰고 환율·금리·공휴일·소식만 받는다. 종목은 어제까지 DB 에 있는 것으로."""
     con = db.connect()
@@ -227,6 +238,10 @@ def main(today: date, dart_up: bool = True) -> None:
     print(f"공휴일 {len(hs)}일 ({today.year}~{today.year + 1})")
 
     print(f"소식 {save_news(con, picked, today)}건 (회사 뉴스룸 — 제목·요약문만)")
+    try:  # 정부 소식은 곁들이는 것 — 창구가 쉬어도 받기 전체를 실패로 만들지 않는다
+        print(f"정부 소식 {save_policy(con, today)}건 (정책브리핑 정책뉴스 — 업종·시장에 걸리는 제목만)")
+    except Exception as err:  # noqa: BLE001
+        print(f"정부 소식 받기 실패 — {type(err).__name__}: {err}")
     con.commit()
 
 

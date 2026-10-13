@@ -241,6 +241,12 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         if label in mine and t not in seen and len(peers) < 3:
             seen.add(t)
             peers.append({"name": nm, "label": label, "body": happened(title, ai), "url": src(con, rno), "tag": KIND.get(code, "공시")})
+    # 정부 소식 — 정책브리핑 정책뉴스 가운데 내 종목 업종이나 시장(증시·환율·금리)에 걸리는 제목. 제목 그대로 + 원문 주소(공공누리 제1유형, data-rights §7)
+    gov = []
+    for d, minister, title, url, labels in con.execute("select date, minister, title, url, labels from policy_news where date >= ? order by date desc, id desc", (lo.isoformat(),)):
+        hit = [x for x in labels.strip("|").split("|") if x == "시장" or x in mine]
+        if hit and len(gov) < 2:
+            gov.append({"label": labels.strip("|").split("|")[0], "title": title, "url": url, "minister": minister or "정부"})  # 이름표는 그 글의 주제(「반도체」)로 — 내 업종 이름(「전자·통신장비」)이 아니라
     # 큰손 움직임 — 5% 넘게 가진 기관의 지분 변화 · 임원 주식 거래. 소식과 같은 기간(피드의 「오늘의 내 종목」을 여기로 합쳤다, 사용자 10/11)
     moves = [f"{holders.BIG[i][0]}{notes.josa(holders.BIG[i][0], '이')} {name.get(t, t)} 지분을 {'늘렸어요' if chg > 0 else '줄였어요'}(지분 {rate:.2f}%)."
              for i, t, rate, chg in con.execute(
@@ -295,7 +301,7 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         a = learn.ARTICLES[today.toordinal() % len(learn.ARTICLES)]
         tip = (a["title"], a["lead"].replace("**", ""), ("이어서 읽기", f"/learn/{a['slug']}"))
     facet = facets.today_pick(con, tickers, today, skip=set(by))  # 오늘의 한 면 — 소식이 없는 날에도 날마다 다른 글
-    return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4), "missed": missed, "facet": facet,
+    return {"title": f"{today.month}월 {today.day}일 {WEEK[today.weekday()]}요일 아침", "when": when, "news": news, "more": max(0, len(by) - 4), "missed": missed, "facet": facet, "gov": gov,
             "moves": moves, "follows": follows, "market": market(con, today), "peers": peers, "week": week, "ipo": ipo, "tip": tip, "today": today.isoformat()}
 
 
@@ -314,6 +320,8 @@ def lead(m: dict) -> str:
     for x in mine:  # 며칠 남았는지 — 새 공시가 없어도 숫자가 날마다 줄어든다
         left = (date.fromisoformat(x["date"]) - date.fromisoformat(m["today"])).days
         return f"오늘 {x['label']}" if left == 0 else f"내일 {x['label']}" if left == 1 else f"{x['label']}까지 {left}일"
+    if m.get("gov"):  # 내 업종에 생긴 나랏일 — 새 소식이라 「오늘의 한 면」보다 앞
+        return m["gov"][0]["title"]
     if f := m.get("facet"):
         return f"{f['name']} · {f['title']}"
     for x in m["week"]:
@@ -336,6 +344,8 @@ def text(m: dict) -> str:
         out += ["", f"[오늘의 한 면 · {f['name']} — {f['title']}]"] + f["sentences"]
     if m.get("market") or m.get("peers"):
         out += ["", "[시장 · 같은 업종]"] + ([m["market"]] if m.get("market") else []) + [f"#{x['label']} {x['name']}{eun(x['name'])} {x['body']}" for x in m.get("peers", [])]
+    if m.get("gov"):
+        out += ["", "[정부 소식 · 정책브리핑]"] + [f"#{x['label']} {x['title']} ({x['minister']})" for x in m["gov"]]
     out += ["", "[이번 주]"] + [f"{x['date'][5:]}  {x['tag']:<4} {x['label']}" + (f"  ({x['note']})" if x.get("note") else "") for x in m["week"]] + ([m["ipo"]] if m["ipo"] else [])
     head, body, more = m["tip"]
     out += ["", f"[알아 두면 좋아요 · {head}]", body] + ([f"→ {more[0]}"] if more else [])
@@ -389,11 +399,18 @@ def html(m: dict) -> str:
     out = ('<p class="pt-1 text-[12px] leading-[20px] text-on-surface-variant">한장은 주가와 지수를 다루지 않아요. '
            f'<a class="font-bold text-primary hover:underline" href="{QUOTES}" target="_blank" rel="noopener">오늘 시세 보기</a> · '
            f'<a class="font-bold text-primary hover:underline" href="{MARKET_NEWS}" target="_blank" rel="noopener">시장 뉴스 찾아보기</a></p>')
-    if m.get("market") or m.get("peers"):
+    gv = ""
+    if m.get("gov"):  # 제목은 정책브리핑이 쓴 그대로 — 출처와 이용 조건을 함께 건다(정책브리핑 저작권 정책의 요청)
+        gv = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface"><span class="text-[12px] text-outline">#{e(x["label"])}</span> '
+                     f'<a class="font-bold hover:underline" href="{e(x["url"])}" target="_blank" rel="noopener">{e(x["title"])}</a>'
+                     f' <span class="text-[12px] text-on-surface-variant">{e(x["minister"])}</span></p>' for x in m["gov"])  # fmt: skip
+        gv += ('<p class="text-[11px] text-outline">출처: 대한민국 정책브리핑(www.korea.kr) · '
+               '<a class="hover:underline" href="https://www.korea.kr/guide/copyRight.do" target="_blank" rel="noopener">공공누리 제1유형</a></p>')
+    if m.get("market") or m.get("peers") or gv:
         ps = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface"><span class="text-[12px] text-outline">#{e(x["label"])}</span> '
                      f'<a class="font-bold hover:underline" href="{e(x["url"])}">{e(x["name"])}</a>{e(eun(x["name"]))} {e(x["body"])}</p>' for x in m.get("peers", []))  # fmt: skip
         mk = f'<p class="text-[14px] leading-[23px] text-on-surface">{e(m["market"])}</p>' if m.get("market") else ""
-        around = rule + f'<section class="flex flex-col">{h3("시장 · 같은 업종")}<div class="flex flex-col gap-2.5">{mk}{ps}{out}</div></section>'
+        around = rule + f'<section class="flex flex-col">{h3("시장 · 같은 업종")}<div class="flex flex-col gap-2.5">{mk}{ps}{gv}{out}</div></section>'
     else:
         around = rule + f'<section class="flex flex-col">{h3("시장")}<div class="flex flex-col gap-2.5">{out}</div></section>'
 
