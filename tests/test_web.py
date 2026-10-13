@@ -948,10 +948,10 @@ def test_personas_seen_by_everyone_with_label():
     demo = con.execute("select id from users where email = ?", (personas.DEMO_EMAIL,)).fetchone()[0]
     first = con.execute("select id from users where email = ?", ("chip" + personas.DOMAIN,)).fetchone()[0]
     me = f"s={web.sign('1', SECRET)}"
-    assert "삼성전자" in app.this_week() and "반도체일기" in app.suggest(1)
+    assert "삼성전자" in app.this_week() and "minsu_k" in app.suggest(1)
     body = call(app, f"/u/{first}", cookie=me)[2]
-    assert "반도체일기" in body
-    assert "반도체일기" in call(app, "/feed?q=" + quote("반도체"), cookie=me)[2]
+    assert "minsu_k" in body
+    assert "minsu_k" in call(app, "/feed?q=" + quote("minsu"), cookie=me)[2]
     assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
     assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
 

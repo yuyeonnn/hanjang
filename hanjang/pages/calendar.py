@@ -213,7 +213,7 @@ class CalendarPages:
                  f'<a class="px-3 py-1.5 rounded-full bg-primary text-on-primary font-semibold" href="/calendar">오늘</a>'
                  f'<a class="flex items-center gap-0.5 px-3 py-1.5 rounded-full border border-outline-variant/60 text-on-surface-variant hover:bg-surface-container" href="/calendar?m={nxt}">다음 달<span class="material-symbols-outlined text-[16px]">chevron_right</span></a></nav>'
                  '</div>'
-                 '<p class="font-body-compact text-body-compact text-on-surface-variant">관심 기업의 주요 의사결정과 공시 기록을 날짜별로 천천히 짚어드려요.</p></header>'
+                 '</header>'
                  '<section class="py-space-sm px-1 flex items-center justify-between border-b border-surface-container-high"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-primary text-[20px]">calendar_clock</span><div class="flex items-baseline gap-space-xs">'
                  f'<span class="font-label-regular text-label-regular text-on-surface font-semibold">이번 달 주목할 공시 {len(mine)}건</span><span class="font-label-micro text-label-micro text-on-surface-variant">{e(mix)}</span></div></div>'
                  '</section>'
