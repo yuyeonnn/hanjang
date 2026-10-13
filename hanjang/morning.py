@@ -16,6 +16,8 @@ from html import escape as e
 from . import facets, holders, learn, notes, sources
 
 WEEK = "월화수목금토일"
+QUOTES = "https://finance.naver.com/sise/"  # 바깥 링크 — 자료를 가져오지 않는다
+MARKET_NEWS = "https://search.naver.com/search.naver?where=news&sort=1&query=%EC%A6%9D%EC%8B%9C"  # 「증시」 뉴스 검색
 
 # 그 주에 생긴 일에 맞춘 짧은 꿀팁 — 사실과 읽는 법만(사라·팔아라·예측 없음, 불변식 1). (제목, 글, 더 읽기 slug)
 TIPS = {
@@ -217,7 +219,7 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
     # 1) 내 종목 소식 — 회사마다 한 문단. 한 회사 안에서는 「이와 함께」로 이어지게. 회사 이름에 원문 링크
     # 걸리는 공시(WARN)는 오늘 나온 것도 바로, 맨 위에 — 나머지는 어제까지 것만(아침에 한 번 읽는 글이라 낮에 바뀌지 않게)
     rows = con.execute(f"select ticker, title, rcept_no, code, plain, {WARN} from disclosures where ticker in ({q}) and date >= ? and (date < ? or {WARN})"
-                       f" and importance >= 2 order by {WARN} desc, importance desc, date desc limit 8", (*tickers, lo.isoformat(), today.isoformat())).fetchall()  # fmt: skip
+                       f" and importance >= 2 order by {WARN} desc, code = 'SWING' desc, importance desc, date desc limit 8", (*tickers, lo.isoformat(), today.isoformat())).fetchall()  # fmt: skip
     by: dict[str, list] = {}
     for r in rows:
         by.setdefault(r[0], []).append(r)
@@ -342,7 +344,7 @@ def text(m: dict) -> str:
 
 KIND = {"RIGHTS_ISSUE": "유상증자", "CB_BW": "전환사채", "BONUS_ISSUE": "무상증자", "EARNINGS": "실적", "MAJOR_CONTRACT": "큰 계약", "BUYBACK": "자사주",
         "DIVIDEND": "배당", "MA": "지분·합병", "CLINICAL": "신약", "TRADING_HALT": "거래 정지", "EXEC": "경영진", "DEBT": "빚", "LAWSUIT": "소송",
-        "WRITE_DOWN": "손상", "HOLDER_CHANGE": "최대주주", "RUMOR": "보도 해명", "FRAUD": "횡령·배임"}  # fmt: skip
+        "WRITE_DOWN": "손상", "HOLDER_CHANGE": "최대주주", "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "SWING": "주가 급변"}  # fmt: skip
 
 
 def html(m: dict) -> str:
@@ -383,12 +385,17 @@ def html(m: dict) -> str:
                         '<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a>'
                         f'<a class="text-[11px] text-on-surface-variant hover:underline" href="{e(f["url"])}" target="_blank" rel="noopener">원문</a></div></section>')  # fmt: skip
 
-    around = ""
+    # 한장은 주가·지수 자료가 없다(쓸 권리가 없다) — 시장이 크게 움직인 날에도 아무 말을 못 했다(10/12~13). 없다고 말하고 볼 곳으로 보낸다. 링크만 걸고 자료는 가져오지 않는다
+    out = ('<p class="pt-1 text-[12px] leading-[20px] text-on-surface-variant">한장은 주가와 지수를 다루지 않아요. '
+           f'<a class="font-bold text-primary hover:underline" href="{QUOTES}" target="_blank" rel="noopener">오늘 시세 보기</a> · '
+           f'<a class="font-bold text-primary hover:underline" href="{MARKET_NEWS}" target="_blank" rel="noopener">시장 뉴스 찾아보기</a></p>')
     if m.get("market") or m.get("peers"):
         ps = "".join(f'<p class="text-[14px] leading-[23px] text-on-surface"><span class="text-[12px] text-outline">#{e(x["label"])}</span> '
                      f'<a class="font-bold hover:underline" href="{e(x["url"])}">{e(x["name"])}</a>{e(eun(x["name"]))} {e(x["body"])}</p>' for x in m.get("peers", []))  # fmt: skip
         mk = f'<p class="text-[14px] leading-[23px] text-on-surface">{e(m["market"])}</p>' if m.get("market") else ""
-        around = rule + f'<section class="flex flex-col">{h3("시장 · 같은 업종")}<div class="flex flex-col gap-2.5">{mk}{ps}</div></section>'
+        around = rule + f'<section class="flex flex-col">{h3("시장 · 같은 업종")}<div class="flex flex-col gap-2.5">{mk}{ps}{out}</div></section>'
+    else:
+        around = rule + f'<section class="flex flex-col">{h3("시장")}<div class="flex flex-col gap-2.5">{out}</div></section>'
 
     rows = []
     for x in m["week"]:

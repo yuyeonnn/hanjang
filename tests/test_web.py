@@ -1800,3 +1800,27 @@ def test_daily_facet_rotates_and_missed_news_goes_away_once_read():
     con.execute("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', '2026-10-13T09:00:00')")  # 그 뒤에 노트를 열어 봤다
     assert morning.build(con, ["005930"], today, 1)["missed"] == []
     assert morning.build(con, ["005930"], today)["missed"] == []  # 누구인지 모르면(시안·메일 미리보기) 놓친 소식은 없다
+
+
+def test_price_swing_inquiry_leads_and_market_line_points_outside():
+    """한장은 주가 자료가 없다 — ① 시장 줄에서 그렇다고 말하고 볼 곳으로 보낸다 ② 내 종목 주가가 크게 움직인 것은 거래소 조회공시(현저한 시황변동)로 알고 맨 앞에 낸다 (사용자 10/13)."""
+    from hanjang import articles, morning, notepage
+
+    assert notes.by_rule("조회공시요구(현저한시황변동)에대한답변(중요정보없음)")[0] == "SWING" and notes.by_rule("조회공시요구(풍문또는보도)")[0] == "RUMOR"
+    assert notes.plain("조회공시요구(현저한시황변동)에대한답변(중요정보없음)").endswith("따로 알릴 중요한 정보가 없다고 답했어요")
+    assert notes.plain("조회공시요구(현저한시황변동)").startswith("주가가 크게 움직여서")
+    assert notepage.quote_url("005930").endswith("code=005930") and notepage.quote_url("TSLA").endswith("/quote/TSLA") and notepage.quote_url("ETF123") == ""
+    app, con = _app()
+    today = date(2026, 10, 14)
+    con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
+    con.execute("insert into holdings values (1, '005930', '2026-10-01')")
+    con.execute("insert into disclosures (rcept_no, ticker, date, title, code, importance, direction) values"
+                " ('1', '005930', '2026-10-13', '단일판매ㆍ공급계약체결', 'MAJOR_CONTRACT', 3, 1), ('2', '005930', '2026-10-13', '조회공시요구(현저한시황변동)에대한답변(중요정보없음)', 'SWING', 2, 0)")
+    con.commit()
+    m = morning.build(con, ["005930"], today, 1)
+    assert m["news"][0]["tag"] == "주가 급변" and m["news"][0]["body"].startswith("주가가 크게 움직인 까닭을 묻는")  # 중요도가 더 높은 계약보다 앞
+    page = morning.html(m)
+    assert "한장은 주가와 지수를 다루지 않아요" in page and morning.QUOTES in page and "시장 뉴스 찾아보기" in page
+    assert "한장은 주가와 지수를 다루지 않아요" in morning.html(morning.build(con, [], today))  # 시장 자료가 없는 날에도 길은 있다
+    assert [x["kind"] for x in articles.events(con, today)] == ["MAJOR_CONTRACT"]  # 조회공시는 기사로 키우지 않는다
+    assert "시세 보기" in call(app, "/n/005930", cookie=f"s={web.sign('1', SECRET)}")[2]

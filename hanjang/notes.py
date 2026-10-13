@@ -15,13 +15,13 @@ from hanjang import db, llm, sources
 DART = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={}"
 TAXONOMY = ("RIGHTS_ISSUE", "BONUS_ISSUE", "SPLIT", "REVERSE_SPLIT", "BUYBACK", "CB_BW",
             "MAJOR_CONTRACT", "EARNINGS", "DIVIDEND", "LAWSUIT", "MA", "HOLDER_CHANGE",
-            "CLINICAL", "TRADING_HALT", "RUMOR", "FRAUD", "OTHER")  # fmt: skip
+            "CLINICAL", "TRADING_HALT", "RUMOR", "FRAUD", "SWING", "OTHER")  # fmt: skip
 EVENT_KO = {
     "RIGHTS_ISSUE": "유상증자", "BONUS_ISSUE": "무상증자", "SPLIT": "액면분할",
     "REVERSE_SPLIT": "감자·병합", "BUYBACK": "자사주 매입", "CB_BW": "전환사채·신주인수권",
     "MAJOR_CONTRACT": "대형 계약", "EARNINGS": "실적", "DIVIDEND": "배당", "LAWSUIT": "소송",
     "MA": "합병·인수", "HOLDER_CHANGE": "대주주 지분 변동", "CLINICAL": "임상",
-    "TRADING_HALT": "거래정지·관리", "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "OTHER": "기타",
+    "TRADING_HALT": "거래정지·관리", "RUMOR": "보도 해명", "FRAUD": "횡령·배임", "SWING": "주가 급변 조회", "OTHER": "기타",
     # 미국 8-K 에만 있는 종류 (us.ITEMS)
     "DEBT": "빚(차입·채권 발행)", "WRITE_DOWN": "구조조정·손상", "RESTATEMENT": "재무제표 정정", "AUDITOR": "회계법인 교체", "EXEC": "최고경영진 교체",
 }  # fmt: skip
@@ -35,6 +35,8 @@ TITLE_RULES = (
     # 걸리는 공시 — 예전엔 「기타」로 묻혔다. 그날 바로 보이고 알림이 간다(사용자 10/12). 보도 해명의 재공시는 morning.rumors 가 중요도를 낮춘다
     (r"횡령|배임", "FRAUD", 3),
     (r"풍문또는보도", "RUMOR", 2),
+    # 주가가 크게 움직여 거래소가 까닭을 물은 것(「현저한 시황변동」)과 회사의 답 — 한장이 주가 자료 없이 「내 종목이 크게 움직였다」를 아는 유일한 길 (사용자 10/13)
+    (r"현저한시황변동", "SWING", 2),
     (r"자기주식(취득|소각)|주식소각결정|자기주식취득신탁계약체결", "BUYBACK", 3),
     (r"(?<!무)유상증자결정", "RIGHTS_ISSUE", 3),
     (r"무상증자결정", "BONUS_ISSUE", 3),
@@ -54,6 +56,10 @@ TITLE_RULES = (
 # 공시 제목 → 「무슨 일인지」 쉬운 말 (우리가 쓴 고정 문장, 숫자 없음). 첫 번째로 맞는 것을 쓴다.
 # AI 가 「자사주 매입 공시」라는 이름만 반복하지 않고 뜻을 풀어 쓰게 하려고 사실에 붙인다
 TITLE_PLAIN = (
+    (r"현저한시황변동.*답변.*(중요정보없음|중요공시대상없음)", "주가가 크게 움직인 까닭을 묻는 거래소의 요구에, 따로 알릴 중요한 정보가 없다고 답했어요"),
+    (r"현저한시황변동.*답변.*미확정", "주가가 크게 움직인 까닭을 묻는 거래소의 요구에, 검토 중인 일이 있지만 아직 정해진 것은 없다고 답했어요"),
+    (r"현저한시황변동.*답변", "주가가 크게 움직인 까닭을 묻는 거래소의 요구에 답을 냈어요"),
+    (r"현저한시황변동", "주가가 크게 움직여서, 거래소가 그 까닭을 밝히라고 회사에 요구했어요"),
     # 미국 8-K (us.classify_8k 의 제목)
     (r"예전재무제표를믿지말라", "예전에 낸 재무제표에 잘못이 있어 믿지 말라고 회사가 알렸어요 — 숫자를 다시 고쳐 낼 예정이에요"),
     (r"파산절차", "법원에 파산 보호 절차를 신청했어요"),

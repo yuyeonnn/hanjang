@@ -425,6 +425,13 @@ def owners_block(owners: tuple | None) -> str:
             f'<p class="font-label-micro text-label-micro text-outline leading-normal">{e(note)}</p></section>')  # fmt: skip
 
 
+def quote_url(ticker: str) -> str:
+    """이 종목 시세를 볼 수 있는 바깥 주소 — 한장은 주가를 싣지 않는다(쓸 권리가 없다). 링크만 건다."""
+    if ticker.startswith("ETF"):  # 담은 ETF 는 우리 안의 번호라 바깥 주소를 만들 수 없다
+        return ""
+    return f"https://finance.naver.com/item/main.naver?code={quote(ticker)}" if ticker.isdigit() else f"https://finance.yahoo.com/quote/{quote(ticker)}"
+
+
 def render_note(name: str, ticker: str, week: str, body: dict, writer: str, facts: list[dict] | None = None,
                 industry: str | None = None, initial: str = "", survey: str = "", made: str = "", homepage: str | None = None,
                 stats: tuple[int, int, bool] = (0, 0, False), regram: str = "",
@@ -439,7 +446,8 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         # 머리 — 로고·이름 한 줄, 업종 · 날짜 · 읽음 한 줄 (글자를 줄였다, 사용자 10/8)
         f'<header class="mt-space-sm mb-space-lg"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
-        f'<p class="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 text-[12px] text-outline">{industry_chip(industry)}<span>{e(" · ".join(x for x in (md(made), f"읽음 {stats[0]:,}") if x))}</span></p></header>',
+        f'<p class="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 text-[12px] text-outline">{industry_chip(industry)}<span>{e(" · ".join(x for x in (md(made), f"읽음 {stats[0]:,}") if x))}</span>'
+        + (f'<a class="font-bold text-primary hover:underline" href="{e(quote_url(ticker))}" target="_blank" rel="noopener">시세 보기 →</a>' if quote_url(ticker) else "") + "</p></header>",
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip

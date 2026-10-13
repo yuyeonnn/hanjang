@@ -53,7 +53,7 @@ def events(con: sqlite3.Connection, today: date, ref: str | None = None) -> list
     out = []
     for rno, t, d, raw, code, dr in con.execute(
             f"select rcept_no, ticker, date, title, code, direction from disclosures where {which} and importance >= 2"
-            " and code is not null and code not in ('OTHER', 'RUMOR')"  # 보도 해명은 기사로 키우지 않는다 — 확정된 사실이 아니다
+            " and code is not null and code not in ('OTHER', 'RUMOR', 'SWING')"  # 보도 해명은 기사로 키우지 않는다 — 확정된 사실이 아니다
             " and ticker in (select ticker from stocks where market = 'KR')", (arg,)):  # 미국 기사는 아직 (원문이 영어) # fmt: skip
         day = date.fromisoformat(d)
         dd = f"{day.month}월 {day.day}일"
