@@ -160,8 +160,10 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return "200 OK", [("Content-Type", "image/jpeg"), ("Cache-Control", "public, max-age=604800")], (STATIC / "people" / path[15:]).read_bytes()
         if path == "/static/og.png":  # 링크 미리보기 그림
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=86400")], (STATIC / "og.png").read_bytes()
-        if path in ("/static/icon-192.png", "/static/icon-512.png", "/static/icon-maskable.png", "/static/apple-touch-icon.png", "/static/tree.png"):  # 홈 화면 아이콘 · 선 나무 그림
+        if path in ("/static/icon-192.png", "/static/icon-512.png", "/static/icon-maskable.png", "/static/apple-touch-icon.png"):  # 홈 화면 아이콘
             return "200 OK", [("Content-Type", "image/png"), ("Cache-Control", "public, max-age=604800")], (STATIC / path[8:]).read_bytes()
+        if re.fullmatch(r"/static/tree(-[a-z]+)?\.(png|webp)", path) and (STATIC / path[8:]).exists():  # 선 나무 그림과 그 버전들
+            return "200 OK", [("Content-Type", "image/" + path.rsplit(".", 1)[1]), ("Cache-Control", "public, max-age=604800")], (STATIC / path[8:]).read_bytes()
         if path == "/static/app.css":  # 주소에 내용 지문(?v=)이 붙어 있어 오래 캐시해도 된다
             return "200 OK", [("Content-Type", "text/css; charset=utf-8"), ("Cache-Control", "public, max-age=31536000, immutable")], (STATIC / "app.css").read_bytes()
         if path == "/manifest.webmanifest":  # 「홈 화면에 추가」 · 플레이스토어 포장(TWA)의 재료

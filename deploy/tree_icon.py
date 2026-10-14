@@ -2,7 +2,7 @@
 deploy/tree-source.png: 배경을 지운 원본(665×559). 선 굵기는 원본 그대로 둔다(사용자: 굵게 하지 말 것)."""
 from PIL import Image
 
-PAPER = (252, 248, 251)
+GREEN = (21, 69, 57)  # 앱 위쪽 띠와 같은 초록(theme_color #154539)
 src = Image.open("deploy/tree-source.png")
 
 
@@ -13,8 +13,9 @@ def fit(box: int) -> Image.Image:
 
 
 def icon(size: int, fill: float) -> Image.Image:
-    """종이색 네모 한가운데에 나무 — fill: 나무가 차지하는 너비의 비율."""
-    im, t = Image.new("RGBA", (size, size), PAPER + (255,)), fit(round(size * fill))
+    """짙은 초록 네모 한가운데에 흰 선 나무 — fill: 나무가 차지하는 너비의 비율. 선 굵기는 원본 그대로인데, 짙은 바탕이라 작은 크기에서도 보인다."""
+    im, t = Image.new("RGBA", (size, size), GREEN + (255,)), fit(round(size * fill))
+    t = Image.merge("RGBA", (*Image.new("RGB", t.size, (255, 255, 255)).split(), t.getchannel("A")))
     im.alpha_composite(t, ((size - t.width) // 2, (size - t.height) // 2))
     return im.convert("RGB")
 

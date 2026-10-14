@@ -1462,7 +1462,7 @@ def test_others_see_my_tree_unless_private():
 def test_line_tree_on_notice_error_and_offline_pages():
     from hanjang import tree
 
-    assert "hj-sway" in tree.line("wait") and "hj-sway" not in tree.line("oops") and "/static/tree.png" in tree.line("oops")
+    assert "hj-sway" in tree.line("wait") and "hj-sway" not in tree.line("oops") and "/static/tree-fall.webp" in tree.line("oops") and "/static/tree.png" in tree.line()
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
     con.commit()
@@ -1470,7 +1470,8 @@ def test_line_tree_on_notice_error_and_offline_pages():
     s404, _, body = call(app, "/nope", cookie=a)
     assert s404.startswith("404") and 'alt="나무"' in body and "없는 화면이에요" in body
     assert 'alt="나무"' in call(app, "/offline")[2]
-    assert call_raw(app, "/static/tree.png")[1]["Content-Type"] == "image/png"  # 그림 파일이 실제로 나간다
+    assert call_raw(app, "/static/tree.png")[1]["Content-Type"] == "image/png" and call_raw(app, "/static/tree-rain.webp")[1]["Content-Type"] == "image/webp"
+    assert not call_raw(app, "/static/tree-nope.webp")[1]["Content-Type"].startswith("image/")  # 없는 그림 이름은 그림으로 안 나간다
     app.cards = lambda *x, **k: 1 / 0  # 화면을 그리다 터져도
     s500, _, body = call(app, "/", cookie=a)
     assert s500.startswith("500") and "다시 불러오기" in body and "ZeroDivisionError" not in body

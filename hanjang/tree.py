@@ -7,6 +7,7 @@
 """
 
 import math
+import time
 import random
 from datetime import date, timedelta
 from html import escape as e
@@ -166,10 +167,20 @@ def grass(counts: dict[str, int], today: date) -> tuple[str, int]:
             f'<p style="margin:8px 0 0;display:flex;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#68706c">적게 {legend} 많이</p>'), came  # fmt: skip
 
 
-def line(mood: str = "calm") -> str:
-    """가는 선으로 그린 나무 한 그루 — 안내·오류·기다림 화면에. 사용자가 고른 그림(static/tree.png, 10/14).
-    mood: "wait"(살랑살랑 흔들린다 — 기다림) · 그 밖에는 가만히."""
-    if mood != "wait":
-        return '<img src="/static/tree.png?v=1" width="210" height="177" alt="나무">'
-    return ('<style>@keyframes hj-sway{0%,100%{transform:rotate(-1.6deg)}50%{transform:rotate(1.6deg)}}</style>'
-            '<img src="/static/tree.png?v=1" width="210" height="177" alt="나무" style="transform-origin:50% 100%;animation:hj-sway 3s ease-in-out infinite">')
+def line(mood: str = "calm", width: int = 210) -> str:
+    """가는 선으로 그린 나무 한 그루 — 사용자가 고른 그림과 그 버전들(10/14 · 만들기: deploy/tree_icon.py, deploy/tree_moods.py).
+    mood: "wait"(바람 — 살랑 흔들린다) · "oops"(잎이 떨어진다 — 오류) · "rain"(비 — 끊김) · "sun"·"moon"(낮·밤) · 그 밖에는 나무만.
+    width: 나무의 너비. 버전 그림은 달·해·날리는 잎 자리만큼 캔버스가 넓어서(860 가운데 나무 665) 그만큼 넓게 놓는다 — 어느 버전이든 나무 크기가 같다."""
+    kind = MOODS.get(mood)
+    src, w, h = (f"tree-{kind}.webp", width * 860 // 665, width * 600 // 665) if kind else ("tree.png", width, width * 559 // 665)
+    sway = "transform-origin:50% 100%;animation:hj-sway 3s ease-in-out infinite" if mood == "wait" else ""
+    return (('<style>@keyframes hj-sway{0%,100%{transform:rotate(-1.6deg)}50%{transform:rotate(1.6deg)}}</style>' if sway else "")
+            + f'<img src="/static/{src}?v=1" width="{w}" height="{h}" alt="나무" style="max-width:100%;height:auto;{sway}">')
+
+
+MOODS = {"wait": "wind", "oops": "fall", "rain": "rain", "sun": "sun", "moon": "moon"}
+
+
+def sky() -> str:
+    """지금 한국 시각이 낮이면 "sun", 밤이면 "moon" — 홈 맨 아래 나무."""
+    return "sun" if 6 <= (time.gmtime().tm_hour + 9) % 24 < 18 else "moon"

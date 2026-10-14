@@ -5,7 +5,7 @@ import re
 from datetime import date
 from urllib.parse import quote
 
-from hanjang import notes
+from hanjang import notes, tree
 from hanjang.charts import DONUT, chapter, price_chart
 from hanjang.ui import DART_VIEW, RULE, RULE_FLIP, avatar, e, industry_chip, logo, page
 
@@ -444,10 +444,10 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
             + avatar(initial) + '</div></div></header>')  # fmt: skip
     parts = [
         # 머리 — 로고·이름 한 줄, 업종 · 날짜 · 읽음 한 줄 (글자를 줄였다, 사용자 10/8)
-        f'<header class="mt-space-sm mb-space-lg"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
+        f'<header class="mt-space-sm mb-space-lg" style="display:flex;align-items:flex-end;gap:8px"><div style="flex:1;min-width:0"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 text-[12px] text-outline">{industry_chip(industry)}<span>{e(" · ".join(x for x in (md(made), f"읽음 {stats[0]:,}") if x))}</span>'
-        + (f'<a class="font-bold text-primary hover:underline" href="{e(quote_url(ticker))}" target="_blank" rel="noopener">시세 보기 →</a>' if quote_url(ticker) else "") + "</p></header>",
+        + (f'<a class="font-bold text-primary hover:underline" href="{e(quote_url(ticker))}" target="_blank" rel="noopener">시세 보기 →</a>' if quote_url(ticker) else "") + f'</p></div><span style="flex:none;opacity:.9">{tree.line("calm", 92)}</span></header>',
         price_chart(prices) if prices else "",
         f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
