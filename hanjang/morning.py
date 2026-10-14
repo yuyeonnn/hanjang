@@ -442,11 +442,11 @@ def html(m: dict) -> str:
     top = '<span class="block border-t-2 border-primary"></span><span class="block mt-[3px] border-t-2 border-dotted border-primary"></span>'
     bottom = '<span class="block border-t-2 border-dotted border-primary"></span><span class="block mt-[3px] border-t-2 border-primary"></span>'
     card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" class="group block w-full mt-space-lg mb-space-xl" style="text-align:left">'
-            + top + '<span style="display:flex;align-items:center;gap:6px;padding:8px 2px 8px 4px"><span style="flex:1;min-width:0"><span class="flex items-center gap-1 text-[12px] font-semibold text-primary">'
+            + top + '<span style="display:flex;align-items:flex-end;gap:6px;padding:10px 2px 0 4px"><span style="flex:1;min-width:0;align-self:center;padding-bottom:8px"><span class="flex items-center gap-1 text-[12px] font-semibold text-primary">'
             f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
             f'<span class="mt-1.5 flex items-center gap-0.5 text-[17px] font-bold text-primary"><span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{e(first)}</span>'
             '<span class="material-symbols-outlined shrink-0 text-[20px] transition-transform group-hover:translate-x-0.5">chevron_right</span></span></span>'
-            f'<span style="flex:none">{tree.line(tree.sky(), 78)}</span></span>' + bottom + '</button>')  # fmt: skip
+            + tree.perch(tree.sky(), 78) + '</span>' + bottom + '</button>')  # fmt: skip — 나무는 아래 띠 위에 선다(낮엔 해, 밤엔 달)
     # 위에 뜨는 카드 — 뒤 화면은 가리지 않고(사용자 10/10) 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
              'class="w-[calc(100%-32px)] max-w-[448px] max-h-[82vh] p-0 rounded-3xl bg-surface-container-lowest border border-primary/10 backdrop:bg-transparent overflow-hidden '

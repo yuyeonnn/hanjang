@@ -442,14 +442,16 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
     facts = facts or []
     head = ('<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-xl pt-safe"><div class="h-14 max-w-[480px] lg:max-w-[760px] mx-auto px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><button class="w-11 h-11 flex items-center justify-center text-on-surface hover:text-primary transition-colors -ml-space-xs" onclick="location.href=\'/\'"><span class="material-symbols-outlined text-[22px]">arrow_back</span></button><h1 class="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate max-w-[200px]">Note</h1></div><div class="flex items-center gap-space-sm">'
             + avatar(initial) + '</div></div></header>')  # fmt: skip
+    chart = price_chart(prices) if prices else ""
+    snug = "" if chart else ";margin-bottom:0"  # 머리 바로 아래가 띠일 때만 붙인다 — 나무가 띠 위에 선다
     parts = [
         # 머리 — 로고·이름 한 줄, 업종 · 날짜 · 읽음 한 줄 (글자를 줄였다, 사용자 10/8)
-        f'<header class="mt-space-sm mb-space-lg" style="display:flex;align-items:flex-end;gap:8px"><div style="flex:1;min-width:0"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
+        f'<header class="mt-space-sm mb-space-lg" style="display:flex;align-items:flex-end;gap:8px{snug}"><div style="flex:1;min-width:0;align-self:center;padding-bottom:14px"><div class="flex items-center gap-2.5">{logo(name, homepage, "w-10 h-10")}'
         f'<h2 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight">{e(name)}</h2></div>'
         f'<p class="mt-1.5 flex items-center flex-wrap gap-x-2 gap-y-1 text-[12px] text-outline">{industry_chip(industry)}<span>{e(" · ".join(x for x in (md(made), f"읽음 {stats[0]:,}") if x))}</span>'
-        + (f'<a class="font-bold text-primary hover:underline" href="{e(quote_url(ticker))}" target="_blank" rel="noopener">시세 보기 →</a>' if quote_url(ticker) else "") + f'</p></div><span style="flex:none;opacity:.9">{tree.line("calm", 92)}</span></header>',
-        price_chart(prices) if prices else "",
-        f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
+        + (f'<a class="font-bold text-primary hover:underline" href="{e(quote_url(ticker))}" target="_blank" rel="noopener">시세 보기 →</a>' if quote_url(ticker) else "") + f'</p></div>{tree.perch("calm", 92)}</header>',
+        chart,
+        f'<aside class="my-space-xl lg:my-10 text-center"{"" if chart else ' style="margin-top:0"'}>{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
     recent = ""
     if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 「좋게 볼 점과 주의해서 볼 점」 아래에 놓는다 (사용자 10/11)

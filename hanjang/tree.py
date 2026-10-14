@@ -178,6 +178,12 @@ def line(mood: str = "calm", width: int = 210) -> str:
             + f'<img src="/static/{src}?v=1" width="{w}" height="{h}" alt="나무" style="max-width:100%;height:auto;{sway}">')
 
 
+def perch(mood: str = "calm", width: int = 92) -> str:
+    """두 줄 띠(실선+점선) 바로 위에 세우는 나무 — 띠가 땅이 된다(사용자 10/14: 띠에 붙여 놓는 게 가장 예쁘다).
+    flex 줄(align-items:flex-end)의 오른쪽 끝에 넣고, 그 줄 바로 아래에 띠가 오게 한다. 그림 아래 여백만큼 살짝 내려 띠에 닿게."""
+    return f'<span style="flex:none;display:flex;margin-bottom:-{2 if mood in MOODS else 1}px">{line(mood, width)}</span>'
+
+
 MOODS = {"wait": "wind", "oops": "fall", "rain": "rain", "sun": "sun", "moon": "moon"}
 
 

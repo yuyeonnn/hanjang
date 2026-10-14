@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime
 from hanjang import quiz
 
-from hanjang import learn, policy, sources
+from hanjang import learn, policy, sources, tree
 from hanjang.charts import index_chart, loss_bars, rate_chart, rate_ladder
 from hanjang.notepage import figure
 from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, page, top_bar
@@ -86,8 +86,8 @@ class LearnPages:
             face, credit = book_face(slug)
             inner = (wrap + '<div class="flex items-center py-space-sm"><a class="flex items-center gap-space-xs text-on-surface-variant hover:text-primary transition-colors" href="/learn"><span class="material-symbols-outlined text-[18px]">arrow_back</span>'
                      f'<span class="font-label-regular text-label-regular font-medium">읽기 팁</span></a><span class="ml-2 px-2 py-0.5 rounded-full bg-primary text-on-primary font-label-micro text-label-micro font-semibold">{e(a["cat"])}</span></div>'
-                     f'<h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight mb-space-sm">{e(a["title"])}</h1>'
-                     + f'<aside class="my-space-xl lg:my-10 text-center">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
+                     f'<div style="display:flex;align-items:flex-end;gap:8px"><h1 class="font-display-editorial text-display-editorial text-on-surface font-semibold tracking-tight" style="flex:1;min-width:0;align-self:center;padding-bottom:14px">{e(a["title"])}</h1>{tree.perch("calm", 84)}</div>'  # 나무가 띠 위에 선다
+                     + f'<aside class="my-space-xl lg:my-10 text-center" style="margin-top:0">{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{self.marked(a["lead"])}</p>{RULE_FLIP}</aside>'
                      + '<div class="block">' + face + self.flow(a["body"][:1]) + '<div class="clear-both"></div></div>'
                      + figure(learn.FIGURE.get(slug))
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
