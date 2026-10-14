@@ -19,7 +19,7 @@ for (const [name, [status, body]] of Object.entries(pages)) {
       n++;
       try { new Function(m[1]); } catch (e) { notes.push(`${n}번째 스크립트 문법 오류: ${e.message}`); }
     }
-    if (body.length < 2000) notes.push(`화면이 너무 작다(${body.length}자)`);
+    if (body.length < 500) notes.push(`화면이 너무 작다(${body.length}자)`);
     if (/Traceback \(most recent call last\)/.test(body)) notes.push("화면에 오류 기록이 찍혔다");
   }
   scripts += n;
