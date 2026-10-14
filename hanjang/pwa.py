@@ -11,9 +11,9 @@ MANIFEST = json.dumps({
     "name": "한장 — 한눈에 읽는 장", "short_name": "한장", "lang": "ko", "start_url": "/", "scope": "/", "id": "/",
     "display": "standalone", "background_color": "#fcf8fb", "theme_color": "#154539",
     "description": "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다.", "categories": ["finance", "education"],
-    "icons": [{"src": "/static/icon-192.png?v=2", "sizes": "192x192", "type": "image/png"},
-              {"src": "/static/icon-512.png?v=2", "sizes": "512x512", "type": "image/png"},
-              {"src": "/static/icon-maskable.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+    "icons": [{"src": "/static/icon-192.png?v=3", "sizes": "192x192", "type": "image/png"},
+              {"src": "/static/icon-512.png?v=3", "sizes": "512x512", "type": "image/png"},
+              {"src": "/static/icon-maskable.png?v=3", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
 }, ensure_ascii=False)  # fmt: skip
 SW = ("const C='hanjang-1';self.addEventListener('install',ev=>{ev.waitUntil(caches.open(C).then(c=>c.add('/offline')));self.skipWaiting();});"
       "self.addEventListener('activate',ev=>{ev.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});"
@@ -25,7 +25,7 @@ OFFLINE = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta nam
            '<body><main>' + tree.line("oops") + '<h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
            '<button onclick="location.reload()">다시 열기</button></main></body></html>')  # fmt: skip
 PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#154539">'
-            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2"><link rel="icon" href="/static/icon-192.png?v=2" type="image/png">'
+            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=3"><link rel="icon" href="/static/icon-192.png?v=3" type="image/png">'
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
 
 
