@@ -1548,8 +1548,8 @@ def test_things_found_by_clicking_through_every_screen(monkeypatch):
     assert "피드로 돌아가기" in call(app, "/u/50", cookie=ck)[2]
 
 
-def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
-    """아침 소식 메일 — 내 종목에 새 공시가 있거나 오늘·내일 일정이 있는 사람에게만 한 통. 끈 사람은 빼고."""
+def test_morning_brief_mail_every_day(monkeypatch):
+    """아침 소식 메일 — 종목을 담은 사람에게 매일 한 통, 새 소식이 없는 날도. 끈 사람은 빼고."""
     from datetime import date
 
     from hanjang import daily, mail, sources
@@ -1560,7 +1560,7 @@ def test_morning_brief_mail_only_when_there_is_news(monkeypatch):
     sent = []
     monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text, html)) or True)
     today = date(2026, 10, 14)  # 수요일
-    assert daily.brief(con, today) == 0 and not sent  # 새 소식 없음 — 보내지 않는다
+    assert daily.brief(con, today) == 1 and sent.pop()[1] == "[한장] 10월 14일 수요일 아침 — 새 공시 없는 조용한 아침이에요"  # 새 소식 없어도
     collect.save_disclosures(con, [sources.Disclosure("20261013000001", "005930", date(2026, 10, 13), "주요사항보고서(자기주식취득결정)")])
     con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
     assert daily.brief(con, today) == 1

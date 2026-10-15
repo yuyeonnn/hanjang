@@ -70,7 +70,7 @@ def alert_mail(name: str, kind: str, line: str, link: str) -> tuple[str, str, st
 
 
 def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
-    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 새 소식이 있는 날만, 하루 한 통(사용자 10/11).
+    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 화~토 하루 한 통(사용자 10/11, 소식 없는 날도 10/15).
     m = morning.build 의 결과, body = morning.text(m). 메일 앱은 CSS 를 못 읽어 인라인 스타일만."""
     from html import escape as e
 
@@ -79,8 +79,8 @@ def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
     soon = next((x["label"] for x in m["week"] if x.get("url")), "")
     moves = m.get("moves", [])
     subject = (f"[한장] 오늘 내 종목 소식 — {who}" if m["news"] else f"[한장] 내 종목 큰손 움직임 — {moves[0].rstrip('.')}" if moves
-               else f"[한장] 곧 있는 내 종목 일정 — {soon}")
-    foot = "새 소식이 있는 날 아침에만 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
+               else f"[한장] 곧 있는 내 종목 일정 — {soon}" if soon else f"[한장] {m['title']} — 새 공시 없는 조용한 아침이에요")
+    foot = "화~토 아침마다 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
     news = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:{INK}">'
                    f'<a href="{e(x["url"])}" style="color:{RED if x.get("warn") else GREEN};font-weight:700;text-decoration:none">{"[꼭 확인] " if x.get("warn") else ""}{e(x["name"])}</a> '
                    f'<span style="color:{SUB}">{e(x["body"])}</span></p>' for x in m["news"])  # fmt: skip

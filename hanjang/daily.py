@@ -68,16 +68,14 @@ def apart(code: str) -> None:
 
 
 def brief(con: sqlite3.Connection, today: date) -> int:
-    """아침 소식 메일 — 「아침 한 장」과 같은 내용을, 내 종목에 새 소식(공시·큰손 움직임)이 있거나 오늘·내일 내 종목 일정이 있는 사람에게만 한 통.
+    """아침 소식 메일 — 「아침 한 장」과 같은 내용을 종목을 담은 사람 모두에게 매일 한 통. 새 소식이 없는 날도 「새 공시는 없어요」로 (사용자 10/15).
     안내 메일을 끈 사람·막힌 계정·종목을 안 담은 사람은 빼고. 한 사람이 실패해도 나머지는 보낸다."""
-    soon, n = (today + timedelta(days=1)).isoformat(), 0
+    n = 0
     for uid, email in con.execute("select id, email from users where mail_on = 1 and coalesce(banned, 0) = 0").fetchall():
         tickers = [t for (t,) in con.execute("select ticker from holdings where user_id = ? order by added_at", (uid,))]
         if not tickers:
             continue
         m = morning.build(con, tickers, today, uid)
-        if not (m["news"] or m.get("moves") or any(x.get("url") and x["date"] <= soon for x in m["week"])):
-            continue  # 새로 알릴 것이 없으면 보내지 않는다 — 알림은 적게, 정확하게
         try:
             mail.send(email, *mail.morning_mail(m, morning.text(m)))
             n += 1
