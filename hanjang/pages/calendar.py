@@ -171,9 +171,9 @@ class CalendarPages:
         for x in items:
             for dd_ in x[3]:
                 days.setdefault(dd_, []).append(x[2])
-        sort = sort if sort in ("new", "old") else "rel"  # 이 달의 일정 — 관련 높은 순(기본) · 최신순 · 날짜순
+        sort = "old" if sort in ("new", "old") else "rel"  # 이 달의 일정 — 관련 높은 순(기본) · 날짜순(1일부터). 최신순은 날짜순을 거꾸로 한 것뿐이라 뺐다(사용자 10/16) — 옛 주소 s=new 는 날짜순으로
         if sort != "rel":
-            items.sort(key=lambda x: x[1], reverse=sort == "new")
+            items.sort(key=lambda x: x[1])
         items = [x[2] for x in items if not x[4]]
         if ipo_n:
             items.append(f'<a href="#calendar-grid" class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2 font-body-compact text-body-compact text-on-surface-variant hover:text-on-surface">'
@@ -229,7 +229,7 @@ class CalendarPages:
                  + '<nav id="month-list" class="scroll-mt-24 pt-2.5 pb-1 flex gap-1.5" aria-label="정렬">' + "".join(
                      f'<a href="/calendar?m={y}-{m:02d}&s={k}#month-list" class="px-3 py-1 rounded-full text-[12px] font-semibold border '
                      + ("bg-primary text-on-primary border-primary" if k == sort else "border-outline-variant/60 text-on-surface-variant hover:bg-surface-container") + f'">{label}</a>'
-                     for k, label in (("rel", "관련 높은 순"), ("new", "최신순"), ("old", "날짜순"))) + "</nav>"
+                     for k, label in (("rel", "관련 높은 순"), ("old", "날짜순"))) + "</nav>"
                  + f'<div class="flex flex-col">{"".join(items)}</div></section>'
                  '<section class="pt-4 border-t border-surface-container-high flex flex-col"><span class="font-label-regular text-label-regular text-primary font-bold">주주를 위한 읽기 팁</span>'
                  f'<div class="flex flex-col divide-y divide-surface-container-high/70">{tips}</div></section></aside></div>'

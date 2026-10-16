@@ -1022,9 +1022,9 @@ def test_month_list_sorts_and_drops_minor():
     assert "유상증자" in month and "판매·인도" not in month  # 보통 공시는 목록에서 빠지고
     assert "이 달 공모주 청약 1곳" in month and "새회사 공모주 청약" not in month  # 공모주는 한 줄로
     assert "판매·인도" in page  # 달력의 그날 일정에는 그대로
-    new = call(app, "/calendar?m=2026-10&s=new", cookie=a)[2]
+    new = call(app, "/calendar?m=2026-10&s=new", cookie=a)[2]  # 최신순은 뺐다 — 옛 주소는 날짜순
     new = new[new.index('id="month-list"'):]
-    assert new.index("단일판매") < new.index("유상증자")  # 최신순
+    assert new.index("유상증자") < new.index("단일판매") and "최신순" not in new
     old = call(app, "/calendar?m=2026-10&s=old", cookie=a)[2]
     old = old[old.index('id="month-list"'):]
     assert old.index("유상증자") < old.index("단일판매")  # 날짜순
