@@ -17,7 +17,8 @@ from hanjang.ui import COHORT, DEMO_EMAIL, DEMO_STOCKS, e, page
 class LoginPages:
     # ---- 로그인 (시안 _2) ----
 
-    def login_page(self, sent: str | None = None, error: str = "", cohort: str = "") -> str:
+    def login_page(self, sent: str | None = None, error: str = "", cohort: str = "", note: str = "") -> str:
+        """note: 이메일 칸 위에 크게 — 둘러보다 담기 등을 눌러 온 손님에게 왜 가입하는지 (10/16)."""
         hidden = f'<input type="hidden" name="c" value="{cohort}">' if COHORT.fullmatch(cohort) else ""
         box = (f'<p class="font-body-compact text-body-compact text-tertiary mt-3" role="alert">{e(error)}</p>' if error else "") + ("" if not sent else (
             '<div class="flex flex-col bg-secondary-container/40 rounded-lg p-4 mt-4 transition-all" id="success-box"><div class="flex items-start gap-3"><div class="flex-shrink-0 w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center mt-0.5"><span class="material-symbols-outlined text-on-secondary-container text-lg" style="font-variation-settings: \'FILL\' 1;">mark_email_read</span></div><div class="flex flex-col flex-1 min-w-0"><div class="flex items-center gap-1.5 mb-1"><span class="font-label-micro text-label-micro bg-primary text-on-primary px-1.5 py-0.5 rounded">발송 완료</span>'
@@ -38,7 +39,8 @@ class LoginPages:
                  '<p class="font-label-regular text-label-regular text-outline mt-1"><b class="text-primary">한</b>눈에 읽는 <b class="text-primary">장</b></p>'
                  '<h1 class="font-headline-sm text-headline-sm text-on-surface mt-4 max-w-[280px] leading-relaxed">내 주식이 지금 어떤 상황인지,<br>쉬운 글 한 장으로.</h1>'
                  '</div>'
-                 '<div class="w-full rounded-xl flex flex-col relative overflow-hidden px-1.5"><form class="flex flex-col w-full relative z-10" id="magic-link-form" method="post" action="/login">' + hidden
+                 + (f'<p class="rounded-xl bg-secondary-container/40 text-on-surface font-body-compact text-body-compact font-semibold text-center px-4 py-3 mb-4" role="status">{e(note)}</p>' if note else "")
+                 + '<div class="w-full rounded-xl flex flex-col relative overflow-hidden px-1.5"><form class="flex flex-col w-full relative z-10" id="magic-link-form" method="post" action="/login">' + hidden
                  + '<label class="sr-only" for="email-input">이메일 주소</label>'
                  '<div class="relative flex items-center w-full"><input class="w-full font-body-reading text-body-reading bg-surface-container-low text-on-surface placeholder:text-outline rounded-lg px-4 py-3.5 focus:outline-none focus:bg-surface-container-lowest transition-all" id="email-input" name="email" placeholder="이메일 주소" required="" type="email">'
                  '<button aria-label="이메일 지우기" class="hidden absolute right-3 text-outline hover:text-on-surface p-1 transition-colors" id="clear-btn" onclick="clearInput()" type="button"><span class="material-symbols-outlined text-lg">cancel</span></button></div>'
@@ -87,6 +89,10 @@ class LoginPages:
     def demo(self):
         if sources.env().get("DEMO") != "1":
             return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
+        return self.see("/", ("Set-Cookie", session_cookie(self.demo_uid(), self.secret, self.clock(), 86400)))
+
+    def demo_uid(self) -> int:
+        """둘러보기 공용 계정 — 없으면 만들고 예시 종목을 담아 둔다. 처음 온 사람도 이 계정으로 본다."""
         self.con.execute("insert or ignore into users (email, created_at, nickname, mail_on) values (?, ?, '둘러보기', 0)",
                          (DEMO_EMAIL, datetime.now().isoformat()))  # fmt: skip
         self.con.execute("update users set rules_at = coalesce(rules_at, created_at) where email = ?", (DEMO_EMAIL,))  # 공용 계정 — 닉네임이 정해져 있어 규칙 동의 관문을 지나게
@@ -95,15 +101,16 @@ class LoginPages:
             if self.con.execute("select 1 from stocks where ticker = ?", (t,)).fetchone():
                 self.con.execute("insert or ignore into holdings values (?, ?, ?)", (u, t, datetime.now().isoformat()))
         self.con.commit()
-        return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock(), 86400)))
+        return u
 
     def start(self, email: str, cohort: str = ""):
         """이 이메일로 로그인 — 계정이 없으면 만든다. 초대 링크 묶음은 처음 한 번만 붙는다."""
-        self.con.execute("insert or ignore into users (email, created_at) values (?, ?)", (email, datetime.now().isoformat()))
+        new = self.con.execute("insert or ignore into users (email, created_at) values (?, ?)", (email, datetime.now().isoformat())).rowcount == 1
         if COHORT.fullmatch(cohort):
             self.con.execute("update users set cohort = ? where email = ? and cohort is null", (cohort, email))
         self.con.commit()
         (u,) = self.con.execute("select id from users where email = ?", (email,)).fetchone()
+        self.track("signup" if new else "login", u)
         return self.see("/", ("Set-Cookie", session_cookie(u, self.secret, self.clock())))
 
     def login(self, email: str, agreed: bool = False, cohort: str = ""):

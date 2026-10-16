@@ -200,6 +200,11 @@ MIGRATIONS = (
     # 정부 소식 — 정책브리핑 정책뉴스의 제목·주소만(공공누리 제1유형). labels: 걸리는 업종 이름표를 「|반도체|조선|」 모양으로 (data-rights §7, 10/14)
     "create table if not exists policy_news (id text primary key, date text not null, minister text, title text not null, url text not null, labels text not null)",
     "create index if not exists policy_news_date on policy_news (date)",
+    # 손님·가입 기록(인사이트, 10/16) — gid: 무작위 번호 쿠키(g). 이름·이메일·IP 는 적지 않는다. 가입·로그인하면 그 gid 의 지난 줄에 uid 를 붙인다
+    # kind: open(하루 한 번, 들어온 곳 ref) · gate(둘러보다 가입 화면, path=누른 것) · signup · login
+    "create table if not exists visits (id integer primary key, at text not null, gid text not null, uid integer, kind text not null, path text, ref text)",
+    "create index if not exists visits_gid on visits (gid, kind, at)",
+    "create index if not exists visits_at on visits (at)",
 )
 
 
@@ -228,6 +233,7 @@ def tidy(con: sqlite3.Connection, today) -> dict[str, int]:
 
     out = {"views": con.execute("delete from views where at < ?", ((today - timedelta(days=VIEWS_DAYS)).isoformat(),)).rowcount,
            "news": con.execute("delete from news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount,
-           "policy_news": con.execute("delete from policy_news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount}
+           "policy_news": con.execute("delete from policy_news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount,
+           "visits": con.execute("delete from visits where at < ?", ((today - timedelta(days=VIEWS_DAYS)).isoformat(),)).rowcount}
     con.commit()
     return out

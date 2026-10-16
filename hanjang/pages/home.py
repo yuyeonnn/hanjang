@@ -149,6 +149,7 @@ class HomePages:
                        f'<a href="/n/{e(t)}"><p class="font-body-reading text-body-reading text-on-surface mt-2 tracking-tight">{e(head)}</p></a>{event}'
                        f'<div class="mt-3 flex items-center justify-between">{status}<a class="font-label-micro text-label-micro text-primary flex items-center gap-0.5 hover:underline font-semibold" href="/n/{e(t)}">노트 읽기<span class="material-symbols-outlined text-[14px]">arrow_forward</span></a></div></article>')  # fmt: skip
         note = (f'<p class="font-label-micro text-label-micro text-tertiary px-margin pt-2">{e(msg)}</p>' if msg else "")
+        demo = self.is_demo(uid)  # 둘러보는 손님 — 제목만 「예시 종목」. 담기 등을 누르면 흐린 덮개(web.GUEST_GATE)
         inner = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[1200px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full flex-1">'
                  '<section class="sticky top-0 z-30 bg-surface/95 backdrop-blur-md px-margin py-3 border-b border-surface-container-high transition-all duration-200"><div class="relative w-full">'
                  '<form method="post" action="/add" class="h-11 w-full bg-surface-container-low/60 rounded-xl flex items-center px-3 border border-surface-container-high/60 focus-within:border-primary-container focus-within:bg-surface-container-lowest transition-all"><span class="material-symbols-outlined text-outline text-[20px] mr-2">search</span>'
@@ -163,7 +164,7 @@ class HomePages:
                  '<p class="font-headline-sm text-headline-sm text-on-surface">분석 중…</p>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant">캡처에서 종목 이름만 읽고 있어요. 사진은 저장하지 않아요.</p></div>'
                  + note
-                 + '<header class="px-margin pt-5 pb-2"><div class="flex items-baseline justify-between mb-1"><div class="flex items-center gap-2"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">내 종목</h1>'
+                 + '<header class="px-margin pt-5 pb-2"><div class="flex items-baseline justify-between mb-1"><div class="flex items-center gap-2"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">' + ("예시 종목" if demo else "내 종목") + '</h1>'
                  f'<span class="font-label-regular text-label-regular text-outline" id="stock-count-badge">{len(rows)} / {MAX_STOCKS}개</span></div>'
                  f'<a class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors flex items-center gap-0.5" href="/?sort={"added" if sort == "name" else "name"}"><span class="material-symbols-outlined text-[15px]">tune</span>정렬</a></div>'
                  '</header>'
@@ -178,7 +179,8 @@ class HomePages:
                     'document.querySelectorAll("#stock-list>article").forEach(a=>a.style.display=(m==="all"||a.dataset.market===m)?"":"none")});</script>' if both else "")
                  + f'<section class="px-margin flex flex-col divide-y divide-surface-container-high/80 lg:grid lg:grid-cols-2 lg:gap-x-12 lg:divide-y-0 lg:[&>*]:border-b lg:[&>*]:border-surface-container-high/80" id="stock-list">{"".join(out) or EMPTY_CARDS}</section>'
                  '<footer class="mt-auto px-margin pt-16 pb-6 flex flex-col items-center justify-center gap-1.5 opacity-80"><p class="font-label-micro text-label-micro text-outline text-center flex items-center justify-center gap-1.5"><span class="material-symbols-outlined text-[13px]">mark_email_unread</span>월요일 아침마다 새 노트가 와요. 새 공시·기사가 나오면 매일 아침 고쳐 써요.</p><div class="flex items-center gap-3 text-outline font-label-micro text-label-micro"><span class="">업데이트: 매일 07:00 (바뀐 종목만)</span><span class="">·</span><span class="">공시 데이터: DART 전자공시</span></div>'
-                 '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
+                 + ('<a class="font-label-micro text-label-micro text-primary font-semibold underline underline-offset-4 py-1" href="/admin">운영자 인사이트</a>' if self.is_admin(uid) else "")  # 운영자에게만
+                 + '<button class="font-label-micro text-label-micro text-outline hover:text-on-surface transition-colors underline underline-offset-4 py-2" onclick="if(confirm(\'현재 계정에서 로그아웃할까요?\'))location.href=\'/logout\'" type="button">로그아웃</button></footer></div>'
                  # 자동완성 — 상장사 전체는 /stocks.js 로 따로 (하루 캐시, 100KB 남짓)
                  f'<script src="/stocks.js?v={self.stocks_v()}"></script><script>'
                  "const STOCKS=window.STOCKS||[];"

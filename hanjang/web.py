@@ -7,6 +7,7 @@
 import json
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import threading
@@ -15,9 +16,9 @@ import traceback
 from contextlib import contextmanager
 from datetime import date, datetime
 from hanjang import quiz
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from hanjang import db, notes, sources, tree
+from hanjang import db, mail, notes, sources, tree
 from hanjang.auth import check_login, read_session, session_cookie
 from hanjang.pwa import MANIFEST, OFFLINE, SW
 from hanjang.ui import BIG_AT_ONCE, BIG_POSTS, BODY_MAX, CSP, FORM_MAX, Me, PEOPLE, STATIC, e, page, photo_url
@@ -26,10 +27,38 @@ from hanjang.auth import CODE_TRIES, LEGACY_UNTIL, LINK_TTL, LOGIN_ALL_HOURLY, L
 from hanjang.charts import bars, ind_tag, pie  # noqa: F401
 from hanjang.notepage import business_block, dividend_block, figure, metrics, money_blocks, owners_block, paras, redone, render_note, risk_block, safe_url, sentence, soften  # noqa: F401
 from hanjang.ui import BOOK_FACE, CSS_TAG, FIRST, PHOTO, Photos, book_face, guru_face, industry_chip, logo, mark, photo_for, sector  # noqa: F401
-from hanjang.pages import login, home, calendar as calendar_pages, profile, social, feed, big, learn as learn_pages  # noqa: F401
+from hanjang.pages import login, home, calendar as calendar_pages, profile, social, feed, big, learn as learn_pages, insights as insight_pages  # noqa: F401
 
 
-class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profile.ProfilePages, social.SocialPages, feed.FeedPages, big.BigPages, learn_pages.LearnPages):
+# 로그인하지 않은 사람도 둘러보기로 보는 화면 — 첫 화면(/)과 공유된 노트 링크 등 (사용자 10/16: 먼저 써 보고, 담으려 할 때 가입)
+GUEST_PAGES = ("/n/", "/feed", "/calendar", "/learn", "/u/", "/a/", "/big")
+# 사람이 아닌 것 — 링크 미리보기·검색 로봇·스크립트. 방문 기록에 넣지 않는다
+BOTS = re.compile(r"bot|crawl|spider|slurp|preview|scrap|facebookexternalhit|curl|wget|python|node|headless|lighthouse", re.I)
+
+
+# 둘러보는 손님이 담기·좋아요·프로필처럼 가입이 필요한 것을 누르면 — 쓰던 화면 위를 흐리게 덮고 「가입하고 이용하세요」. 누르면 가입 화면으로 (사용자 10/16)
+# 담으려던 종목은 가입 화면 주소(?want=)로 넘겨 기억해 둔다. 서버 쪽 막기(route 의 is_demo)는 스크립트가 없을 때를 위해 그대로 둔다
+GUEST_GATE = (
+    '<div id="guest-gate" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;padding:24px;cursor:pointer;'
+    'background:rgba(252,248,251,.55);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)" role="dialog" aria-label="가입 안내">'
+    '<div style="max-width:320px;width:100%;background:#fff;border-radius:20px;padding:26px 20px 18px;text-align:center;box-shadow:0 12px 40px rgba(21,69,57,.16)">'
+    '<p style="font-weight:700;font-size:19px;color:#154539;margin:0">가입하고 이용하세요</p>'
+    '<p id="guest-gate-why" style="margin:8px 0 0;font-size:14px;line-height:22px;color:#434944">내 종목을 담으면 공시·재무·소식을 쉬운 글로 매일 읽어 드려요.</p>'
+    '<span style="display:block;margin-top:18px;padding:13px;border-radius:12px;background:#154539;color:#fff;font-weight:700;font-size:15px">가입하기</span>'
+    '<button type="button" id="guest-gate-close" style="margin-top:12px;font-size:13px;color:#6f7973;background:none;border:0;cursor:pointer">계속 둘러보기</button></div></div>'
+    "<script>(function(){var g=document.getElementById('guest-gate'),to='/login';"
+    "function show(why,want){to='/login?'+(want?'want='+encodeURIComponent(want):'from='+encodeURIComponent(why||''));"
+    "if(want)document.getElementById('guest-gate-why').textContent='가입하면 「'+want+'」부터 바로 담아 드려요.';g.style.display='flex';}"
+    "g.addEventListener('click',function(ev){if(ev.target.id==='guest-gate-close'){g.style.display='none';return;}location.href=to;});"
+    "document.addEventListener('submit',function(ev){var f=ev.target;if((f.getAttribute('method')||'').toLowerCase()!=='post')return;"
+    "ev.preventDefault();ev.stopPropagation();var q=f.querySelector('[name=q]');show(f.getAttribute('action'),q&&q.value.trim());},true);"
+    "document.addEventListener('click',function(ev){var a=ev.target.closest&&ev.target.closest('a[href^=\"/me\"],label');"
+    "if(!a||(a.tagName==='LABEL'&&!a.querySelector('input[type=file]')))return;ev.preventDefault();ev.stopPropagation();show(a.getAttribute('href')||'/scan');},true);"
+    "var f0=window.fetch;window.fetch=function(u,o){if(o&&String(o.method||'').toUpperCase()==='POST'){show(String(u));return new Promise(function(){});}return f0.apply(this,arguments);};"
+    "})();</script>")
+
+
+class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profile.ProfilePages, social.SocialPages, feed.FeedPages, big.BigPages, learn_pages.LearnPages, insight_pages.InsightPages):
     def __init__(self, con: sqlite3.Connection, secret: str, clock=time.time) -> None:
         self.con, self.secret, self.clock = con, secret, clock
         # 요청은 한 번에 하나씩 — DB 연결 하나를 돌려 쓴다. 화면 하나가 수 ms 라 이 규모에선 이게 가장 빠르고 공평하다
@@ -107,14 +136,31 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             del raw
         query = {k: v[0] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
         self.local.ip = (environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR") or "").split(",")[-1].strip()  # 앞의 Caddy 가 붙여 준 마지막 값이 실제 접속 주소
+        self.local.cookie = cookie
+        old = cookie.get("g", "")
+        self.local.gid = old if re.fullmatch(r"[0-9a-f]{16}", old) else secrets.token_hex(8)
+        self.local.real = "HTTP_X_FORWARDED_FOR" in environ and not BOTS.search(environ.get("HTTP_USER_AGENT", ""))  # 앞의 Caddy 를 거친 사람의 요청만 센다
+        guest = False
         with self.turn:
             self.local.held = True
             try:
+                # 처음 온 사람은 로그인 화면 대신 둘러보기로 — 써 보고, 담으려 할 때 가입을 받는다. 초대 링크(?c=)는 로그인 화면 그대로
+                if uid is None and method == "GET" and (path == "/" or path.startswith(GUEST_PAGES)) and not query.get("c") and sources.env().get("DEMO") == "1":
+                    uid, guest = self.demo_uid(), True
+                if method == "GET" and (path in ("/", "/login") or path.startswith(GUEST_PAGES)):
+                    self.opened(uid, path, query, environ.get("HTTP_REFERER", ""))
                 status, headers, body = self.route(method, path, form, query, uid)
             finally:
                 self.local.held = False
+        # 덮개는 둘러보는 화면에만 — 가입·운영자 화면에 붙으면 그 화면의 입력까지 막는다
+        if method == "GET" and (path == "/" or path.startswith(GUEST_PAGES)) and uid is not None and status.startswith("200") and isinstance(body, str) and "</body>" in body and self.is_demo(uid):
+            body = body.replace("</body>", GUEST_GATE + "</body>", 1)
+        if guest and not any(k == "Set-Cookie" for k, _ in headers):
+            headers = [*headers, ("Set-Cookie", session_cookie(uid, self.secret, self.clock(), 86400))]
         if renew and not any(k == "Set-Cookie" for k, _ in headers):  # 옛 쿠키 → 날짜가 든 새 쿠키로 (로그아웃·탈퇴처럼 쿠키를 지우는 응답은 그대로)
             headers = [*headers, ("Set-Cookie", session_cookie(uid, self.secret, self.clock()))]
+        if self.local.real and self.local.gid != old:  # 방문을 세는 무작위 번호 — 처음 한 번
+            headers = [*headers, ("Set-Cookie", f"g={self.local.gid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000" + ("; Secure" if mail.base_url().startswith("https://") else ""))]
         kind = [] if any(k == "Content-Type" for k, _ in headers) else [("Content-Type", "text/html; charset=utf-8"), ("Content-Security-Policy", CSP)]
         start_response(status, [*kind, ("X-Content-Type-Options", "nosniff"),
                                 ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin"), *headers])  # fmt: skip
@@ -122,6 +168,32 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
 
     def see(self, to: str, *headers) -> tuple:
         return "303 See Other", [("Location", to), *headers], ""
+
+    def track(self, kind: str, uid: int | None = None, path: str | None = None, ref: str | None = None) -> None:
+        """손님·가입 기록 한 줄(인사이트). 바깥에서 온 사람의 요청만 — 올린 뒤 확인·테스트·로봇은 적지 않는다. 둘러보기 계정은 손님(uid 없음)으로."""
+        if not getattr(self.local, "real", False):
+            return
+        if uid is not None and self.is_demo(uid):
+            uid = None
+        try:
+            self.con.execute("insert into visits (at, gid, uid, kind, path, ref) values (?, ?, ?, ?, ?, ?)",
+                             (datetime.now().isoformat(timespec="seconds"), self.local.gid, uid, kind, path, ref))  # fmt: skip
+            if uid is not None and kind in ("signup", "login"):  # 가입 전 손님 기록을 이 사람에게 붙인다
+                self.con.execute("update visits set uid = ? where gid = ? and uid is null", (uid, self.local.gid))
+            self.con.commit()
+        except sqlite3.OperationalError:
+            self.con.rollback()
+
+    def opened(self, uid: int | None, path: str, query: dict, referer: str) -> None:
+        """이 브라우저가 오늘 처음 들어왔으면 한 줄 — 어디서 왔는지(링크를 누른 곳의 주소 이름 · utm_source · 초대 묶음)와 함께."""
+        if not getattr(self.local, "real", False) or self.con.execute(
+                "select 1 from visits where gid = ? and kind = 'open' and at >= ?", (self.local.gid, date.today().isoformat())).fetchone():
+            return
+        host = (urlparse(referer).hostname or "").removeprefix("www.")
+        ref = query.get("utm_source") or (f"초대 {query['c']}" if query.get("c") else "")
+        if not ref and host and host != urlparse(mail.base_url()).hostname:
+            ref = "앱" if host == "com.hanjangapp" else host
+        self.track("open", uid, path, ref[:80] or None)
 
     def log(self, uid: int, page_: str, ticker: str | None = None) -> None:
         try:
@@ -180,6 +252,21 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return self.assetlinks()
         if path == "/login/code" and method == "POST":
             return self.login_code(form.get("email", "").strip().lower(), form.get("code", ""), form.get("c", ""))
+        if path == "/login" and method == "GET":  # 둘러보다 흐린 덮개를 누르면 — 무엇을 하려다 왔는지 적고, 담으려던 종목은 기억한다
+            want = query.get("want", "").strip()[:100]
+            if want or query.get("from"):
+                self.track("gate", None, f"담기 {want}" if want else query["from"][:60])
+            if want:
+                return "200 OK", [("Set-Cookie", f"want={quote(want)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400")], self.login_page(note=f"가입하면 「{want}」부터 바로 담아 드려요.")
+            return "200 OK", [], self.login_page(cohort=query.get("c", ""))
+        if path == "/admin" or path.startswith("/admin/u/"):  # 운영자 인사이트 — ADMIN_EMAILS 계정으로 로그인해 있으면 바로 열린다 (pages/insights.py)
+            if uid is None or not self.is_admin(uid):  # 회원 이메일이 보이는 화면 — 다른 사람에겐 있는지도 알리지 않는다
+                return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
+            if path == "/admin":
+                d = query.get("d", "30")
+                return "200 OK", [], self.insights(max(1, min(180, int(d))) if d.isdigit() else 30)
+            got = self.insight_user(int(path[9:])) if path[9:].isdigit() else None
+            return ("200 OK", [], got) if got else ("404 Not Found", [], self.simple("없음", "없는 회원이에요."))
         if path in ("/privacy", "/method", "/help/login", "/rules"):  # 로그인 없이 열린다
             return "200 OK", [], self.doc(path, uid)
         if path == "/auth":
@@ -193,7 +280,12 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return "200 OK", [], self.login_page(cohort=query.get("c", ""))
         # 둘러보기 = 로그인 없이 구경하는 손님. 프로필·설정·알림을 누르거나 무언가 바꾸려 하면(담기·좋아요·팔로우) 로그인 화면으로 (사용자 10/12)
         if self.is_demo(uid) and (method == "POST" or path == "/me" or path.startswith("/me/")):
-            return "200 OK", [], self.login_page(error="둘러보는 중이에요. 로그인하면 내 종목을 담고 프로필을 쓸 수 있어요.")
+            want = form.get("q", "").strip()[:100] if path == "/add" else ""
+            self.track("gate", None, f"담기 {want}" if want else path)
+            if want:  # 담으려던 종목은 가입하고 처음 「내 종목」을 열 때 담아 준다 — 가입하고 다시 찾게 하지 않는다
+                return "200 OK", [("Set-Cookie", f"want={quote(want)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400")], \
+                    self.login_page(note=f"가입하면 「{want}」부터 바로 담아 드려요.")
+            return "200 OK", [], self.login_page(note="둘러보는 중이에요. 가입하면 내 종목을 담고 프로필을 쓸 수 있어요.")
         if path == "/logout":
             return self.see("/", ("Set-Cookie", "s=; Path=/; Max-Age=0"))
         # 닉네임은 가입할 때 받는다 — 정하기 전엔 다른 화면으로 못 간다 (사람 찾기·피드에 쓰이니 겹치면 안 된다)
@@ -232,6 +324,10 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             self.con.commit()
             return self.see("/")
         if path == "/":
+            want = "" if self.is_demo(uid) else unquote(getattr(self.local, "cookie", {}).get("want", ""))
+            if want:  # 둘러보다 담으려던 종목 — 가입하고 처음 여는 「내 종목」에서 담는다
+                status, headers, body = self.add(uid, want)
+                return status, [*headers, ("Set-Cookie", "want=; Path=/; Max-Age=0")], body
             self.log(uid, "cards")
             return "200 OK", [], self.cards(uid, query.get("msg"), query.get("sort"))
         if path.startswith("/n/"):

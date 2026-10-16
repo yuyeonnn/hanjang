@@ -470,11 +470,12 @@ def test_demo_browse_without_email_is_read_only(monkeypatch):
     ck = h["Set-Cookie"].split(";")[0]
     assert s.startswith("303") and "삼성전자" in call(app, "/", cookie=ck)[2]  # 닉네임 화면 없이 바로
     add = call(app, "/add", "POST", "q=005930", ck)[2]  # 바꾸는 것은 막는다 — 로그인 화면으로
-    assert "둘러보는 중이에요" in add and 'name="email"' in add
+    assert "가입하면 「005930」부터 바로 담아 드려요" in add and 'name="email"' in add
     for path in ("/me", "/me/settings", "/me/notices"):  # 프로필 쪽을 누르면 로그인 화면
         assert 'name="email"' in call(app, path, cookie=ck)[2] and "내 나무" not in call(app, path, cookie=ck)[2]
     assert "피드" in call(app, "/feed", cookie=ck)[2] and "읽기 팁" in call(app, "/learn", cookie=ck)[2]  # 구경은 그대로
-    assert "로그인 없이 둘러보기" in call(app, "/")[2]
+    assert "예시 종목" in call(app, "/")[2] and "로그인 없이 둘러보기" in call(app, "/login")[2]  # 처음 온 사람은 둘러보기부터 (10/16)
+    assert 'name="email"' in call(app, "/?c=abc123")[2]  # 초대 링크는 로그인 화면 그대로
 
 
 def test_mark_uses_group_color_not_logo():
@@ -1346,7 +1347,7 @@ def test_tidy_drops_old_views_and_news_and_hot_queries_use_indexes():
     con.execute("insert into users (id, email, created_at) values (1, 'a@b.c', '2026-01-01')")
     con.executemany("insert into views (user_id, page, ticker, at) values (1, 'note', '005930', ?)", [("2026-03-01T10:00",), ("2026-10-01T10:00",)])
     con.executemany("insert into news (url, ticker, date, press, title) values (?, '005930', ?, '삼성전자 뉴스룸', 't')", [("u1", "2026-07-01"), ("u2", "2026-10-01")])
-    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1, "policy_news": 0}
+    assert db.tidy(con, date(2026, 10, 11)) == {"views": 1, "news": 1, "policy_news": 0, "visits": 0}
     assert con.execute("select at from views").fetchall() == [("2026-10-01T10:00",)] and con.execute("select url from news").fetchall() == [("u2",)]
     for q in ("select count(*) from views where page = 'note' and ticker = '005930' and at >= '2026-10-05'", "select count(*) from follows where followee_id = 1 and ok = 1",
               "select * from highlights where user_id = 1 and page = '/n/005930'", "select * from news where ticker = '005930' and date >= '2026-10-01'",
@@ -1857,3 +1858,66 @@ def test_government_news_matched_to_my_industry(monkeypatch):
     assert [g["label"] for g in other["gov"]] == ["시장"]
     assert morning.build(con, ["000660"], date(2026, 10, 16))["gov"] == []  # 지난 것은 다시 올리지 않는다 — 날마다 바뀐다
     assert db.tidy(con, date(2027, 1, 1))["policy_news"] == 2
+
+
+def test_guest_first_remembers_wanted_stock_and_insights_count_real_visits(monkeypatch):
+    """처음 온 사람은 둘러보기 → 담으려 하면 가입 화면(담으려던 종목을 기억) → 가입하고 처음 「내 종목」에서 담긴다.
+    방문·가입은 바깥(Caddy)을 거친 요청만 적고, 운영자만 인사이트를 본다 (사용자 10/16)."""
+    app, con = _app()
+    monkeypatch.setattr(sources, "env", lambda: {"DEMO": "1", "ADMIN_EMAILS": "boss@x.y"})
+
+    def hit(path, method="GET", form="", cookie="", ua="Mozilla/5.0", ref=""):
+        p, _, q = path.partition("?")
+        env = {"REQUEST_METHOD": method, "PATH_INFO": p, "QUERY_STRING": q, "HTTP_COOKIE": cookie, "CONTENT_TYPE": "application/x-www-form-urlencoded",
+               "CONTENT_LENGTH": str(len(form.encode())), "wsgi.input": io.BytesIO(form.encode()), "HTTP_X_FORWARDED_FOR": "1.2.3.4",
+               "HTTP_USER_AGENT": ua, "HTTP_REFERER": ref}
+        got = {}
+        body = b"".join(app(env, lambda s, h: got.update(status=s, headers=h)))
+        return got["status"], got["headers"], body.decode()
+
+    def jar(headers, ck=None):
+        ck = dict(ck or {})
+        for k, v in headers:
+            if k == "Set-Cookie":
+                name, _, val = v.split(";")[0].partition("=")
+                ck[name] = val
+        return ck
+
+    s, h, page = hit("/", ref="https://www.instagram.com/p/1")
+    ck = jar(h)
+    assert s.startswith("200") and "예시 종목" in page and 'id="guest-gate"' in page and set(ck) >= {"s", "g"}  # 담기 등을 누르면 흐린 덮개
+    cookie = lambda: "; ".join(f"{k}={v}" for k, v in ck.items() if v)  # noqa: E731
+    hit("/feed", cookie=cookie())  # 같은 날 두 번째 화면 — 들어옴은 한 번만
+    s, h, page = hit("/add", "POST", "q=" + quote("삼성전자"), cookie=cookie())
+    assert "가입하면 「삼성전자」부터 바로 담아 드려요" in page and 'name="email"' in page
+    ck = jar(h, ck)
+    assert unquote(ck["want"]) == "삼성전자"
+    s, h, _ = hit("/auth?t=" + web.login_token("new@x.y", SECRET, app.clock()), cookie=cookie())
+    ck = jar(h, ck)
+    uid = con.execute("select id from users where email = 'new@x.y'").fetchone()[0]
+    con.execute("update users set nickname = '새사람', rules_at = 'x' where id = ?", (uid,))
+    con.commit()
+    s, h, _ = hit("/", cookie=cookie())  # 가입하고 처음 연 「내 종목」 — 담으려던 종목이 담기고 기억은 지운다
+    assert s.startswith("303") and con.execute("select ticker from holdings where user_id = ?", (uid,)).fetchall() == [("005930",)]
+    assert jar(h, ck)["want"] == ""
+    rows = con.execute("select kind, uid, path, ref from visits order by id").fetchall()
+    assert [r[0] for r in rows] == ["open", "gate", "signup"] and {r[1] for r in rows} == {uid}  # 가입 전 손님 기록이 이 사람에게 붙는다
+    assert rows[0][3] == "instagram.com" and rows[1][2] == "담기 삼성전자"
+    n = len(rows)
+    hit("/", ua="facebookexternalhit/1.1")  # 링크 미리보기 로봇은 세지 않는다
+    call(app, "/")  # Caddy 를 거치지 않은 요청(올린 뒤 확인·테스트)도
+    assert con.execute("select count(*) from visits").fetchone()[0] == n
+
+    assert call(app, "/admin", cookie=f"s={web.sign(str(uid), SECRET)}")[0].startswith("404") and call(app, "/admin")[0].startswith("404")  # 운영자가 아니면 없는 화면
+    assert "운영자 인사이트" not in call(app, "/", cookie=f"s={web.sign(str(uid), SECRET)}")[2]
+    g = call(app, "/login?want=" + quote("현대차"))
+    assert "가입하면 「현대차」부터 바로 담아 드려요" in g[2] and "want=" in g[1]["Set-Cookie"]
+    assert 'id="guest-gate"' not in hit("/login", cookie=cookie())[2]  # 가입 화면엔 덮개가 없다 — 있으면 이메일을 못 넣는다
+    con.execute("insert into users (email, created_at, nickname, rules_at) values ('boss@x.y', '2026-10-01', '운영자', 'x')")
+    con.commit()
+    boss = f"s={web.sign(str(con.execute("select id from users where email = 'boss@x.y'").fetchone()[0]), SECRET)}"
+    assert 'href="/admin"' in call(app, "/", cookie=boss)[2]  # 운영자 계정이면 홈 맨 아래에 인사이트로 가는 길
+    board = call(app, "/admin?d=7", cookie=boss)[2]
+    assert "new@x.y" in board and "instagram.com" in board and "담기 삼성전자" in board and "(운영자)" in board
+    one = call(app, f"/admin/u/{uid}", cookie=boss)[2]
+    assert "새사람" in one and "삼성전자" in one and "가입 화면" in one
