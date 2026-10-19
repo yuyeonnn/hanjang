@@ -94,9 +94,9 @@ class LearnPages:
         word, line, slug = learn.TERMS[today.toordinal() % len(learn.TERMS)]
         more = f' <a href="/learn/{slug}" class="text-[13px] font-semibold text-primary/70 hover:underline whitespace-nowrap">더 읽기 →</a>' if slug else ""
         # 글 머리의 한 줄 요약과 같은 모양 — 위아래 두 줄(실선+점선) 사이에 가운데 굵은 글 (사용자 10/19)
-        return (f'<aside class="mt-space-lg text-center">{RULE}<div class="py-space-lg px-space-md flex flex-col items-center gap-1.5">'
-                '<span class="flex items-center gap-1 text-[12px] font-semibold text-primary"><span class="material-symbols-outlined text-[16px]">lightbulb</span>오늘의 읽기 팁</span>'
-                f'<p class="font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(word)} — {e(line)}{more}</p></div>{RULE_FLIP}</aside>')  # fmt: skip
+        return (f'<aside class="mt-space-lg text-center">{RULE}<div class="py-2.5 px-space-md flex flex-col items-center gap-0.5">'
+                '<span class="flex items-center gap-1 text-[11px] font-semibold text-primary/80"><span class="material-symbols-outlined text-[14px]">lightbulb</span>오늘의 읽기 팁</span>'
+                f'<p class="font-bold text-[16px] leading-[25px] text-primary">{e(word)} — {e(line)}{more}</p></div>{RULE_FLIP}</aside>')  # fmt: skip
 
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
