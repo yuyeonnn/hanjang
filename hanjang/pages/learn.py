@@ -1,13 +1,18 @@
 """읽기 팁·공개 문서(처리방침·계산 방법·이용 규칙)"""
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from hanjang import quiz
 
 from hanjang import gurus, holders, learn, notes, policy, sources, tree
 from hanjang.charts import index_chart, issuer_name, loss_bars, pie, rate_chart, rate_ladder
 from hanjang.notepage import figure
 from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, guru_face, kdate, logo, page, top_bar
+
+
+# 읽기 팁 분류마다 아이콘(Material Symbols) — 로드맵의 동그라미에
+CAT_ICON = {"처음 시작": "flag", "상품 이해": "inventory_2", "회사 읽기": "apartment", "공시 읽기": "description", "업종별로 읽기": "factory",
+            "시장 일정": "event", "미국 주식": "public", "생각 정리": "psychology", "책에서 배우기": "menu_book"}  # fmt: skip
 
 
 class LearnPages:
@@ -59,7 +64,11 @@ class LearnPages:
     def today_big(self, today: date) -> str:
         """읽기 팁 맨 위 — 오늘의 큰손. 미국 보유 신고(13F)가 있는 투자자·기관을 하루에 한 곳씩 돌린다(사용자 10/19: 매일 들어올 까닭).
         이름·사진·종목 수·금액·기준일 + 큰 5종목 파이 + 전체 보기. 따라 사고팔라는 뜻이 아니라고 함께 적는다."""
-        keys = [k for (k,) in self.con.execute("select distinct guru from guru_holdings order by guru") if k in gurus.GURUS or k in holders.BIG]
+        # 13F 는 분기 끝 45일 안에 나온다 — 가장 최근 신고도 길어야 넉 달 반 전. 200일이 넘은 곳은 신고가 끊긴 것이라 돌리지 않는다
+        # (2026-10-19 확인: 마이클 버리의 사이언은 2025-09-30 기준이 마지막 · 퍼싱 스퀘어는 2026-06-30 분을 다른 회사 신고로 넘겼다고 13F-NT 만 냈다)
+        fresh = (today - timedelta(days=200)).isoformat()
+        keys = [k for (k,) in self.con.execute("select guru from guru_holdings group by guru having max(period) >= ? order by guru", (fresh,))
+                if k in gurus.GURUS or k in holders.BIG]
         if not keys:
             return ""
         key = keys[today.toordinal() % len(keys)]
@@ -71,15 +80,14 @@ class LearnPages:
             name, intro = holders.BIG[key][0], holders.BIG[key][2]
             face, href = logo(name, self.BIG_HOME.get(key), "w-14 h-14"), f"/learn/big/{key}"
         total = sum(r[1] for r in rows)
-        return ('<section class="mt-space-lg rounded-2xl border border-surface-container-high px-space-md py-space-md">'
+        return ('<section class="mt-space-lg">'
                 '<div class="flex items-center gap-1.5 text-primary font-label-regular text-label-regular font-bold"><span class="material-symbols-outlined text-[18px]">travel_explore</span>오늘의 큰손</div>'
                 f'<a href="{href}" class="mt-space-sm flex items-center gap-space-md group">{face}<div class="flex flex-col min-w-0">'
                 f'<span class="font-headline-md text-headline-md text-on-surface group-hover:underline">{e(name)}</span>'
                 f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(rows[0][2])} 기준</span></div></a>'
                 f'<p class="mt-space-sm font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
                 + pie([(issuer_name(r[0], r[3]), r[1]) for r in rows])
-                + f'<div class="mt-space-sm flex items-center justify-between gap-2"><span class="text-[11px] text-outline">미국 보유 신고(SEC 13F) · 따라 사고팔라는 뜻이 아니에요 · 내일은 다른 곳</span>'
-                f'<a href="{href}" class="shrink-0 font-label-regular text-label-regular text-primary font-semibold hover:underline">전체 보기 →</a></div></section>')  # fmt: skip
+                + f'<div class="mt-space-sm flex justify-end"><a href="{href}" class="font-label-regular text-label-regular text-primary font-semibold hover:underline">전체 보기 →</a></div></section>')  # fmt: skip
 
     def learn_top(self, uid: int, stamps: set) -> str:
         """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) (사용자 10/12)."""
@@ -142,15 +150,15 @@ class LearnPages:
         def stage(i: int, c: str) -> str:
             arts = by[c]
             n = sum(x["slug"] in stamps for x in arts)
-            dot = ('<span class="w-8 h-8 shrink-0 rounded-full bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">check</span></span>' if i < cur else
-                   f'<span class="w-8 h-8 shrink-0 rounded-full border-2 border-primary bg-surface-container-lowest text-primary font-bold text-[14px] flex items-center justify-center">{i + 1}</span>' if i == cur else
-                   f'<span class="w-8 h-8 shrink-0 rounded-full border border-outline-variant bg-surface-container-lowest text-outline text-[13px] flex items-center justify-center">{i + 1}</span>')  # fmt: skip
-            tag = ("깼어요" if i < cur else "지금 단계" if i == cur else "")
+            icon = CAT_ICON.get(c, "menu_book")
+            dot = (f'<span class="w-8 h-8 shrink-0 rounded-full {"bg-primary text-on-primary" if i <= cur else "border border-outline-variant bg-surface-container-lowest text-outline"} flex items-center justify-center">'
+                   f'<span class="material-symbols-outlined text-[18px]" style="font-variation-settings:\'FILL\' 1">{"check" if i < cur else icon}</span></span>')  # fmt: skip
+            tag = ("다 읽었어요" if i < cur else "지금 읽는 곳" if i == cur else "")
             bar = (f'<span class="mt-1.5 block h-1.5 w-full max-w-[220px] rounded-full bg-surface-container-high overflow-hidden"><span class="block h-full bg-primary rounded-full" style="width:{n / len(arts) * 100:.0f}%"></span></span>'
                    if i == cur else "")  # fmt: skip
             return (f'<details class="relative" style="padding-left:44px"{" open" if i == cur else ""}>'
                     f'<summary class="cursor-pointer py-3 flex items-center gap-3" style="list-style:none;margin-left:-44px">{dot}'
-                    f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-center gap-2"><span class="text-[12px] text-outline">{i + 1}단계</span>'
+                    f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-center gap-2">'
                     + (f'<span class="px-1.5 py-px rounded text-[10px] font-semibold {"bg-primary text-on-primary" if i == cur else "bg-surface-container-high text-on-surface-variant"}">{tag}</span>' if tag else "")
                     + f'</span><span class="font-headline-sm text-headline-sm {"text-on-surface" if i <= cur else "text-on-surface-variant"}">{e(c)}</span>{bar}</span>'
                     f'<span class="text-[12px] text-on-surface-variant shrink-0">{n} / {len(arts)}</span></summary>'
@@ -159,10 +167,10 @@ class LearnPages:
                               f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div>{mark(x["slug"])}</a>' for x in arts)
                     + "</div></details>")  # fmt: skip
 
-        now = (f"{cur + 1}단계 · {learn.CATS[cur]}" if cur < len(learn.CATS) else "모든 단계를 깼어요")
+        now = (f"지금 「{learn.CATS[cur]}」를 읽고 있어요 — 글마다 세 문제를 맞히면 다음으로" if cur < len(learn.CATS) else "모든 글에 도장을 받았어요")
         groups = ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><style>details>summary::-webkit-details-marker{display:none}</style>'
                   f'<div class="flex items-end justify-between gap-2"><div class="flex flex-col"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">나의 로드맵</h2>'
-                  f'<span class="mt-2 font-body-compact text-body-compact text-on-surface-variant">지금 {e(now)} — 단계의 글마다 세 문제를 맞히면 다음 단계로</span></div>'
+                  f'<span class="mt-2 font-body-compact text-body-compact text-on-surface-variant">{e(now)}</span></div>'
                   f'<span class="text-[12px] text-on-surface-variant shrink-0">도장 {got_all} / {n_all}</span></div>'
                   '<div class="relative mt-space-sm"><span class="absolute bg-surface-container-high" style="left:15px;top:20px;bottom:20px;width:2px"></span>'
                   + "".join(stage(i, c) for i, c in enumerate(learn.CATS)) + "</div></section>")  # fmt: skip

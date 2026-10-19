@@ -5,8 +5,18 @@ import re
 from datetime import date
 
 from hanjang import learn, notes, sources
-from hanjang.notepage import AHEAD_SHORT, CHIP, EVENT_EXPLAIN, EVENT_SHORT, FLAG, TIPS, TIP_DEFAULT, TONE_TAG, clean_title, short_name
+from hanjang.notepage import AHEAD_SHORT, CHIP, EVENT_SHORT, FLAG, TIPS, TIP_DEFAULT, TONE_TAG, clean_title, short_name
 from hanjang.ui import bottom_nav, e, page, top_bar
+
+
+def line(d: str, who: str, what: str, href: str, label: str, chip: str, when: str = "") -> str:
+    """이 달의 일정 한 줄 — 날짜 · 누구 **무엇** · 원문 · 꼬리표. 공시·회사채·공모주·시장 일정 모두 같은 모양 (사용자 10/19: 내 종목 일정 줄처럼 다)."""
+    dd = date.fromisoformat(d)
+    when = when or f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})'
+    return (f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
+            f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{when}</span> · {e(who)} <b>{e(what)}</b></span>'
+            f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(href)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a>'
+            f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></span></article>')  # fmt: skip
 
 
 class CalendarPages:
@@ -115,55 +125,28 @@ class CalendarPages:
             d, name, code, title, rno, dr, t, _, imp = rs[0]
             if not (dr or imp >= 3 or (code == "EARNINGS" and not re.match(r"판매|예비", title) and "예고" not in title)):
                 minor.add(len(items))  # 좋고 나쁨이 없는 보통 공시(판매 대수 알림·실적 발표 예고 등)
-            dd = date.fromisoformat(d)
             label, chip = TONE_TAG.get(dr or 0, TONE_TAG[0])
-            src = ("SEC 공시: " if "-" in rno else "DART 공시: ") + " · ".join(dict.fromkeys(re.sub(r"^\[[^\]]*\]", "", r[3]) + (f" {notes.won(r[7])} 규모" if r[7] else "") for r in rs))
             title = clean_title(title, code) + (f" 외 {len(rs) - 1}건" if len(rs) > 1 else "")
-            items.append((1, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1 transition-colors hover:bg-surface-container-low/40"><div class="flex items-center justify-between">'
-                         f'<span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · {e(name)} ({e(t)})</span>'
-                         f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></div>'
-                         f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(title)}</h3>'
-                         f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(EVENT_EXPLAIN.get(code, ""))}</p>'
-                         f'<div class="flex items-center gap-1.5 text-on-surface-variant font-citation-ref text-citation-ref pt-0.5"><span class="material-symbols-outlined {"text-tertiary" if dr == -1 else "text-primary"} text-[15px]">{"info" if dr == -1 else "verified"}</span><a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface">{e(src)}</a></div></article>'))  # fmt: skip
+            items.append((1, d, line(d, name, title, self.src(rno), label, chip)))
         soon = [(d, *x) for d in sorted(ahead) if d[:7] == f"{y}-{m:02d}" for x in ahead[d]]
-        items += [(0, d, f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
-                 f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{(dd := date.fromisoformat(d)).month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})</span> · {e(name)} <b>{e(what)}</b></span>'
-                 f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a><span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-primary/40 text-primary font-semibold">일정</span></span></article>')
-                  for d, name, _, what, rno in soon]  # fmt: skip
+        items += [(0, d, line(d, name, what, self.src(rno), "일정", "border border-primary/40 text-primary")) for d, name, _, what, rno in soon]
         for rno, pay, name, t, total, mats, uses, lead in bonds:  # 내 종목 회사채 — 공시와 같은 자리
             if pay[:7] != f"{y}-{m:02d}":
                 continue
-            dp = date.fromisoformat(pay)
-            say = "회사가 채권을 팔아 돈을 빌려요."
-            items.append((1, pay, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
-                          f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{dp.month}월 {dp.day}일 ({"월화수목금토일"[dp.weekday()]}) 납입 · {e(name)} ({e(t)})</span>'
-                          '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-semibold">회사채</span></div>'
-                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 회사채 {e(notes.won(total))}</h3>'
-                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(채무증권)</a></article>'))  # fmt: skip
+            items.append((1, pay, line(pay, name, f"회사채 {notes.won(total)} 납입", self.src(rno), "회사채", "bg-surface-container-high text-on-surface-variant")))
         for name, a, b, listed, price, total, lead, uses, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
             d = a if a[:7] == f"{y}-{m:02d}" else listed if listed and listed[:7] == f"{y}-{m:02d}" else None
             if not d:
                 continue
             da, db_ = date.fromisoformat(a), date.fromisoformat(b)
-            say = "새로 상장하려는 회사가 주식을 팔아 돈을 모아요."
             minor.add(len(items))  # 공모주는 한 달 수십 곳 — 목록에선 한 줄로 모은다
-            items.append((9, d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
-                          f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{da.month}월 {da.day}일 ~ {db_.month}월 {db_.day}일 청약 · 시장 전체</span>'
-                          '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-secondary/50 text-secondary font-semibold">공모주</span></div>'
-                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(name)} 공모주 청약</h3>'
-                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(say)}</p>'
-                          f'<a href="{e(self.src(rno))}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">출처: DART 증권신고서(지분증권)</a></article>', {x for x in (a, listed) if x}))  # fmt: skip
+            items.append((9, d, line(d, name, "공모주 청약", self.src(rno), "공모주", "border border-secondary/50 text-secondary",
+                                 f"{da.month}월 {da.day}일 ~ {db_.month}월 {db_.day}일"), {x for x in (a, listed) if x}))
         for d, kind, nat, what in macro:  # 시장 일정 — 내 종목 일정·공시 다음, 금리 → 물가 → 선거 → 고용
             if d[:7] != f"{y}-{m:02d}":
                 continue
-            dd, (who, url) = date.fromisoformat(d), sources.MACRO_SOURCE[nat + kind]
-            items.append((1 + sources.MACRO_RANK[kind], d, f'<article class="py-3.5 border-b border-surface-container-high flex flex-col gap-1">'
-                          f'<div class="flex items-center justify-between"><span class="font-label-micro text-label-micro text-on-surface-variant">{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]}) · 시장 전체</span>'
-                          '<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full border border-dashed border-outline-variant text-on-surface-variant font-semibold">시장 일정</span></div>'
-                          f'<h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold">{e(what)}</h3>'
-                          f'<p class="font-body-compact text-body-compact text-on-surface-variant leading-relaxed">{e(sources.MACRO_EXPLAIN[(kind, nat)])}</p>'
-                          f'<a href="{e(url)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface self-start font-citation-ref text-citation-ref text-on-surface-variant pt-0.5">일정 출처: {e(who)}</a></article>'))  # fmt: skip
+            _, url = sources.MACRO_SOURCE[nat + kind]
+            items.append((1 + sources.MACRO_RANK[kind], d, line(d, "시장 전체", what, url, "시장 일정", "border border-dashed border-outline-variant text-on-surface-variant")))
         ipo_n = len(minor & {i for i, x in enumerate(items) if x[0] == 9})
         items = [(*x[:3], x[3] if len(x) > 3 else {x[1]}, i in minor) for i, x in enumerate(items)]
         items.sort(key=lambda x: (x[0], x[1]))  # 관련 높은 순 — 내 종목 일정 → 내 종목 공시 → 시장 일정

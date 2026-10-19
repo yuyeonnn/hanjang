@@ -540,12 +540,12 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
     assert html_.count("외 1건") == 2 and "계약 2건" in html_  # 두 건이 한 줄로 (고른 날 일정 · 이 달의 일정에 한 번씩)
     assert "한국 금리 결정" in html_ and "미국 금리 결정" in html_ and "관련 높은 순" in html_ and "🇰🇷" not in html_
-    assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>")  # 내 종목 공시가 시장 일정보다 위
+    assert html_.index("외 1건") < html_.index("한국 금리 결정</b>")  # 내 종목 공시가 시장 일정보다 위 — 이 달의 일정은 모두 한 줄(10/19)
     con.execute("insert into ipos values ('c1', 'r9', '엘리스그룹', '2026-10-07', '2026-10-08', '2026-10-13', '2026-10-16', 70400, 156428800000, '미래에셋증권', '시설자금 1,549억원')")
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
     assert html_.count("엘리스그룹 공모주 청약</span>") == 1 and "엘리스그룹 공모주 상장" in html_  # 청약 첫날 · 상장일
-    assert "새로 상장하려는 회사가 주식을 팔아 돈을 모아요.</p>" in html_ and "70,400원" not in html_  # 한 줄, 숫자 없이
-    assert html_.index("외 1건") < html_.index("한국 금리 결정</h3>") < html_.index("공모주 청약</h3>")
+    assert "엘리스그룹 <b>공모주 청약</b>" in html_ and "70,400원" not in html_  # 한 줄, 숫자 없이
+    assert html_.index("외 1건") < html_.index("한국 금리 결정</b>") < html_.index("공모주 청약</b>")
     assert "line-clamp-2" not in html_  # 칸 안 칩은 한 줄
     assert sources.macro_events("2026-11-01", "2026-11-30")[0] == ("2026-11-03", "물가", "KR", "한국 소비자물가 발표")
 
@@ -631,7 +631,7 @@ def test_calendar_shows_my_companys_bond_on_pay_day():
     (uid,) = con.execute("select id from users").fetchone()
     html_ = app.calendar(uid, "2026-10", today=date(2026, 10, 9))
     assert html_.count("삼성전자 회사채 1,500억원</span>") == 1  # 두 회차가 칩 하나로
-    assert "<p class=\"font-body-compact text-body-compact text-on-surface-variant leading-relaxed\">회사가 채권을 팔아 돈을 빌려요.</p>" in html_  # 한 줄, 숫자 없이 (사용자 10/9)
+    assert "삼성전자 <b>회사채 1,500억원 납입</b>" in html_  # 이 달의 일정은 한 줄 (사용자 10/19)
     assert '<a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=r1"' in html_ and 'noopener"><article' not in html_  # 카드는 글자 — 출처 줄만 원문 링크
 
 
@@ -1703,7 +1703,7 @@ def test_learn_quiz_daily_question_and_path_stamps():
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
-    assert top.count('aria-label="도장 받음"') == 2 and "도장 2 / " in top and "나의 로드맵" in top and "지금 1단계" in top and "1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
+    assert top.count('aria-label="도장 받음"') == 2 and "도장 2 / " in top and "나의 로드맵" in top and "지금 읽는 곳" in top and "1단계" not in top and "지금 단계" not in top and "1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
 
 
 def test_web_main_block_only_uses_names_that_exist():

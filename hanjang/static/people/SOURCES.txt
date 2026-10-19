@@ -10,3 +10,4 @@ soros|Aris Oikonomou / European Commission|CC BY 4.0|https://commons.wikimedia.o
 graham|Unknown author|Public domain|https://commons.wikimedia.org/wiki/File:Benjamin_Graham_(1894-1976)_portrait_on_23_March_1950.jpg
 bogle|Bill Cramer|CC BY-SA 4.0|https://commons.wikimedia.org/wiki/File:Photo_of_a_John_C._Bogle_By_Bill_Cramer.jpg
 marks|kellywritershouse|CC BY 2.0|https://commons.wikimedia.org/wiki/File:Howard_Marks_2.17.12_(cropped).jpg
+lilu|Joi Ito|CC BY 2.0 (얼굴 쪽만 잘라냄)|https://commons.wikimedia.org/wiki/File:Li_Lu,_Davis_Guggenheim_and_Lisa_Shue.jpg
