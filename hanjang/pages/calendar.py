@@ -15,7 +15,7 @@ def line(d: str, who: str, what: str, href: str, label: str, chip: str, when: st
     when = when or f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})'
     return (f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
             f'<span class="font-body-compact text-body-compact text-on-surface"><span class="text-on-surface-variant">{when}</span> · {e(who)} <b>{e(what)}</b></span>'
-            f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(href)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant hover:text-on-surface font-citation-ref text-citation-ref text-on-surface-variant">원문</a>'
+            f'<span class="flex items-center gap-2 flex-shrink-0"><a href="{e(href)}" target="_blank" rel="noopener" class="underline underline-offset-2 decoration-outline-variant/60 hover:text-on-surface text-[10px] text-outline">원문</a>'
             f'<span class="font-label-micro text-label-micro px-2 py-0.5 rounded-full {chip} font-semibold">{label}</span></span></article>')  # fmt: skip
 
 

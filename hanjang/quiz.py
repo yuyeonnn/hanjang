@@ -7,7 +7,6 @@ QUIZ[slug] = [(물음, [보기 셋], 정답 번호(0부터), 풀이)]. 숫자를
 
 import sqlite3
 import zlib
-from datetime import date
 from html import escape as e
 
 
@@ -138,12 +137,6 @@ QUIZ.update(learn_more.QUIZ)  # 둘째 묶음 21편의 문제
 def questions(slug: str) -> list[tuple]:
     """그 글의 세 문제 — 모두 그 글에 적힌 내용에서(내 종목 숫자로 내는 문제는 뺐다: 공시 숫자를 외우고 있어야 풀 수 있었다, 사용자 10/12)."""
     return list(QUIZ.get(slug, []))
-
-
-def daily(today: date) -> tuple[str, tuple]:
-    """오늘의 한 문제 — (도장 열쇠 「daily:날짜」, 문제). 모든 글의 문제를 날마다 차례로."""
-    pool = [q for qs in QUIZ.values() for q in qs]
-    return f"daily:{today.isoformat()}", pool[today.toordinal() * 7 % len(pool)]
 
 
 def done(con: sqlite3.Connection, uid: int) -> set[str]:

@@ -1690,9 +1690,9 @@ def test_learn_quiz_daily_question_and_path_stamps():
     app, con = _app()
     ck = _login(app)
     (uid,) = con.execute("select id from users").fetchone()
-    assert quiz.questions("statements") == quiz.QUIZ["statements"] and quiz.daily(date(2026, 10, 12))[0] == "daily:2026-10-12"
+    assert quiz.questions("statements") == quiz.QUIZ["statements"]
     top = call(app, "/learn", cookie=ck)[2]
-    assert "오늘의 한 문제" in top and "배움 길" not in top and "도장 받음" not in top and "아직 도장 없음" in top and "읽음\"" not in top
+    assert "오늘의 읽기 팁" in top and "오늘의 한 문제" not in top and "배움 길" not in top and "도장 받음" not in top and "아직 도장 없음" in top and "읽음\"" not in top
     art = call(app, "/learn/statements", cookie=ck)[2]
     assert "세 문제로 확인하기" in art and "분기 실적은 보통 무엇과 견줘 볼까요?" in art and "내 종목 삼성전자" not in art
     assert 'id="stamp"' in art and "display:none" in art[art.index('id="stamp"'):art.index('id="stamp"') + 400]  # 도장은 숨겨져 있다가

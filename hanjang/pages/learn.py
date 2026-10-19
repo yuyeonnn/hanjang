@@ -89,10 +89,13 @@ class LearnPages:
                 + pie([(issuer_name(r[0], r[3]), r[1]) for r in rows])
                 + f'<div class="mt-space-sm flex justify-end"><a href="{href}" class="font-label-regular text-label-regular text-primary font-semibold hover:underline">전체 보기 →</a></div></section>')  # fmt: skip
 
-    def learn_top(self, uid: int, stamps: set) -> str:
-        """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) (사용자 10/12)."""
-        key, q = quiz.daily(date.today())
-        return quiz.block(key, [q], key in stamps, "오늘의 한 문제", "맞혔어요. 내일 새 문제가 나와요.") + quiz.JS
+    def learn_top(self, today: date) -> str:
+        """읽기 팁 맨 위 — 오늘의 읽기 팁: 어려운 말 하나를 한 줄로, 날마다 차례로 (사용자 10/19: 「오늘의 한 문제」 대신)."""
+        word, line, slug = learn.TERMS[today.toordinal() % len(learn.TERMS)]
+        more = f'<a href="/learn/{slug}" class="mt-1 self-start font-label-regular text-label-regular text-primary font-semibold hover:underline">더 읽기 →</a>' if slug else ""
+        return ('<section class="mt-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5">'
+                '<span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>오늘의 읽기 팁</span>'
+                f'<p class="font-body-reading text-body-reading text-on-surface"><b>{e(word)}</b> — {e(line)}</p>{more}</section>')  # fmt: skip
 
     def learn(self, uid: int, slug: str):
         wrap = (top_bar(self.initial(uid)) + '<main class="flex flex-col relative w-full max-w-[480px] lg:max-w-[760px] mx-auto pt-14 pb-24 lg:pt-20 lg:pb-16 bg-surface min-h-screen"><div class="flex flex-col w-full px-margin pb-6">')
@@ -176,5 +179,5 @@ class LearnPages:
                   + "".join(stage(i, c) for i, c in enumerate(learn.CATS)) + "</div></section>")  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>'
-                 + self.cached(f"today-big:{date.today()}", lambda: self.today_big(date.today())) + self.learn_top(uid, stamps) + groups + self.cached("learn", lambda: self.guru_list() + self.big_list()) + end)  # fmt: skip
+                 + self.cached(f"today-big:{date.today()}", lambda: self.today_big(date.today())) + self.learn_top(date.today()) + groups + self.cached("learn", lambda: self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
