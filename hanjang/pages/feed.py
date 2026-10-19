@@ -13,14 +13,15 @@ class FeedPages:
         """기사 사진 — 처음 고를 때 사건 종류에 맞는 주제(증자는 돈, 계약은 계약서…)로 고르고 저장한다.
         그 뒤로 피드와 기사 화면이 같은 사진을 쓴다 (사용자 10/9: 눌렀더니 사진이 바뀌었다)."""
         got = self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()
-        if got and got[0]:
+        if got and got[0] and not (photos and got[0] in photos.used):
             if photos:
                 photos.used.add(got[0])
             return got[0]
+        # 처음이거나, 이 화면에 이미 나온 사진이면 새로 고르고 저장한다 — 기사마다 따로 고르던 때 같은 계약서 사진이 나란히 붙었다 (사용자 10/19)
         img = (photos or Photos()).pick(kind, ind, name)
-        self.con.execute("update articles set photo = ? where id = ? and photo is null", (img, aid))
+        self.con.execute("update articles set photo = ? where id = ?", (img, aid))
         self.con.commit()
-        return self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()[0] or img
+        return img
 
     def latest(self, uid: int, photos: "Photos") -> str:
         """최근 소식 — 사건마다 쓴 기사. 최신 날짜 먼저(내 종목이라고 옛 기사가 맨 위에 붙박이지 않게 — 사용자 10/11), 같은 날 안에선 내 종목 먼저.

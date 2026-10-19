@@ -675,6 +675,13 @@ def test_feed_and_article_show_the_same_photo():
     (photo,) = con.execute("select photo from articles where id = ?", (aid,)).fetchone()
     assert photo and re.search(r"/(money|chart)\d*\.jpg$", photo)  # 증자 → 돈·차트 주제
     assert photo in call(app, f"/a/{aid}", cookie=ck)[2]
+    con.execute("insert into articles (ref, ticker, date, kind, body, made_at, photo) values ('r2', '005930', '2026-10-02', 'RIGHTS_ISSUE', ?, 'x', ?)",
+                (json.dumps({"title": "또 새 주식", "paragraphs": [{"text": "돈을 또 모아요.", "refs": []}], "links": {}}, ensure_ascii=False), photo))
+    con.commit()
+    feed = call(app, "/feed", cookie=ck)[2]  # 따로 고를 때 같은 사진을 받아 둔 두 기사 — 한 화면에 나란히 같은 사진을 쓰지 않는다
+    shots = [p for (p,) in con.execute("select photo from articles order by id")]
+    assert len(set(shots)) == 2 and all(feed.count(p) == 1 for p in shots)
+    assert shots[1] in call(app, f"/a/{con.execute("select id from articles where ref = 'r2'").fetchone()[0]}", cookie=ck)[2]  # 바꾼 사진은 기사 화면에도
 
 
 def test_regram_cards_note_like_my_stock_and_article_like_feed_row():
