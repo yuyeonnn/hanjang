@@ -57,7 +57,7 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
         b = a + pct / shown * 2 * math.pi
         x1, y1, x2, y2 = 50 + 48 * math.cos(a), 50 + 48 * math.sin(a), 50 + 48 * math.cos(b), 50 + 48 * math.sin(b)
         slices.append(f'<circle cx="50" cy="50" r="48" fill="{col}"/>' if pct >= shown - 0.01 else
-                      f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#fcf8fb" stroke-width="1"/>')  # fmt: skip
+                      f'<path d="M50 50 L{x1:.2f} {y1:.2f} A48 48 0 {1 if b - a > math.pi else 0} 1 {x2:.2f} {y2:.2f} Z" fill="{col}" stroke="#ffffff" stroke-width="1"/>')  # fmt: skip
         m = (a + b) / 2
         sides[math.cos(m) >= 0].append((math.sin(m), k, pct, col, m))
         a = b

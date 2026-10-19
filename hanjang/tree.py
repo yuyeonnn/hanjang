@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from html import escape as e
 
 STAGES = ((0, "씨앗"), (1, "새싹"), (4, "어린 나무"), (15, "자라는 나무"), (40, "잎이 풍성한 나무"), (90, "꽃이 핀 나무"), (150, "분홍빛이 드는 나무"))
-LEVEL = ("#eae7ea", "#bceddc", "#86c5a4", "#3f7d5c", "#154539")  # 잔디 — 안 온 날 → 많이 본 날
+LEVEL = ("#ebebeb", "#bceddc", "#86c5a4", "#3f7d5c", "#154539")  # 잔디 — 안 온 날 → 많이 본 날
 
 
 def stage(n: int) -> tuple[str, int | None]:

@@ -40,7 +40,7 @@ BOTS = re.compile(r"bot|crawl|spider|slurp|preview|scrap|facebookexternalhit|cur
 # 담으려던 종목은 가입 화면 주소(?want=)로 넘겨 기억해 둔다. 서버 쪽 막기(route 의 is_demo)는 스크립트가 없을 때를 위해 그대로 둔다
 GUEST_GATE = (
     '<div id="guest-gate" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;padding:24px;cursor:pointer;'
-    'background:rgba(252,248,251,.55);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)" role="dialog" aria-label="가입 안내">'
+    'background:rgba(255,255,255,.55);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)" role="dialog" aria-label="가입 안내">'
     '<div style="max-width:320px;width:100%;background:#fff;border-radius:20px;padding:26px 20px 18px;text-align:center;box-shadow:0 12px 40px rgba(21,69,57,.16)">'
     '<p style="font-weight:700;font-size:19px;color:#154539;margin:0">가입하고 이용하세요</p>'
     '<p id="guest-gate-why" style="margin:8px 0 0;font-size:14px;line-height:22px;color:#434944">내 종목을 담으면 공시·재무·소식을 쉬운 글로 매일 읽어 드려요.</p>'

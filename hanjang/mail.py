@@ -107,9 +107,9 @@ def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
 
 # 화면과 같은 색 (docs/design.md 「Warm Editorial Finance」) — 메일 앱은 CSS 파일·클래스·웹 글꼴을 못 읽어
 # 인라인 스타일과 기기 기본 글꼴 하나로만 쓴다 (글꼴을 섞으면 앱마다 다르게 바뀌어 더 어수선해진다)
-INK, SUB, MUTE, LINE, BG, GREEN, MINT, PALE, RED = ("#1b1b1d", "#404945", "#717975", "#c0c8c4", "#f6f3f5",
+INK, SUB, MUTE, LINE, BG, GREEN, MINT, PALE, RED = ("#1b1b1d", "#404945", "#717975", "#c0c8c4", "#f5f5f5",
                                                    "#154539", "#a0d1c0", "#e3f4ec", "#741f11")  # fmt: skip
-TINT = {1: ("#aef1c9", "#095134"), -1: ("#ffdad3", "#802919"), 0: ("#f0edef", "#404945")}
+TINT = {1: ("#aef1c9", "#095134"), -1: ("#ffdad3", "#802919"), 0: ("#f0f0f0", "#404945")}
 FONT = "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','맑은 고딕',sans-serif"
 ICON = {"회사 사정": "🏢", "요즘 무슨": "📌", "임원·큰손": "👥"}
 

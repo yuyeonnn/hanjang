@@ -9,7 +9,7 @@ from hanjang import tree
 # 인터넷이 끊겼을 때만 미리 받아 둔 「연결이 끊겼어요」 화면을 보여 준다 (흰 화면·브라우저 오류 대신 — 앱 심사가 보는 것)
 MANIFEST = json.dumps({
     "name": "한장 — 한눈에 읽는 장", "short_name": "한장", "lang": "ko", "start_url": "/", "scope": "/", "id": "/",
-    "display": "standalone", "background_color": "#fcf8fb", "theme_color": "#154539",
+    "display": "standalone", "background_color": "#ffffff", "theme_color": "#154539",
     "description": "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다.", "categories": ["finance", "education"],
     "icons": [{"src": "/static/icon-192.png?v=5", "sizes": "192x192", "type": "image/png"},
               {"src": "/static/icon-512.png?v=5", "sizes": "512x512", "type": "image/png"},
@@ -20,7 +20,7 @@ SW = ("const C='hanjang-3';self.addEventListener('install',ev=>{ev.waitUntil(cac
       "self.addEventListener('fetch',ev=>{if(ev.request.mode==='navigate')ev.respondWith(fetch(ev.request).catch(()=>caches.match('/offline')));else if(ev.request.url.includes('/static/tree-rain'))ev.respondWith(fetch(ev.request).catch(()=>caches.match(ev.request)));});")
 OFFLINE = ('<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
            '<title>연결이 끊겼어요 · 한장</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;'
-           'background:#fcf8fb;color:#1b1b1d;font-family:system-ui,sans-serif;word-break:keep-all;text-align:center}main{padding:24px;max-width:360px}'
+           'background:#ffffff;color:#1b1b1d;font-family:system-ui,sans-serif;word-break:keep-all;text-align:center}main{padding:24px;max-width:360px}'
            'h1{font-size:20px;color:#154539}p{color:#404945;line-height:1.7}button{margin-top:12px;padding:12px 20px;border:0;border-radius:8px;background:#154539;color:#fff;font-size:15px}</style></head>'
            '<body><main>' + tree.line("rain") + '<h1>인터넷 연결이 끊겼어요</h1><p>한장은 매일 새로 쓴 노트를 보여 드려서, 연결이 돌아오면 바로 이어서 볼 수 있어요.</p>'
            '<button onclick="location.reload()">다시 열기</button></main></body></html>')  # fmt: skip
