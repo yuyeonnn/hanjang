@@ -4,10 +4,10 @@ import re
 from datetime import date, datetime
 from hanjang import quiz
 
-from hanjang import learn, policy, sources, tree
-from hanjang.charts import index_chart, loss_bars, rate_chart, rate_ladder
+from hanjang import gurus, holders, learn, notes, policy, sources, tree
+from hanjang.charts import index_chart, issuer_name, loss_bars, pie, rate_chart, rate_ladder
 from hanjang.notepage import figure
-from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, page, top_bar
+from hanjang.ui import RULE, RULE_FLIP, book_face, bottom_nav, e, guru_face, kdate, logo, page, top_bar
 
 
 class LearnPages:
@@ -56,6 +56,31 @@ class LearnPages:
                           '<span class="material-symbols-outlined text-primary text-[18px]">chevron_right</span></a>' for x in items)
                 + "</div></section>")  # fmt: skip
 
+    def today_big(self, today: date) -> str:
+        """읽기 팁 맨 위 — 오늘의 큰손. 미국 보유 신고(13F)가 있는 투자자·기관을 하루에 한 곳씩 돌린다(사용자 10/19: 매일 들어올 까닭).
+        이름·사진·종목 수·금액·기준일 + 큰 5종목 파이 + 전체 보기. 따라 사고팔라는 뜻이 아니라고 함께 적는다."""
+        keys = [k for (k,) in self.con.execute("select distinct guru from guru_holdings order by guru") if k in gurus.GURUS or k in holders.BIG]
+        if not keys:
+            return ""
+        key = keys[today.toordinal() % len(keys)]
+        rows = self.con.execute("select g.issuer, g.value, g.period, s.name from guru_holdings g left join stocks s on s.ticker = g.ticker"
+                                " where g.guru = ? order by g.value desc", (key,)).fetchall()  # fmt: skip
+        if key in gurus.GURUS:
+            name, intro, face, href = gurus.GURUS[key][0], gurus.GURUS[key][2], guru_face(key, "w-14 h-14"), f"/learn/guru/{key}"
+        else:
+            name, intro = holders.BIG[key][0], holders.BIG[key][2]
+            face, href = logo(name, self.BIG_HOME.get(key), "w-14 h-14"), f"/learn/big/{key}"
+        total = sum(r[1] for r in rows)
+        return ('<section class="mt-space-lg rounded-2xl border border-surface-container-high px-space-md py-space-md">'
+                '<div class="flex items-center gap-1.5 text-primary font-label-regular text-label-regular font-bold"><span class="material-symbols-outlined text-[18px]">travel_explore</span>오늘의 큰손</div>'
+                f'<a href="{href}" class="mt-space-sm flex items-center gap-space-md group">{face}<div class="flex flex-col min-w-0">'
+                f'<span class="font-headline-md text-headline-md text-on-surface group-hover:underline">{e(name)}</span>'
+                f'<span class="text-[12px] text-outline">미국 주식 {len(rows):,}종목 · {e(notes.usd(total))} · {kdate(rows[0][2])} 기준</span></div></a>'
+                f'<p class="mt-space-sm font-body-compact text-body-compact text-on-surface">{e(intro)}</p>'
+                + pie([(issuer_name(r[0], r[3]), r[1]) for r in rows])
+                + f'<div class="mt-space-sm flex items-center justify-between gap-2"><span class="text-[11px] text-outline">미국 보유 신고(SEC 13F) · 따라 사고팔라는 뜻이 아니에요 · 내일은 다른 곳</span>'
+                f'<a href="{href}" class="shrink-0 font-label-regular text-label-regular text-primary font-semibold hover:underline">전체 보기 →</a></div></section>')  # fmt: skip
+
     def learn_top(self, uid: int, stamps: set) -> str:
         """읽기 팁 맨 위 — 오늘의 한 문제(그 자리에서 푼다) (사용자 10/12)."""
         key, q = quiz.daily(date.today())
@@ -101,8 +126,8 @@ class LearnPages:
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
-        # 글 목록 — 놓인 차례가 곧 읽는 차례. 글마다 오른쪽 끝에 동그라미 하나: 세 문제를 다 맞히면 도장, 아니면 빈 동그라미
-        # (읽기만 한 글의 옅은 체크는 뺐다 — 사용자 10/12: 뜻이 헷갈린다, 다 동그라미로)
+        # 글 목록 — 단계 로드맵(사용자 10/19: 도장은 뒤로, 단계적으로 깨는 길). 분류 하나가 한 단계 — 그 단계 글에 다 도장을 받으면 깬다.
+        # 지금 단계(아직 못 깬 첫 단계)만 펼쳐 두고, 깬 단계는 ✓, 앞으로의 단계는 접어 둔다(눌러서 미리 읽을 수는 있다)
         stamps = quiz.done(self.con, uid)
 
         def mark(sl: str) -> str:
@@ -110,14 +135,38 @@ class LearnPages:
                                 ("border border-outline-variant text-outline-variant", "circle", "아직 도장 없음"))  # fmt: skip
             return f'<span aria-label="{label}" title="{label}" class="mt-0.5 w-7 h-7 shrink-0 rounded-full flex items-center justify-center {cls}"><span class="material-symbols-outlined text-[16px]">{icon}</span></span>'
 
-        groups = "".join(
-            f'<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><div class="flex items-center justify-between mb-space-sm"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">{e(c)}</h2>'
-            f'<span class="text-[12px] text-on-surface-variant">도장 {sum(x["slug"] in stamps for x in arts)} / {len(arts)}</span></div>'
-            f'<div class="flex flex-col divide-y divide-surface-container-high/80">'
-            + "".join(f'<a href="/learn/{e(x["slug"])}" class="py-3.5 flex items-start justify-between gap-space-sm"><div class="flex flex-col gap-0.5"><span class="font-body-reading-strong text-body-reading-strong text-on-surface">{e(x["title"])}</span>'
-                      f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div>{mark(x["slug"])}</a>'
-                      for x in arts) + "</div></section>" for c in learn.CATS for arts in [[x for x in learn.ARTICLES if x["cat"] == c]])  # fmt: skip
+        by = {c: [x for x in learn.ARTICLES if x["cat"] == c] for c in learn.CATS}
+        cur = next((i for i, c in enumerate(learn.CATS) if not all(x["slug"] in stamps for x in by[c])), len(learn.CATS))
+        got_all, n_all = sum(x["slug"] in stamps for x in learn.ARTICLES), len(learn.ARTICLES)
+
+        def stage(i: int, c: str) -> str:
+            arts = by[c]
+            n = sum(x["slug"] in stamps for x in arts)
+            dot = ('<span class="w-8 h-8 shrink-0 rounded-full bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">check</span></span>' if i < cur else
+                   f'<span class="w-8 h-8 shrink-0 rounded-full border-2 border-primary bg-surface-container-lowest text-primary font-bold text-[14px] flex items-center justify-center">{i + 1}</span>' if i == cur else
+                   f'<span class="w-8 h-8 shrink-0 rounded-full border border-outline-variant bg-surface-container-lowest text-outline text-[13px] flex items-center justify-center">{i + 1}</span>')  # fmt: skip
+            tag = ("깼어요" if i < cur else "지금 단계" if i == cur else "")
+            bar = (f'<span class="mt-1.5 block h-1.5 w-full max-w-[220px] rounded-full bg-surface-container-high overflow-hidden"><span class="block h-full bg-primary rounded-full" style="width:{n / len(arts) * 100:.0f}%"></span></span>'
+                   if i == cur else "")  # fmt: skip
+            return (f'<details class="relative" style="padding-left:44px"{" open" if i == cur else ""}>'
+                    f'<summary class="cursor-pointer py-3 flex items-center gap-3" style="list-style:none;margin-left:-44px">{dot}'
+                    f'<span class="flex flex-col min-w-0 flex-1"><span class="flex items-center gap-2"><span class="text-[12px] text-outline">{i + 1}단계</span>'
+                    + (f'<span class="px-1.5 py-px rounded text-[10px] font-semibold {"bg-primary text-on-primary" if i == cur else "bg-surface-container-high text-on-surface-variant"}">{tag}</span>' if tag else "")
+                    + f'</span><span class="font-headline-sm text-headline-sm {"text-on-surface" if i <= cur else "text-on-surface-variant"}">{e(c)}</span>{bar}</span>'
+                    f'<span class="text-[12px] text-on-surface-variant shrink-0">{n} / {len(arts)}</span></summary>'
+                    '<div class="flex flex-col divide-y divide-surface-container-high/80 pb-2">'
+                    + "".join(f'<a href="/learn/{e(x["slug"])}" class="py-3.5 flex items-start justify-between gap-space-sm"><div class="flex flex-col gap-0.5"><span class="font-body-reading-strong text-body-reading-strong text-on-surface">{e(x["title"])}</span>'
+                              f'<span class="font-body-compact text-body-compact text-on-surface-variant">{e(x["lead"].replace("**", ""))}</span></div>{mark(x["slug"])}</a>' for x in arts)
+                    + "</div></details>")  # fmt: skip
+
+        now = (f"{cur + 1}단계 · {learn.CATS[cur]}" if cur < len(learn.CATS) else "모든 단계를 깼어요")
+        groups = ('<section class="mt-space-xl pt-space-md border-t border-surface-container-high"><style>details>summary::-webkit-details-marker{display:none}</style>'
+                  f'<div class="flex items-end justify-between gap-2"><div class="flex flex-col"><h2 class="font-headline-md text-headline-md text-primary border-l-4 border-primary pl-2 leading-none">나의 로드맵</h2>'
+                  f'<span class="mt-2 font-body-compact text-body-compact text-on-surface-variant">지금 {e(now)} — 단계의 글마다 세 문제를 맞히면 다음 단계로</span></div>'
+                  f'<span class="text-[12px] text-on-surface-variant shrink-0">도장 {got_all} / {n_all}</span></div>'
+                  '<div class="relative mt-space-sm"><span class="absolute bg-surface-container-high" style="left:15px;top:20px;bottom:20px;width:2px"></span>'
+                  + "".join(stage(i, c) for i, c in enumerate(learn.CATS)) + "</div></section>")  # fmt: skip
         inner = (wrap + '<header class="pt-5"><h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">읽기 팁</h1>'
                  '<p class="font-body-compact text-body-compact text-on-surface-variant mt-1">주식을 처음 시작할 때 알아 두면 좋은 기초를 쉬운 말로 풀었어요.</p></header>'
-                 + self.learn_top(uid, stamps) + groups + self.cached("learn", lambda: self.guru_list() + self.big_list()) + end)  # fmt: skip
+                 + self.cached(f"today-big:{date.today()}", lambda: self.today_big(date.today())) + self.learn_top(uid, stamps) + groups + self.cached("learn", lambda: self.guru_list() + self.big_list()) + end)  # fmt: skip
         return "200 OK", [], page("읽기 팁", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)

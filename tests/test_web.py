@@ -1703,7 +1703,7 @@ def test_learn_quiz_daily_question_and_path_stamps():
     call(app, "/learn/rates", cookie=ck)  # 문제가 없는 글은 읽으면 도장
     assert quiz.done(con, uid) == {"statements", "rates"}
     top = call(app, "/learn", cookie=ck)[2]
-    assert top.count('aria-label="도장 받음"') == 2 and "도장 1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
+    assert top.count('aria-label="도장 받음"') == 2 and "도장 2 / " in top and "나의 로드맵" in top and "지금 1단계" in top and "1 / " in top and "도장 받음" in call(app, "/learn/statements", cookie=ck)[2]  # 글 오른쪽 끝에 도장
 
 
 def test_web_main_block_only_uses_names_that_exist():
