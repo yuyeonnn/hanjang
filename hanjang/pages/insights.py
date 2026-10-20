@@ -8,6 +8,7 @@ from hanjang import sources
 from hanjang.personas import DEMO_EMAIL
 from hanjang.ui import e, page
 
+WHY = {'email': '이메일을 주기 꺼려져요', 'more': '더 둘러보고 정할래요', 'unclear': '어떤 서비스인지 아직 모르겠어요', 'notneed': '지금은 필요 없어요'}  # 「계속 둘러보기」 뒤에 묻는 까닭 (web.GUEST_GATE 와 같은 열쇠)
 PAGE_NAMES = {"cards": "내 종목", "note": "노트", "feed": "피드", "calendar": "캘린더", "learn": "읽기 팁", "article": "읽기 팁 글", "me": "프로필", "user": "남의 프로필"}
 CELL = "padding:6px 8px;border-bottom:1px solid #e6e1e5;vertical-align:top"
 
@@ -48,12 +49,19 @@ class InsightPages:
         no = f"coalesce(uid, 0) not in ({','.join('?' * len(skip)) or 'null'})"
         today = date.today()
         lo = (today - timedelta(days=days - 1)).isoformat()
-        came = q(f"select count(distinct gid) from visits where kind = 'open' and at >= ? and {no}", (lo, *skip)).fetchone()[0]
-        gated = q(f"select count(distinct gid) from visits where kind = 'gate' and at >= ? and {no}", (lo, *skip)).fetchone()[0]
+        def n(kind: str) -> int:
+            return q(f"select count(distinct gid) from visits where kind = ? and at >= ? and {no}", (kind, lo, *skip)).fetchone()[0]
+
+        # 들어온 사람 = 화면의 스크립트가 실제로 돈 브라우저(js) — 그 기록이 없던 10/20 전에는 열기(open)로 (로봇이 섞여 많게 나온다)
+        came = n("js") or n("open")
+        shown, gated, emailed = n("gate_show"), n("gate"), n("email")
         joined = q(f"select count(*) from users where created_at >= ? and id not in ({','.join('?' * len(skip)) or 'null'})", (lo, *skip)).fetchone()[0]
         rate = f"{joined / came:.0%}" if came else "—"
+        whys = dict(q(f"select ref, count(distinct gid) from visits where kind = 'why' and at >= ? and {no} group by 1", (lo, *skip)).fetchall())
         tabs = " ".join(f'<a href="/admin?d={d}" style="padding:4px 10px;border-radius:999px;border:1px solid #c4c7c5;{"background:#154539;color:#fff" if d == days else ""}">{d}일</a>' for d in (7, 30, 90))
-        funnel = table(["손님으로 들어온 사람", "가입하려다 막힌 사람", "가입한 사람", "가입률"], [[f"<b>{came}</b>", f"<b>{gated}</b>", f"<b>{joined}</b>", rate]])
+        funnel = table(["들어온 사람", "가입 덮개를 본 사람", "가입하기를 누른 사람", "이메일을 넣은 사람", "가입한 사람", "가입률"],
+                       [[f"<b>{x}</b>" for x in (came, shown, gated, emailed, joined)] + [rate]])
+        why_rows = [[e(WHY.get(k, k)), str(whys.get(k, 0))] for k in WHY]
         refs = q(f"select coalesce(nullif(ref, ''), '직접·알 수 없음'), count(distinct gid) from visits where kind = 'open' and at >= ? and {no} group by 1 order by 2 desc limit 12", (lo, *skip)).fetchall()
         walls = q(f"select path, count(distinct gid) from visits where kind = 'gate' and at >= ? and {no} group by 1 order by 2 desc limit 12", (lo, *skip)).fetchall()
         daily = []
@@ -83,9 +91,11 @@ class InsightPages:
         body = (f'<main class="w-full max-w-[1100px] mx-auto px-margin pt-8 pb-16"><h1 class="font-headline-lg text-headline-lg">인사이트</h1>'
                 f'<p class="text-[12px] text-on-surface-variant" style="margin:4px 0 12px">예시 계정·둘러보기·운영자는 숫자에서 뺐어요. 손님 기록은 무작위 번호 쿠키로만 묶여 있어요(이름·이메일·IP 없음).</p>'
                 f'<nav style="display:flex;gap:6px;font-size:13px">{tabs}</nav>'
-                + section("깔때기", funnel, "들어온 사람 = 그 기간에 한 번이라도 화면을 연 브라우저 수. 막힌 사람 = 둘러보다 담기·프로필 같은 것을 눌러 가입 화면을 본 브라우저 수.")
+                + section("깔때기", funnel, "모두 브라우저 수. 들어온 사람 = 화면의 스크립트가 실제로 돈 브라우저(로봇은 대개 빠져요). 덮개 = 둘러보다 담기·프로필 같은 것을 눌러 「가입하고 이용하세요」가 뜬 것. 단계마다 줄어드는 곳이 멈춘 곳이에요.")
                 + section("어디서 들어왔나", table(["들어온 곳", "사람"], [[e(r), str(n)] for r, n in refs]) if refs else "<p>아직 기록이 없어요.</p>",
                           "링크를 누른 곳의 주소 이름 · utm_source · 초대 링크 묶음. 비어 있으면 주소를 직접 쳤거나 앱·메신저 안에서 열린 것.")
+                + section("가입을 망설인 까닭", table(["고른 것", "사람"], why_rows) if whys else "<p>아직 고른 사람이 없어요.</p>",
+                          "덮개에서 「계속 둘러보기」를 누른 사람에게 한 번 물어요(고르지 않고 닫을 수도 있어요). 가입하기를 눌렀다가 이메일을 안 넣은 사람은 위 깔때기의 차이로 봐요.")
                 + section("가입 화면을 본 까닭", table(["누른 것", "사람"], [[e(p), str(n)] for p, n in walls]) if walls else "<p>아직 기록이 없어요.</p>")
                 + section("날마다", table(["날", "들어온 사람", "막힌 사람", "가입", "쓴 회원"], daily), "쓴 회원 = 그날 화면을 하나라도 연 회원 수.")
                 + section(f"회원 {len(members)}명", table(["이메일", "닉네임", "가입", "처음 온 때 · 경로", "가입 전 누른 것", "담은 종목", "들어온 날", "마지막", "최근 7일 열람", "초대 묶음"], members),
@@ -103,7 +113,8 @@ class InsightPages:
         days = q("select substr(at, 1, 10), count(*), group_concat(distinct page) from views where user_id = ? group by 1 order by 1 desc limit 60", (uid,)).fetchall()
         recent = q("select v.at, v.page, s.name from views v left join stocks s on s.ticker = v.ticker where v.user_id = ? order by v.at desc limit 100", (uid,)).fetchall()
         visits = q("select at, kind, path, ref from visits where uid = ? order by at limit 100", (uid,)).fetchall()
-        name = {"open": "들어옴", "gate": "가입 화면", "signup": "가입", "login": "로그인"}
+        name = {"open": "들어옴", "js": "화면을 봄", "gate_show": "가입 덮개를 봄", "gate_close": "덮개를 닫음", "why": "망설인 까닭", "gate": "가입하기를 누름",
+                "email": "이메일을 넣음", "code_fail": "코드 틀림", "signup": "가입", "login": "로그인"}
         body = (f'<main class="w-full max-w-[900px] mx-auto px-margin pt-8 pb-16"><a class="text-primary underline text-[13px]" href="/admin">← 인사이트</a>'
                 f'<h1 class="font-headline-lg text-headline-lg" style="margin-top:8px">{e(nick or "닉네임 없음")}</h1>'
                 f'<p class="text-[13px] text-on-surface-variant">{e(email)} · 가입 {when(created)}' + (f" · 초대 묶음 {e(cohort)}" if cohort else "") + f' · 메일 {"받음" if mail_on else "끔"}</p>'

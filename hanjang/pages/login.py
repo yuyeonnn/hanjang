@@ -138,6 +138,7 @@ class LoginPages:
         code = fixed if review else f"{secrets.randbelow(10**6):06d}"
         self.con.execute("insert or replace into login_codes values (?, ?, ?, 0)", (email, code, now + LINK_TTL))  # 새로 받으면 옛 코드는 버린다
         self.con.commit()
+        self.track("email")  # 인사이트 — 이메일까지 넣었다(가입 단계 어디서 멈추나)
         if not review:
             with self.outside():  # 메일 서버와 주고받는 수 초 동안 다른 화면은 돈다
                 mail.send(email, *mail.login_mail(link, code))  # SMTP 설정이 없으면 서버 콘솔에 찍힌다
@@ -158,6 +159,7 @@ class LoginPages:
                 return "200 OK", [], self.login_page(error="코드를 여러 번 틀렸어요. 이메일을 넣고 새로 받아 주세요.", cohort=cohort)
             self.con.execute("update login_codes set tries = ? where email = ?", (tries, email))
             self.con.commit()
+            self.track("code_fail")
             return "200 OK", [], self.login_page(email, error=f"코드가 맞지 않아요. 메일의 숫자 6자리를 다시 봐 주세요. ({CODE_TRIES - tries}번 남음)", cohort=cohort)
         gone()  # 한 번만 쓴다
         return self.start(email, cohort)

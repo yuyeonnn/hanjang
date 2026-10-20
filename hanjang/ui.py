@@ -114,9 +114,12 @@ QUOTE_MIN, QUOTE_MAX = 5, 200  # 프로필에 공유하는 글귀 길이
 TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.S)
 
 
+SEEN = "<script>try{navigator.sendBeacon('/t?k=js')}catch(e){}</script>"  # 인사이트 — 스크립트가 실제로 돈 브라우저(사람)만 「들어온 사람」으로 센다
+
+
 def page(title: str, body_attr: str, inner: str) -> str:
     return (f'<!DOCTYPE html><html lang="ko"><head>{HEAD}{CSS_TAG}{share_tags()}{PWA_TAGS}<title>{e(title)} · 한장</title></head>'
-            f'<body class="{body_attr}">{inner}{STAY}{HL}</body></html>')  # fmt: skip
+            f'<body class="{body_attr}">{inner}{STAY}{HL}{SEEN}</body></html>')  # fmt: skip
 
 
 # 업종마다 작은 그림 하나 — 노트 머리에 귀엽게 (사용자 10/10: 톱니바퀴 같은 것). Material Symbols(Apache 2.0) 아이콘 이름

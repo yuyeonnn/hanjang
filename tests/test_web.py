@@ -1914,6 +1914,10 @@ def test_guest_first_remembers_wanted_stock_and_insights_count_real_visits(monke
     hit("/", ua="facebookexternalhit/1.1")  # 링크 미리보기 로봇은 세지 않는다
     call(app, "/")  # Caddy 를 거치지 않은 요청(올린 뒤 확인·테스트)도
     assert con.execute("select count(*) from visits").fetchone()[0] == n
+    # 화면이 보내는 짧은 기록 — 스크립트가 돈 브라우저(js, 하루 한 줄) · 덮개를 봄 · 망설인 까닭. 정해 둔 종류만 받는다
+    for q in ("/t?k=js", "/t?k=js", "/t?k=gate_show&p=/add", "/t?k=why&p=/add&v=email", "/t?k=hack&v=x"):
+        assert hit(q, cookie=cookie())[0].startswith("204")
+    assert [k for (k,) in con.execute("select kind from visits where id > ? order by id", (n,))] == ["js", "gate_show", "why"]
 
     assert call(app, "/admin", cookie=f"s={web.sign(str(uid), SECRET)}")[0].startswith("404") and call(app, "/admin")[0].startswith("404")  # 운영자가 아니면 없는 화면
     assert "운영자 인사이트" not in call(app, "/", cookie=f"s={web.sign(str(uid), SECRET)}")[2]
@@ -1925,6 +1929,7 @@ def test_guest_first_remembers_wanted_stock_and_insights_count_real_visits(monke
     boss = f"s={web.sign(str(con.execute("select id from users where email = 'boss@x.y'").fetchone()[0]), SECRET)}"
     assert 'href="/admin"' in call(app, "/", cookie=boss)[2]  # 운영자 계정이면 홈 맨 아래에 인사이트로 가는 길
     board = call(app, "/admin?d=7", cookie=boss)[2]
+    assert "이메일을 주기 꺼려져요" in board and "가입 덮개를 본 사람" in board
     assert "new@x.y" in board and "instagram.com" in board and "담기 삼성전자" in board and "(운영자)" in board
     one = call(app, f"/admin/u/{uid}", cookie=boss)[2]
-    assert "새사람" in one and "삼성전자" in one and "가입 화면" in one
+    assert "새사람" in one and "삼성전자" in one and "가입하기를 누름" in one
