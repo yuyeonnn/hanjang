@@ -46,20 +46,11 @@ GUEST_GATE = (
     '<p id="guest-gate-why" style="margin:8px 0 0;font-size:14px;line-height:22px;color:#434944">내 종목을 담으면 공시·재무·소식을 쉬운 글로 매일 읽어 드려요.</p>'
     '<span style="display:block;margin-top:18px;padding:13px;border-radius:12px;background:#154539;color:#fff;font-weight:700;font-size:15px">가입하기</span>'
     '<button type="button" id="guest-gate-close" style="margin-top:12px;font-size:13px;color:#6f7973;background:none;border:0;cursor:pointer">계속 둘러보기</button></div></div>'
-    # 「계속 둘러보기」를 누른 사람에게 한 번만 — 가입을 망설인 까닭 하나 (사용자 10/20: 왜 가입을 안 하는지 알고 싶다)
-    '<div id="guest-why" style="display:none;position:fixed;left:12px;right:12px;bottom:84px;z-index:91;max-width:420px;margin:0 auto;background:#fff;border-radius:16px;padding:14px 14px 10px;box-shadow:0 8px 30px rgba(21,69,57,.18)">'
-    '<p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#154539">가입을 망설인 까닭이 있다면 하나만 골라 주세요</p>'
-    + "".join(f'<button type="button" data-why="{k}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:9px 12px;border:1px solid #e4e4e4;border-radius:10px;background:#fff;font-size:13px;color:#1b1b1d;cursor:pointer">{v}</button>'
-              for k, v in (("email", "이메일을 주기 꺼려져요"), ("more", "더 둘러보고 정할래요"), ("unclear", "어떤 서비스인지 아직 모르겠어요"), ("notneed", "지금은 필요 없어요")))
-    + '<button type="button" data-why="skip" style="margin-top:2px;font-size:12px;color:#6f7973;background:none;border:0;cursor:pointer">닫기</button></div>'
-    "<script>(function(){var g=document.getElementById('guest-gate'),w=document.getElementById('guest-why'),to='/login',why='';"
+    "<script>(function(){var g=document.getElementById('guest-gate'),to='/login',why='';"
     "function t(k,p,v){try{navigator.sendBeacon('/t?k='+k+'&p='+encodeURIComponent(p||'')+'&v='+encodeURIComponent(v||''))}catch(e){}}"
     "function show(p,want){why=p||'';to='/login?'+(want?'want='+encodeURIComponent(want):'from='+encodeURIComponent(p||''));"
     "if(want)document.getElementById('guest-gate-why').textContent='가입하면 「'+want+'」부터 바로 담아 드려요.';g.style.display='flex';why=want?'담기 '+want:(why||'');t('gate_show',why);}"
-    "g.addEventListener('click',function(ev){if(ev.target.id==='guest-gate-close'){g.style.display='none';t('gate_close',why);"
-    "try{if(!localStorage.getItem('hj-why')){w.style.display='block'}}catch(e){w.style.display='block'}return;}location.href=to;});"
-    "w.addEventListener('click',function(ev){var k=ev.target.dataset&&ev.target.dataset.why;if(!k)return;if(k!=='skip')t('why',why,k);"
-    "try{localStorage.setItem('hj-why','1')}catch(e){}w.style.display='none';});"
+    "g.addEventListener('click',function(ev){if(ev.target.id==='guest-gate-close'){g.style.display='none';t('gate_close',why);return;}location.href=to;});"
     "document.addEventListener('submit',function(ev){var f=ev.target;if((f.getAttribute('method')||'').toLowerCase()!=='post')return;"
     "ev.preventDefault();ev.stopPropagation();var q=f.querySelector('[name=q]');show(f.getAttribute('action'),q&&q.value.trim());},true);"
     "document.addEventListener('click',function(ev){var a=ev.target.closest&&ev.target.closest('a[href^=\"/me\"],label');"
@@ -264,7 +255,7 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return self.login_code(form.get("email", "").strip().lower(), form.get("code", ""), form.get("c", ""))
         if path == "/t":  # 화면이 보내는 짧은 기록(인사이트) — 정해 둔 종류만. js: 스크립트가 실제로 돈 브라우저(로봇은 대개 안 돈다)
             k = query.get("k", "")
-            if k in ("js", "gate_show", "gate_close", "why"):
+            if k in ("js", "gate_show", "gate_close"):
                 if k != "js" or not self.con.execute("select 1 from visits where gid = ? and kind = 'js' and at >= ?",
                                                      (getattr(self.local, "gid", ""), date.today().isoformat())).fetchone():  # fmt: skip
                     self.track(k, None if self.is_demo(uid) else uid, query.get("p", "")[:60] or None, query.get("v", "")[:20] or None)
