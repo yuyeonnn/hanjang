@@ -171,4 +171,4 @@ sudo systemctl start litestream hanjang-web
 $env:UV_PROJECT_ENVIRONMENT = "C:\venvs\hanjang"; uv run pytest
 ```
 
-화면 미리보기(`.claude/launch.json`)는 이 환경의 파이썬을 바로 부른다.
+화면 미리보기 설정은 이 환경의 파이썬을 바로 부른다.

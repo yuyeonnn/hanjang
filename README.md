@@ -1,0 +1,113 @@
+# 한장 — 한눈에 읽는 장
+
+**내가 가진 주식이 지금 어떤 상황인지, 공시·재무·소식을 쉬운 글 한 장으로 꿰어 보여주는 모바일 웹 서비스.**
+
+네이버·토스는 정보를 늘어놓고, 한장은 설명합니다. 약속하는 것은 **수익이 아니라 이해**입니다.
+
+🔗 **https://hanjangapp.com** (로그인 없이 둘러볼 수 있어요)
+
+<p>
+<img src="docs/images/home.jpg" width="160" alt="내 종목">
+<img src="docs/images/note.jpg" width="160" alt="종목 노트">
+<img src="docs/images/morning.jpg" width="160" alt="아침 한 장">
+<img src="docs/images/feed.jpg" width="160" alt="피드">
+<img src="docs/images/calendar.jpg" width="160" alt="캘린더">
+<img src="docs/images/learn.jpg" width="160" alt="읽기 팁">
+</p>
+
+---
+
+## 무엇을 하나요
+
+| 화면 | 하는 일 |
+|---|---|
+| **내 종목** | 담은 종목마다 「지금 무슨 일이 있는지」 한 줄. 맨 위 **아침 한 장**은 매일 아침 새 공시 · 놓친 소식 · 다가오는 일정 · 오늘의 한 면을 한 장으로 |
+| **종목 노트** | 무엇으로 돈을 버나 · 지난해 장사 · 빚 · 배당 · 요즘 생긴 일 · 큰손. **모든 문장에 원문(DART·SEC) 링크** |
+| **피드** | 내 종목의 공시를 쉬운 해설 기사로, 이번 주 많이 읽힌 노트 |
+| **캘린더** | 실적 발표 · 공시 · 공모주 · 금리 결정 같은 일정을 한 달 달력으로 |
+| **읽기 팁** | 오늘의 큰손(13F) · 오늘의 읽기 팁(어려운 말 한 줄) · 주제별 로드맵과 3문제 퀴즈 |
+| **프로필** | 들어온 날만큼 자라는 「내 나무」, 팔로우·리그램 |
+
+국내 코스피 100곳 + 사용자가 담은 상장사(코스닥 포함), 미국 종목(SEC)까지 다룹니다.
+
+## 원칙
+
+1. **「사라·팔아라」·비중·주가 예측을 싣지 않는다.** 사실과 해설만.
+2. **숫자는 코드가 계산하고, LLM 은 옮겨 적기만 한다. 모든 문장에 원문 링크.** 「쉬운데 틀리지 않는 글」이 이 서비스의 전부다.
+3. **쓸 권리가 확인된 데이터만 쓴다.** 출처마다 약관 원문을 읽고 [docs/data-rights.md](docs/data-rights.md)에 남겼다. 그래서 주가·언론 기사는 쓰지 않는다.
+4. **수익률이 좋아진다고 말하지 않는다.**
+
+## 어떻게 만들었나
+
+```mermaid
+flowchart LR
+  subgraph 매일 07·13·19시
+    A[DART · SEC · 한국은행 ECOS<br>공공데이터 · 회사 뉴스룸] --> B[받기<br>collect / us]
+    B --> C[(SQLite WAL)]
+    C --> D[사실 계산<br>코드]
+    D --> E[LLM 글쓰기<br>사실 번호만 인용]
+    E --> F[검사<br>숫자 대조 · 금지어 · 예측어]
+    F -->|통과| C
+    F -->|탈락| E
+  end
+  C --> W[WSGI 화면 서버<br>파이썬 표준 라이브러리]
+  W --> U[모바일 웹 · PWA · 안드로이드 TWA]
+  C -.연속 백업.-> L[(Litestream → GCS)]
+```
+
+- **틀리지 않는 글**: 코드가 재무·공시에서 사실을 계산해 번호(`F1`·`D3`…)를 붙이고, LLM 은 그 번호를 인용해 문장만 쓴다. 숫자는 `{F1.매출}` 같은 자리표시로 쓰고 코드가 채운다. 사실에 없는 숫자 · 「호재·악재」 같은 평가 · 예측이 나오면 글째 버리고 다시 쓴다.
+- **값싼 AI**: 읽기는 작은 모델, 글은 싼 모델로 먼저 쓰고 검사에 떨어질 때만 큰 모델. 노트는 묶음 처리(Batch API)로 반값. 바뀐 종목만 다시 쓴다 — 하루 AI 비용 약 0.1~0.2달러.
+- **AI 없이 되는 건 코드로**: 아침 한 장 · 오늘의 한 면 · 캘린더 · 공시 제목을 쉬운 말로 바꾸기(규칙 우선) · 정부 소식.
+- **가벼운 서버**: 프레임워크 없이 파이썬 표준 라이브러리 WSGI + SQLite(WAL). 구글 클라우드 e2-micro 한 대, Caddy(HTTPS), systemd 타이머. Litestream 으로 DB 를 클라우드 저장소에 연속 백업.
+- **로그인**: 비밀번호 없이 메일 링크 + 6자리 코드, 서명 쿠키. 처음 온 사람은 둘러보기로 먼저 써 보고, 담으려 할 때 가입한다.
+- **품질 장치**: 테스트 225개 · GitHub Actions(ruff + pytest) · 올린 뒤 실제 서버 화면 24개의 상태와 스크립트 문법을 자동 확인(`deploy/check.sh`) · 바깥 감시(업타임 체크).
+
+## 데이터
+
+| 출처 | 쓰는 곳 | 조건 |
+|---|---|---|
+| OpenDART (금융감독원) | 공시 · 재무 · 사업보고서 · 지분 보고 | 무료 · 출처 표시 |
+| SEC EDGAR | 미국 종목 공시 · 13F | 미국 정부 공개 자료 |
+| 한국은행 ECOS | 금리 · 환율 | 무료 · 출처 표시 |
+| 정책브리핑 정책뉴스 | 업종에 걸리는 정부 소식 | 공공누리 제1유형 |
+| 회사 뉴스룸 RSS | 이용 정책이 허락하는 곳만, 제목·요약문 | 회사별 정책 확인 |
+
+주가 · 언론 기사 · 네이버 데이터는 **쓸 권리가 없어 쓰지 않는다** (자세한 판단 근거는 [docs/data-rights.md](docs/data-rights.md)).
+
+## 폴더
+
+```
+hanjang/
+  web.py            길 찾기 · 요청 처리 (WSGI)
+  pages/            화면 한 개에 파일 한 개 (home · feed · calendar · learn · profile · social · login · insights)
+  daily.py          매일 실행 — 받기 → 노트 → 기사 → 메일 (단계별 실패 격리)
+  collect.py, us.py 국내·미국 자료 받기
+  notes.py          사실 계산 · 노트 쓰기 · 검사
+  articles.py       공시 해설 기사
+  morning.py        아침 한 장
+  llm.py            모델 호출 · 묶음 처리 · 비용 기록
+  db.py             표 · 구조 변경(migrations)
+  prompts/          LLM 지시문
+deploy/             서버 설정 · 올린 뒤 확인 스크립트
+docs/               기획(PRD) · 데이터 사용권 · DB · 배포 · 디자인 문서
+tests/              pytest
+```
+
+## 실행
+
+```bash
+cp .env.example .env          # OpenDART·ECOS·OpenAI 키 등을 채운다
+uv run python -m hanjang.daily  # 자료 받기 → 노트 쓰기
+uv run python -m hanjang.web    # http://127.0.0.1:8000
+uv run pytest                   # 테스트
+```
+
+파이썬 3.13 · 의존성은 `httpx`·`selectolax` 두 개뿐.
+
+## 문서
+
+[기획(PRD)](docs/PRD.md) · [구상](docs/concept.md) · [데이터 사용권](docs/data-rights.md) · [DB](docs/erd.md) · [배포](docs/deploy.md) · [디자인](docs/design.md) · [출시 준비](docs/launch.md) · [미국 종목](docs/stage3-us.md)
+
+---
+
+혼자 기획 · 개발 · 배포 · 운영 (2026년 10월 ~). 이 저장소는 열람용으로 공개하며, 코드와 문서의 저작권은 작성자에게 있습니다 (All rights reserved).

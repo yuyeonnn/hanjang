@@ -3,3 +3,6 @@ data/
 __pycache__/
 .venv/
 .pytest_cache/
+# 내 컴퓨터에서만 쓰는 작업 규칙·도구 설정
+CLAUDE.md
+.claude/
