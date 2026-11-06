@@ -6,14 +6,6 @@
 
 🔗 **https://hanjangapp.com** (로그인 없이 둘러볼 수 있어요)
 
-<p>
-<img src="docs/images/home.jpg" width="160" alt="내 종목">
-<img src="docs/images/note.jpg" width="160" alt="종목 노트">
-<img src="docs/images/morning.jpg" width="160" alt="아침 한 장">
-<img src="docs/images/feed.jpg" width="160" alt="피드">
-<img src="docs/images/calendar.jpg" width="160" alt="캘린더">
-<img src="docs/images/learn.jpg" width="160" alt="읽기 팁">
-</p>
 
 ---
 
