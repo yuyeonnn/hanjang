@@ -53,7 +53,7 @@ ECOS 에서 표마다 「작성기관」을 조회했다(`StatisticTableList`).
 | **902Y002 국제 주요국 주가지수** (월평균, 2015=100) | **OECD** | ✅ 조건부 — OECD 는 2024-07-01 부터 자료를 **CC BY 4.0**(출처 표시하면 상업 이용 가능)으로 낸다 ([OECD open by default](https://www.oecd.org/en/about/oecd-open-by-default-policy.html), [보도자료](https://www.oecd.org/en/about/news/press-releases/2024/07/oecd-data-publications-and-analysis-become-freely-accessible.html)). 단 「제3자 소유 자료가 섞이면 그쪽 허락」 단서가 있고 원자료는 각국 거래소다 |
 
 **쓰는 곳**: 읽기 팁 「오래 들고 있으면 덜 위험할까요?」의 차트와 숫자(한국·미국)만. 종목 노트에는 안 쓴다. 출처 「OECD 주가지수 · 한국은행 ECOS」.
-**할 일**: KRX 견적 문의([krx-inquiry.md](krx-inquiry.md))에 「OECD 가 공개한 한국 주가지수(월평균)를 교육용 차트에 써도 되는지」를 함께 묻는다. 안 된다면 그 글은 차트 없이 고정 문장으로 돌린다.
+**할 일**: KRX 견적 문의에 「OECD 가 공개한 한국 주가지수(월평균)를 교육용 차트에 써도 되는지」를 함께 묻는다. 안 된다면 그 글은 차트 없이 고정 문장으로 돌린다.
 
 ## 2-2. DART 지분 보고 — ✅ (2026-10-08)
 
