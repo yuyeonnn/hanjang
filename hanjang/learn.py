@@ -3,9 +3,9 @@
 글마다 「더 알아보기」는 공공 기관 누리집으로만 잇는다(책 글은 국립중앙도서관, 버핏 서한은 버크셔가 무료로 공개한 원문).
 **굵게** 표시한 말은 화면에서 초록색으로 강조된다."""
 
-FINE = ("금융감독원 금융소비자 정보포털 「파인」", "https://fine.fss.or.kr")
-DART = ("금융감독원 전자공시시스템 DART", "https://dart.fss.or.kr")
-KRX = ("한국거래소", "https://www.krx.co.kr")
+from hanjang import learn_more  # 둘째 묶음(공시 읽기·미국 주식·시장 일정 …) 21편은 파일을 나눴다
+from hanjang.learn_more import DART, FINE, KRX
+from hanjang.sources import INDEX, RATES
 
 ARTICLES = [
     {"slug": "start", "cat": "처음 시작", "title": "주식은 어떻게 시작하나요?",
@@ -105,7 +105,7 @@ ARTICLES = [
      ],
      "points": ["숫자 하나로 좋다·나쁘다 정하지 않기", "같은 업종끼리 비교하기", "몇 년 흐름을 함께 보기"],
      "more": FINE},
-    # 업종마다 숫자를 다르게 읽는 법 — 노트의 「금융회사는 잣대가 달라요」·「빚이 많은 까닭」에서 이어진다 (사용자 10/9)
+    # 업종마다 숫자를 다르게 읽는 법 — 노트의 「금융회사는 잣대가 달라요」·「빚이 많은 까닭」에서 이어진다
     {"slug": "sector-finance", "cat": "업종별로 읽기", "title": "은행·증권·보험은 어떻게 봐요?",
      "lead": "금융회사는 **남의 돈을 맡아 굴리는 게 본업**이라, 다른 회사와 같은 잣대(부채비율, 100원당 남긴 돈)로 보면 틀린 인상을 받아요.",
      "body": [
@@ -173,7 +173,7 @@ ARTICLES = [
      ],
      "points": ["해외 주식 = 주가 + 환율", "환전 수수료도 확인"],
      "more": FINE},
-    # --- 책에서 배우기 — 유명한 투자 책·주주서한의 생각을 우리 말로 풀어 소개한다 (사용자 10/10).
+    # --- 책에서 배우기 — 유명한 투자 책·주주서한의 생각을 우리 말로 풀어 소개한다.
     # 원문을 옮기지 않고 요약하며, 짧게 인용할 때는 누구의 말인지 밝힌다. 책의 주장이지 한장의 권유가 아니다(불변식 1)
     {"slug": "book-graham", "cat": "책에서 배우기", "title": "벤저민 그레이엄의 『현명한 투자자』",
      "lead": "버핏의 스승 그레이엄이 1949년에 낸 책이에요. **「미스터 마켓」**과 **「안전마진」**이라는 두 생각이 유명해요.",
@@ -271,12 +271,10 @@ ARTICLES = [
      "points": ["숫자 너머 회사가 일하는 방식 보기", "고객·거래처·경쟁사의 이야기", "경영진이 나쁜 일도 솔직하게 알리나"],
      "more": ("국립중앙도서관에서 책 찾기", "https://www.nl.go.kr")},
 ]
-from hanjang import learn_more  # noqa: E402 — 둘째 묶음(공시 읽기·미국 주식·시장 일정 …) 21편은 파일을 나눴다
-
 ARTICLES += learn_more.NEW
 BY_SLUG = {a["slug"]: a for a in ARTICLES}
 
-# --- 더 풀어 쓴 문단 — 기존 글이 짧다는 말에 (사용자 10/10). 같은 원칙: 뜻과 구조만, 사라·팔라 없음 ---
+# --- 더 풀어 쓴 문단 — 기존 글이 짧다는 말에. 같은 원칙: 뜻과 구조만, 사라·팔라 없음 ---
 MORE = {
     "start": [
         "주문은 크게 두 가지예요. 원하는 값을 정해 두는 **지정가 주문**과, 지금 시장에서 바로 사고파는 **시장가 주문**이에요. 처음엔 값을 직접 정하는 지정가가 실수를 줄여 줘요.",
@@ -357,10 +355,7 @@ MORE = {
         "한장 노트에서 미국 회사의 금액은 달러를 먼저 쓰고, 원화는 괄호 안에 「약」과 기준 환율 날짜를 함께 적어요.",
     ],
 }
-for _a in ARTICLES:
-    _a["body"] = _a["body"] + MORE.get(_a["slug"], [])
-
-# --- 글마다 한 문단(200자 남짓) 더 — 「약간만 더」 (사용자 10/10) ---
+# --- 글마다 한 문단(200자 남짓) 더 — 「약간만 더」 ---
 PLUS = {
     "start": "시작하기 전에 **어떤 돈으로 할지**부터 정해요. 몇 달 생활비 같은 비상금은 따로 두고, 당장 쓸 일이 없는 돈으로 하는 게 기본이에요. 주가는 짧은 기간에 크게 내릴 수 있어서, 돈이 급히 필요할 때 손해를 보고 팔아야 하는 상황을 피하려는 거예요.",
     "stock-bond": "국내 상장 주식은 사고팔아 생긴 이익에 대부분 세금이 붙지 않지만(아주 많이 가진 대주주는 예외), 채권 이자에는 이자소득세가 붙어요. 같은 돈이라도 어디서 생긴 이익인지에 따라 세금이 달라서, 상품 설명서의 세금 칸을 함께 보는 게 좋아요.",
@@ -386,13 +381,12 @@ PLUS = {
     "book-housel": "하우절은 「부자가 되는 것」과 「부자로 남는 것」은 다른 기술이라고 말해요. 벌 때는 과감함이, 지킬 때는 겸손과 두려움이 필요하다는 거예요. 큰 손실을 피하는 것이 오래 버티는 첫 조건이라고 봐요.",
     "book-fisher": "피셔는 회사를 판단할 때 좋은 점만이 아니라 **경영진이 문제를 어떻게 말하는지**를 중요하게 봤어요. 일이 잘 안 풀릴 때 솔직하게 알리는 회사가 오래 믿을 만하다고 본 거예요.",
 }
-for _a in ARTICLES:
-    if _a["slug"] in PLUS:
-        _a["body"] = _a["body"] + [PLUS[_a["slug"]]]
+for _a in ARTICLES:  # 본문 + 더 풀어 쓴 문단(MORE) + 한 문단 더(PLUS)
+    _a["body"] = _a["body"] + MORE.get(_a["slug"], []) + ([PLUS[_a["slug"]]] if _a["slug"] in PLUS else [])
 
-# --- 그림 — 흐름·구조를 한눈에 (사용자 10/10). 화면이 세 모양으로 그린다:
+# --- 그림 — 흐름·구조를 한눈에. 화면이 세 모양으로 그린다:
 # flow 단계 · compare 두 칸 비교 · equation 계산식 · cards 그림 카드 · ladder 계단(먼저→나중) · timeline 때 · bars 막대 · lines 꺾은선 · stack 나눠 쌓은 막대.
-# 그림은 Material Symbols(Apache 2.0) 아이콘을 꽉 찬 검은 모양으로 — 상자·흰 바탕 없이 (사용자 10/10)
+# 그림은 Material Symbols(Apache 2.0) 아이콘을 꽉 찬 검은 모양으로 — 상자·흰 바탕 없이
 FIGURE = {
     "start": {"type": "flow", "title": "주식을 처음 사기까지",
               "steps": [("smartphone", "증권사 앱에서 계좌 열기", "신분증만 있으면 휴대폰으로 10분쯤"), ("account_balance_wallet", "계좌에 돈 넣기", "은행 계좌에서 옮겨요"),
@@ -441,7 +435,7 @@ FIGURE = {
                      ("currency_exchange", "팔고 달러를 원화로 바꿔요", "이때의 환율 — 원화 결과 = 주가 변화 + 환율 변화")]},
 }
 
-# --- 「이야기로 보면」 — 제목에 대한 답(핵심)을 먼저 한 줄, 그다음 최근 사건·사례 1~2개 (사용자 10/10).
+# --- 「이야기로 보면」 — 제목에 대한 답(핵심)을 먼저 한 줄, 그다음 최근 사건·사례 1~2개.
 # 오래된 역사 이야기는 쓰지 않는다. 널리 보도된 사실만, 날짜·숫자는 둥글게. 사라·팔라는 말 없이 「이런 일이 있었다」만 (불변식 1)
 STORY = {
     "start": ["**계좌는 앱으로 금방 열지만, 진짜 시작은 내가 살 회사가 무엇으로 돈을 버는지 읽어 보는 거예요.**",
@@ -495,7 +489,7 @@ STORY = {
                     "피셔는 1955년 무렵 산 모토로라 주식을 거의 50년 가까이 갖고 있었다고 알려져 있어요."],
 }
 
-# --- 글 아래 「함께 읽으면 좋은 팁」 — 이어 읽기 (사용자 10/10) ---
+# --- 글 아래 「함께 읽으면 좋은 팁」 — 이어 읽기 ---
 RELATED = {
     "start": ["stock-bond", "fund-etf", "diversify"], "stock-bond": ["start", "rates", "fund-etf"],
     "fund-etf": ["index", "inverse-leverage", "book-bogle"], "index": ["fund-etf", "long-short", "book-malkiel"],
@@ -548,8 +542,6 @@ def pct(x: float) -> str:
 
 def long_short(con) -> dict | None:
     """DB 의 지수로 글을 채운다. 자료가 없으면 None (고정 글이 대신 나간다)."""
-    from hanjang.sources import INDEX
-
     got = {}
     for sid, name in INDEX.items():
         pts = con.execute("select date, value from macro where series_id = ? order by date", (sid,)).fetchall()
@@ -578,8 +570,6 @@ def long_short(con) -> dict | None:
 
 def rates(con) -> dict | None:
     """DB 의 금리로 글을 채운다. 다섯 가지가 10년치 넘게 있어야 쓴다 — 아니면 None (고정 글)."""
-    from hanjang.sources import RATES
-
     got = {n: con.execute("select date, value from macro where series_id = ? and date >= '2001-01-01' order by date", (sid,)).fetchall()
            for sid, n in RATES.items()}  # fmt: skip
     if any(len(v) < 120 for v in got.values()):
@@ -616,7 +606,7 @@ FOR_EVENT = {"BUYBACK": "buyback", "DIVIDEND": "dividend", "EARNINGS": "earnings
              "RIGHTS_ISSUE": "rights-issue", "CB_BW": "cb", "BONUS_ISSUE": "bonus-split", "TRADING_HALT": "warnings"}  # fmt: skip
 
 
-# 오늘의 읽기 팁 — 어려운 말 하나를 한 줄로 (사용자 10/19: 퀴즈보다 짧은 풀이가 매일 바뀌는 게 낫다). 날마다 차례로 하나.
+# 오늘의 읽기 팁 — 어려운 말 하나를 한 줄로. 날마다 차례로 하나.
 # (말, 한 줄 풀이, 더 읽을 글 — 없으면 None). 풀이는 사실만 — 좋다 나쁘다·사라 팔아라는 쓰지 않는다
 TERMS = [
     ("유상증자", "회사가 돈이 필요할 때 빌리는 대신 새 주식을 만들어 팔아 돈을 모으는 거예요.", "rights-issue"),

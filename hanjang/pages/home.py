@@ -124,7 +124,7 @@ class HomePages:
     def cards(self, uid: int, msg: str | None, sort: str | None = None) -> str:
         order = "s.name" if sort == "name" else "h.added_at"
         rows = self.con.execute(
-            "select s.ticker, s.name, n.week, n.body, n.facts, s.homepage, s.market from holdings h join stocks s using(ticker)"
+            "select s.ticker, s.name, n.week, n.body, s.homepage, s.market from holdings h join stocks s using(ticker)"
             " left join notes n on n.ticker = s.ticker and n.week ="
             " (select max(week) from notes where ticker = s.ticker)"
             f" where h.user_id = ? order by {order}", (uid,)).fetchall()  # fmt: skip
@@ -132,8 +132,8 @@ class HomePages:
         happened: dict[str, list] = {}
         for c in self.my_events(uid):
             happened.setdefault(c[9], []).append(c)
-        both = len({r[6] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
-        for t, name, week, body, facts, home, mkt in rows:  # facts 는 지금 카드에 안 쓴다 (상태 줄은 사용자 요청 10/7로 뺐다)
+        both = len({r[5] for r in rows}) > 1  # 국내·미국을 둘 다 담았을 때만 거르기 칩
+        for t, name, week, body, home, mkt in rows:
             b = json.loads(body) if body else {}
             head = (b.get("headline") and notes.mend(b["headline"])) or ("첫 노트를 만들고 있어요. 1~2분 뒤 새로고침해 보세요." if t in self.making else
                                           "새로 담은 종목이에요. 공시 자료를 받는 대로 첫 노트가 나와요(보통 다음 아침 7시).")
@@ -141,7 +141,7 @@ class HomePages:
             if (evs := happened.get(t)):  # 이 종목에 생긴 일 — 노트 핵심 한 줄 아래에. 누르면 노트의 그 대목으로 (임원·큰손은 #who, 그 밖은 #recent)
                 _, icon, tint, _, _, what, _, when, _, _ = evs[0]
                 event = (f'<a href="/n/{e(t)}#{"who" if icon in WHO_ICONS else "recent"}" class="mt-2 block"><p class="text-[15px] leading-[22px] font-semibold text-on-surface">'
-                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p></a>')  # 회색 설명 줄은 카드에서 뺐다 — 노트에 있다 (사용자 10/11)  # fmt: skip
+                         f'<span class="material-symbols-outlined text-[17px] align-[-3px] mr-1 {tint}">{icon}</span>{e(what)}</p></a>')  # 회색 설명 줄은 카드에서 뺐다 — 노트에 있다  # fmt: skip
                 status = f'<span class="text-[12px] text-outline">{e(when)}{f" · 소식 {len(evs) - 1}건 더" if len(evs) > 1 else ""}</span>'
             out.append(f'<article class="py-4 relative transition-all group" data-stock-id="{e(t)}" data-market="{e(mkt)}"><div class="flex items-start justify-between"><div class="flex items-center gap-2">'
                        f'{logo(name, home, "w-7 h-7")}<a href="/n/{e(t)}"><h2 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h2></a><span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e("ETF" if t.startswith("ETF") else t)}</span>{'<span class="font-citation-ref text-citation-ref text-secondary px-1.5 py-0.5 rounded bg-secondary-fixed/50 font-semibold">미국</span>' if mkt == "US" else ""}<span class="font-label-micro text-label-micro text-outline-variant">{e(week or "")}</span></div>'

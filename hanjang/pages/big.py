@@ -2,7 +2,7 @@
 
 from hanjang import gurus, holders, notes, sources
 from hanjang.charts import TOP_LIST, bars, ind_tag, issuer_name, pie
-from hanjang.ui import DART_VIEW, PEOPLE, e, guru_face, kdate, logo, page, sector
+from hanjang.ui import PEOPLE, e, guru_face, kdate, logo, page, sector
 
 
 class BigPages:
@@ -176,7 +176,7 @@ class BigPages:
 
             def row(i, r):  # 미국 신고가 없는 기관(신한·KB 등)만 — 5% 넘게 가진 회사가 이 페이지의 전부라 남긴다
                 code, corp, rate, _, d, rno, ours, home = r
-                href = f"/n/{code}" if ours else DART_VIEW.format(rno)
+                href = f"/n/{code}" if ours else notes.DART.format(rno)
                 return (f'<a href="{e(href)}" {"" if ours else "target=_blank rel=noopener"} class="py-3 flex items-center gap-3">'
                         f'<span class="w-5 text-right text-[12px] text-outline tabular-nums">{i}</span>{logo(corp, home, "w-9 h-9")}'
                         f'<span class="flex flex-col min-w-0 flex-1"><span class="text-[15px] font-semibold text-on-surface truncate">{e(corp)}</span>'

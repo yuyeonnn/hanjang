@@ -23,20 +23,16 @@ from hanjang.auth import check_login, read_session, session_cookie
 from hanjang.pwa import MANIFEST, OFFLINE, SW
 from hanjang.ui import BIG_AT_ONCE, BIG_POSTS, BODY_MAX, CSP, FORM_MAX, Me, PEOPLE, STATIC, e, page, photo_url
 # 테스트·smoke 가 web.X 로 닿는 이름 — 여기서 다시 내보낸다 (화면 코드는 쓰지 않는다)
-from hanjang.auth import CODE_TRIES, LEGACY_UNTIL, LINK_TTL, LOGIN_ALL_HOURLY, LOGIN_IP_HOURLY, SESSION_TTL, login_token, sign  # noqa: F401
-from hanjang.charts import bars, ind_tag, pie  # noqa: F401
-from hanjang.notepage import business_block, dividend_block, figure, metrics, money_blocks, owners_block, paras, redone, render_note, risk_block, safe_url, sentence, soften  # noqa: F401
-from hanjang.ui import BOOK_FACE, CSS_TAG, FIRST, PHOTO, Photos, book_face, guru_face, industry_chip, logo, mark, photo_for, sector  # noqa: F401
 from hanjang.pages import login, home, calendar as calendar_pages, profile, social, feed, big, learn as learn_pages, insights as insight_pages  # noqa: F401
 
 
-# 로그인하지 않은 사람도 둘러보기로 보는 화면 — 첫 화면(/)과 공유된 노트 링크 등 (사용자 10/16: 먼저 써 보고, 담으려 할 때 가입)
+# 로그인하지 않은 사람도 둘러보기로 보는 화면 — 첫 화면(/)과 공유된 노트 링크 등
 GUEST_PAGES = ("/n/", "/feed", "/calendar", "/learn", "/u/", "/a/", "/big")
 # 사람이 아닌 것 — 링크 미리보기·검색 로봇·스크립트. 방문 기록에 넣지 않는다
 BOTS = re.compile(r"bot|crawl|spider|slurp|preview|scrap|facebookexternalhit|curl|wget|python|node|headless|lighthouse", re.I)
 
 
-# 둘러보는 손님이 담기·좋아요·프로필처럼 가입이 필요한 것을 누르면 — 쓰던 화면 위를 흐리게 덮고 「가입하고 이용하세요」. 누르면 가입 화면으로 (사용자 10/16)
+# 둘러보는 손님이 담기·좋아요·프로필처럼 가입이 필요한 것을 누르면 — 쓰던 화면 위를 흐리게 덮고 「가입하고 이용하세요」. 누르면 가입 화면으로
 # 담으려던 종목은 가입 화면 주소(?want=)로 넘겨 기억해 둔다. 서버 쪽 막기(route 의 is_demo)는 스크립트가 없을 때를 위해 그대로 둔다
 GUEST_GATE = (
     '<div id="guest-gate" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;padding:24px;cursor:pointer;'
@@ -286,7 +282,7 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
             return self.demo()
         if uid is None:
             return "200 OK", [], self.login_page(cohort=query.get("c", ""))
-        # 둘러보기 = 로그인 없이 구경하는 손님. 프로필·설정·알림을 누르거나 무언가 바꾸려 하면(담기·좋아요·팔로우) 로그인 화면으로 (사용자 10/12)
+        # 둘러보기 = 로그인 없이 구경하는 손님. 프로필·설정·알림을 누르거나 무언가 바꾸려 하면(담기·좋아요·팔로우) 로그인 화면으로
         if self.is_demo(uid) and (method == "POST" or path == "/me" or path.startswith("/me/")):
             want = form.get("q", "").strip()[:100] if path == "/add" else ""
             self.track("gate", None, f"담기 {want}" if want else path)
@@ -440,13 +436,8 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
         return "404 Not Found", [], self.simple("없음", "없는 화면이에요. <a class='text-primary underline' href='/'>처음으로</a>")
 
     def src(self, rno: str | None) -> str:
-        """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽."""
-        if not rno:
-            return "#"
-        if "-" not in rno:
-            return notes.DART.format(rno)
-        row = self.con.execute("select s.cik from filings f join stocks s using(ticker) where f.accession = ?", (rno,)).fetchone()
-        return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else "#"
+        """원문 주소(notes.source_url) — 화면의 링크라 모르면 「#」."""
+        return notes.source_url(self.con, rno) or "#"
 
     # ---- 큰손 포트폴리오 (읽기 팁 맨 아래) — 기관이 5% 넘게 가진 종목, 전체 상장사 ----
 
@@ -459,7 +450,6 @@ class App(login.LoginPages, home.HomePages, calendar_pages.CalendarPages, profil
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 윈도우 콘솔(cp949)이 「—」를 못 찍어 뒤에서 도는 첫 노트 쓰기가 멈췄다 (10/10)
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    import threading
     from socketserver import ThreadingMixIn
     import wsgiref.simple_server
     from wsgiref.simple_server import WSGIServer, make_server

@@ -1,4 +1,4 @@
-"""읽기 팁 퀴즈 — 글 끝의 세 문제 · 오늘의 한 문제 · 다 맞히면 도장 (사용자 10/12).
+"""읽기 팁 퀴즈 — 글 끝의 세 문제 · 오늘의 한 문제 · 다 맞히면 도장.
 
 문제의 답은 모두 그 글에 적힌 사실이다 — 「오를까요?」 같은 예측 문제는 내지 않는다(불변식 1).
 글은 잠그지 않는다. 틀려도 다시 고를 수 있고, 세 문제를 다 맞히면 그 글에 도장이 찍힌다. AI 는 쓰지 않는다.
@@ -8,6 +8,8 @@ QUIZ[slug] = [(물음, [보기 셋], 정답 번호(0부터), 풀이)]. 숫자를
 import sqlite3
 import zlib
 from html import escape as e
+
+from hanjang import learn_more
 
 
 QUIZ = {
@@ -128,8 +130,6 @@ QUIZ = {
     ],
 }
 
-
-from hanjang import learn_more  # noqa: E402
 
 QUIZ.update(learn_more.QUIZ)  # 둘째 묶음 21편의 문제
 

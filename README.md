@@ -33,18 +33,18 @@
 
 ```mermaid
 flowchart LR
-  subgraph 매일 07·13·19시
-    A[DART · SEC · 한국은행 ECOS<br>공공데이터 · 회사 뉴스룸] --> B[받기<br>collect / us]
-    B --> C[(SQLite WAL)]
-    C --> D[사실 계산<br>코드]
-    D --> E[LLM 글쓰기<br>사실 번호만 인용]
-    E --> F[검사<br>숫자 대조 · 금지어 · 예측어]
+  subgraph daily["매일 07·13·19시"]
+    A["DART · SEC · 한국은행 ECOS<br/>공공데이터 · 회사 뉴스룸"] --> B["받기<br/>collect · us"]
+    B --> C[("SQLite WAL")]
+    C --> D["사실 계산<br/>코드"]
+    D --> E["LLM 글쓰기<br/>사실 번호만 인용"]
+    E --> F["검사<br/>숫자 대조 · 금지어 · 예측어"]
     F -->|통과| C
     F -->|탈락| E
   end
-  C --> W[WSGI 화면 서버<br>파이썬 표준 라이브러리]
-  W --> U[모바일 웹 · PWA · 안드로이드 TWA]
-  C -.연속 백업.-> L[(Litestream → GCS)]
+  C --> W["WSGI 화면 서버<br/>파이썬 표준 라이브러리"]
+  W --> U["모바일 웹 · PWA · 안드로이드 TWA"]
+  C -. 연속 백업 .-> L[("Litestream → GCS")]
 ```
 
 - **틀리지 않는 글**: 코드가 재무·공시에서 사실을 계산해 번호(`F1`·`D3`…)를 붙이고, LLM 은 그 번호를 인용해 문장만 쓴다. 숫자는 `{F1.매출}` 같은 자리표시로 쓰고 코드가 채운다. 사실에 없는 숫자 · 「호재·악재」 같은 평가 · 예측이 나오면 글째 버리고 다시 쓴다.

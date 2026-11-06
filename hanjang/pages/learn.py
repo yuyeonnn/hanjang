@@ -43,13 +43,13 @@ class LearnPages:
 
     def flow(self, paras: list[str]) -> str:
         """읽기 팁 본문 — 짧은 문단을 둘씩 묶어 한 덩어리로, 줄 간격은 노트보다 조금 촘촘하게.
-        한두 문장짜리 문단이 하나씩 떨어져 보여 글이 끊겨 읽히던 것 (사용자 10/10)."""
+        한두 문장짜리 문단이 하나씩 떨어져 보여 글이 끊겨 읽히던 것."""
         groups = [" ".join(paras[k:k + 2]) for k in range(0, len(paras), 2)]
         return "".join(f'<p class="font-body-reading text-body-reading text-on-surface leading-[1.8] mb-5">{self.marked(g)}</p>' for g in groups)
 
     @staticmethod
     def related(slug: str) -> str:
-        """글 아래 「함께 읽으면 좋은 팁」 — 이어 읽을 글 세 편 (사용자 10/10)."""
+        """글 아래 「함께 읽으면 좋은 팁」 — 이어 읽을 글 세 편."""
         items = [learn.BY_SLUG[x] for x in learn.RELATED.get(slug, []) if x in learn.BY_SLUG]
         if not items:
             return ""
@@ -62,7 +62,7 @@ class LearnPages:
                 + "</div></section>")  # fmt: skip
 
     def today_big(self, today: date) -> str:
-        """읽기 팁 맨 위 — 오늘의 큰손. 미국 보유 신고(13F)가 있는 투자자·기관을 하루에 한 곳씩 돌린다(사용자 10/19: 매일 들어올 까닭).
+        """읽기 팁 맨 위 — 오늘의 큰손. 미국 보유 신고(13F)가 있는 투자자·기관을 하루에 한 곳씩 돌린다.
         이름·사진·종목 수·금액·기준일 + 큰 5종목 파이 + 전체 보기. 따라 사고팔라는 뜻이 아니라고 함께 적는다."""
         # 13F 는 분기 끝 45일 안에 나온다 — 가장 최근 신고도 길어야 넉 달 반 전. 200일이 넘은 곳은 신고가 끊긴 것이라 돌리지 않는다
         # (2026-10-19 확인: 마이클 버리의 사이언은 2025-09-30 기준이 마지막 · 퍼싱 스퀘어는 2026-06-30 분을 다른 회사 신고로 넘겼다고 13F-NT 만 냈다)
@@ -90,10 +90,10 @@ class LearnPages:
                 + f'<div class="mt-space-sm flex justify-end"><a href="{href}" class="font-label-regular text-label-regular text-primary font-semibold hover:underline">전체 보기 →</a></div></section>')  # fmt: skip
 
     def learn_top(self, today: date) -> str:
-        """읽기 팁 맨 위 — 오늘의 읽기 팁: 어려운 말 하나를 한 줄로, 날마다 차례로 (사용자 10/19: 「오늘의 한 문제」 대신)."""
+        """읽기 팁 맨 위 — 오늘의 읽기 팁: 어려운 말 하나를 한 줄로, 날마다 차례로."""
         word, line, slug = learn.TERMS[today.toordinal() % len(learn.TERMS)]
         more = f' <a href="/learn/{slug}" class="text-[13px] font-semibold text-primary/70 hover:underline whitespace-nowrap">더 읽기 →</a>' if slug else ""
-        # 글 머리의 한 줄 요약과 같은 모양 — 위아래 두 줄(실선+점선) 사이에 가운데 굵은 글 (사용자 10/19)
+        # 글 머리의 한 줄 요약과 같은 모양 — 위아래 두 줄(실선+점선) 사이에 가운데 굵은 글
         return (f'<aside class="mt-space-lg text-center">{RULE}<div class="py-2.5 px-space-md flex flex-col items-center gap-0.5">'
                 '<span class="flex items-center gap-1 text-[11px] font-semibold text-primary/80"><span class="material-symbols-outlined text-[14px]">lightbulb</span>오늘의 읽기 팁</span>'
                 f'<p class="font-bold text-[16px] leading-[25px] text-primary">{e(word)} — {e(line)}{more}</p></div>{RULE_FLIP}</aside>')  # fmt: skip
@@ -130,7 +130,7 @@ class LearnPages:
                      + (index_chart(a["charts"]) + loss_bars(a["charts"]) if a.get("charts") else "")
                      + (rate_ladder(a["now"], a["month"]) + rate_chart(a["rates"]) if a.get("rates") else "")
                      + '<div class="relative overflow-hidden">' + self.flow(a["body"][1:] + [x.replace("**", "") for x in learn.STORY.get(slug, [])])
-                     + quiz.stamp(slug in stamps) + "</div>"  # 다 맞힌 글엔 본문 오른쪽 아래에 도장 — 가장자리에 걸쳐 조금 잘리게 (사용자 10/12)
+                     + quiz.stamp(slug in stamps) + "</div>"  # 다 맞힌 글엔 본문 오른쪽 아래에 도장 — 가장자리에 걸쳐 조금 잘리게
                      + '<section class="mt-space-sm mb-space-lg rounded-xl bg-primary-fixed/40 border-l-4 border-primary px-space-md py-space-md flex flex-col gap-1.5"><span class="flex items-center gap-1 font-label-regular text-label-regular text-primary font-bold"><span class="material-symbols-outlined text-[18px]">lightbulb</span>기억할 것</span>'
                      + "".join(f'<p class="flex items-start gap-1.5 font-body-compact text-body-compact text-on-surface"><span class="material-symbols-outlined text-primary text-[16px] mt-0.5">check_circle</span><span>{self.marked(x)}</span></p>' for x in a["points"])
                      + f'</section><a class="inline-flex items-center gap-1 font-label-regular text-label-regular text-primary font-semibold hover:underline" href="{e(more_url)}" target="_blank" rel="noopener">더 알아보기: {e(more_label)}<span class="material-symbols-outlined text-[14px]">open_in_new</span></a>'
@@ -138,7 +138,7 @@ class LearnPages:
                      + self.related(slug) + credit
                      + '<div class="mt-space-lg flex justify-end">' + self.regram_form(uid, "learn", slug, "") + "</div>" + end)  # fmt: skip
             return "200 OK", [], page(a["title"], "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
-        # 글 목록 — 단계 로드맵(사용자 10/19: 도장은 뒤로, 단계적으로 깨는 길). 분류 하나가 한 단계 — 그 단계 글에 다 도장을 받으면 깬다.
+        # 글 목록 — 단계 로드맵. 분류 하나가 한 단계 — 그 단계 글에 다 도장을 받으면 깬다.
         # 지금 단계(아직 못 깬 첫 단계)만 펼쳐 두고, 깬 단계는 ✓, 앞으로의 단계는 접어 둔다(눌러서 미리 읽을 수는 있다)
         stamps = quiz.done(self.con, uid)
 

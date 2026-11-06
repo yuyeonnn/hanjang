@@ -58,16 +58,6 @@ def _get(url: str, secret: str, **params) -> httpx.Response:
 UNIVERSE = ROOT / "hanjang" / "universe.txt"
 MACRO_EVENTS = ROOT / "hanjang" / "macro_events.txt"
 MACRO_RANK = {"금리": 1, "물가": 2, "선거": 3, "고용": 4, "휴장": 5}  # 캘린더 목록 정렬 — 주식과 이어지는 정도
-MACRO_EXPLAIN = {  # 한 줄로, 숫자 없이 (사용자 10/9: 길다)
-    ("금리", "KR"): "한국은행이 기준금리를 정하는 날이에요.",
-    ("금리", "US"): "미국 중앙은행이 기준금리를 정하는 날이에요.",
-    ("물가", "KR"): "지난달 물가가 얼마나 올랐는지 나오는 날이에요.",
-    ("물가", "US"): "미국의 지난달 물가가 나오는 날이에요.",
-    ("고용", "KR"): "지난달 일자리가 얼마나 늘었는지 나오는 날이에요.",
-    ("고용", "US"): "미국의 지난달 일자리 수가 나오는 날이에요.",
-    ("선거", "US"): "미국 의회 의원을 뽑는 중간선거예요.",
-    ("휴장", "US"): "미국 증시가 쉬는 날이에요. 이날은 미국 주식을 사고팔 수 없어요.",
-}  # fmt: skip
 MACRO_SOURCE = {"KR금리": ("한국은행", "https://www.bok.or.kr"), "US금리": ("미 연준", "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"),
                 "KR물가": ("국가데이터처", "https://mods.go.kr"), "KR고용": ("국가데이터처", "https://mods.go.kr"),
                 "US물가": ("미 노동통계국", "https://www.bls.gov/schedule/news_release/cpi.htm"),
@@ -81,10 +71,15 @@ def macro_events(lo: str, hi: str) -> list[tuple[str, str, str, str]]:
     return sorted(r for r in rows if len(r) == 4 and lo <= r[0] <= hi)
 
 
+def pairs(path: Path) -> list[tuple[str, str]]:
+    """「코드 나머지」 줄로 된 글 파일 → [(코드, 나머지)]. 빈 줄·# 줄은 건너뛴다."""
+    rows = (ln.split(maxsplit=1) for ln in path.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
+    return [(t, n.strip()) for t, n in rows]
+
+
 def kospi_universe() -> list[tuple[str, str]]:
     """종목 목록 [(종목코드, 이름)] — universe.txt (손으로 갱신). 시세 API 를 부르지 않는다 (data-rights §4)."""
-    rows = (ln.split(maxsplit=1) for ln in UNIVERSE.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
-    return [(t, n.strip()) for t, n in rows]
+    return pairs(UNIVERSE)
 
 
 def price_dev() -> bool:
@@ -753,8 +748,7 @@ class News:
 
 
 def newsrooms() -> dict[str, str]:
-    rows = (ln.split(maxsplit=1) for ln in NEWSROOMS.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
-    return {t: u.strip() for t, u in rows}
+    return dict(pairs(NEWSROOMS))
 
 
 def fetch_rss(url: str, press: str) -> list[News]:

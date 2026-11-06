@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 import json
 from urllib.parse import quote, unquote
 
-from hanjang import collect, db, learn, mail, notes, sources, web
+from hanjang import auth, charts, collect, db, learn, mail, notepage, notes, sources, ui, web
 from hanjang.pages import home
 
 SECRET = "test-secret"
@@ -38,15 +38,15 @@ def call(app, path, method="GET", form="", cookie="", ctype="application/x-www-f
 
 
 def test_login_link_expires_and_cannot_be_forged():
-    t = web.login_token("a@b.c", SECRET, 0)
+    t = auth.login_token("a@b.c", SECRET, 0)
     assert web.check_login(t, SECRET, 60) == "a@b.c"
-    assert web.check_login(t, SECRET, web.LINK_TTL + 1) is None  # 15분 지나면 끝
+    assert web.check_login(t, SECRET, auth.LINK_TTL + 1) is None  # 15분 지나면 끝
     assert web.check_login(t.replace("a@b.c", "x@b.c"), SECRET, 60) is None  # 이메일 바꿔치기
     assert web.check_login(t, "other", 60) is None
 
 
 def _login(app, nick="나"):
-    link = "/auth?t=" + quote(web.login_token("me@x.kr", SECRET, 1_000_000.0))
+    link = "/auth?t=" + quote(auth.login_token("me@x.kr", SECRET, 1_000_000.0))
     _, h, _ = call(app, link)
     ck = h["Set-Cookie"].split(";")[0]
     call(app, "/welcome", "POST", "nickname=" + quote(nick + "닉") + "&rules=1", ck)  # 가입할 때 닉네임 + 이용 규칙 동의
@@ -74,7 +74,7 @@ def test_unknown_stock_and_forged_cookie():
     _, h, _ = call(app, "/add", "POST", "q=" + quote("없는회사"), ck)
     assert "찾지 못했어요" in unquote(h["Location"])
     assert "시작하기" in call(app, "/", cookie="s=1.deadbeef")[2]  # 서명 틀린 쿠키는 로그인 화면
-    assert web.safe_url("javascript:alert(1)") == "#"
+    assert notepage.safe_url("javascript:alert(1)") == "#"
 
 
 def test_calendar_month_grid_marks_red_days_and_events():
@@ -161,10 +161,10 @@ def test_learn_tab_lists_and_opens_articles():
 
 def test_empty_good_or_concern_side_is_hidden():
     base = {"headline": "h", "summary": [], "sections": []}
-    only_good = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "좋아요.", "refs": ["F1"]}],
+    only_good = notepage.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "좋아요.", "refs": ["F1"]}],
                                 "concern": [], "good_title": "성장"}, "llm:x")
     assert "좋게 볼 점</span>" in only_good and "주의해서 볼 점</span>" not in only_good
-    old = web.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "없었어요.", "refs": ["F1"]}],
+    old = notepage.render_note("가", "000000", "2026-10-05", {**base, "good": [{"text": "없었어요.", "refs": ["F1"]}],
                           "concern": [{"text": "없었어요.", "refs": ["F1"]}], "good_title": "분류된 것 없음",
                           "concern_title": "분류된 것 없음"}, "llm:x")
     assert "긍정 요인과 부정 요인" not in old  # 둘 다 비면 절째 숨긴다
@@ -225,11 +225,6 @@ def test_long_short_numbers_from_index():
     assert "보장은 없어요" in " ".join(a["body"]) and a["charts"]["한국"]["rows"]
 
 
-def test_redone_label():
-    assert web.redone("2026-10-05", "2026-10-08T07:00:00") == " · 10월 8일 고침"
-    assert web.redone("2026-10-05", "2026-10-05T07:00:00") == "" and web.redone("2026-10-05", "now") == ""
-
-
 def test_login_needs_consent_and_a_mailed_link(capsys):
     app, _ = _app()
     s, _, body = call(app, "/login", "POST", "email=a%40b.c")
@@ -286,7 +281,7 @@ def test_like_toggle_views_and_date():
     app, con = _app()
     con.execute("update notes set made_at = '2026-10-06T07:00:00'")
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가'), (2, 'z@b.c', '2026-10-01', '나')")
-    me, other = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    me, other = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     call(app, "/like", "POST", "t=005930&w=2026-10-05", other)
     call(app, "/n/005930", cookie=other)
     _, _, body = call(app, "/n/005930", cookie=me)
@@ -304,7 +299,7 @@ def test_follow_regram_feed_and_privacy():
     """닉네임이 있어야 남에게 보인다 · 팔로우한 사람의 리그램이 피드에 · 이메일은 어디에도 안 보인다 · 코멘트 금지어."""
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉'), (2, 'you@b.c', '2026-10-01', '너닉')")
-    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    me, you = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     assert call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부") + "&bio=" + quote("메모리 회사를 봐요"), you)[1]["Location"] == "/me"  # 저장하면 내 프로필로
     assert call(app, "/me/profile", "POST", "nickname=" + quote("반도체공부"), me)[1]["Location"].startswith("/me/settings?msg=")  # 같은 이름은 안 된다
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("가나") + "&bio=" + quote("지금 사세요"), me)[1]["Location"]  # 자기소개 금지어
@@ -371,7 +366,7 @@ def call_raw(app, path, cookie=""):
 def test_nickname_is_asked_at_signup_and_unique():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (9, 'x@b.c', '2026-10-01', 'Hanjang')")
-    _, h, _ = call(app, "/auth?t=" + quote(web.login_token("new@b.c", SECRET, 1_000_000.0)))
+    _, h, _ = call(app, "/auth?t=" + quote(auth.login_token("new@b.c", SECRET, 1_000_000.0)))
     ck = h["Set-Cookie"].split(";")[0]
     assert "닉네임을 정해 주세요" in call(app, "/", cookie=ck)[2]  # 정하기 전엔 다른 화면으로 못 간다
     assert "닉네임을 정해 주세요" in call(app, "/feed", cookie=ck)[2]
@@ -388,25 +383,25 @@ def test_industry_photos_served_and_used():
     s, h, body = call_raw(app, "/static/photos/semiconductor.jpg")  # 로그인 없이
     assert s.startswith("200") and h["Content-Type"] == "image/jpeg" and body[:3] == b"\xff\xd8\xff"
     assert call_raw(app, "/static/photos/../db.jpg")[1]["Content-Type"].startswith("text/html")  # 다른 파일은 못 꺼낸다(로그인 화면이 나온다)
-    assert web.photo_for(None) == "/static/photos/seoul.jpg"
-    assert all((web.STATIC / "photos" / f"{k}.jpg").exists() for k in set(web.PHOTO.values()) | {"seoul"})
+    assert ui.photo_for(None) == "/static/photos/seoul.jpg"
+    assert all((web.STATIC / "photos" / f"{k}.jpg").exists() for k in set(ui.PHOTO.values()) | {"seoul"})
     ck = _login(app)
     assert "/static/photos/" in call(app, "/feed", cookie=ck)[2]  # 사진은 피드에만 — 노트 위는 실적 차트
 
 
 def test_note_logo_and_domain():
-    assert ">삼성<" in web.logo("삼성전자", None)  # 로고를 못 찾으면 그룹 대표색 표시
+    assert ">삼성<" in ui.logo("삼성전자", None)  # 로고를 못 찾으면 그룹 대표색 표시
     from hanjang import sources
     assert sources.domain("www.samsung.com/sec") == "samsung.com" and sources.domain("http://WWW.SKHYNIX.COM") == "skhynix.com"
     assert sources.domain("-") is None
 
 
 def test_report_blocks_compute_from_dart_numbers():
-    d = web.dividend_block([(2024, 1000, 5_000_000_000_000, 25.0), (2025, 1100, 6_000_000_000_000, 30.0)])
+    d = notepage.dividend_block([(2024, 1000, 5_000_000_000_000, 25.0), (2025, 1100, 6_000_000_000_000, 30.0)])
     assert "1,100원" in d and "30.0%" in d and "6.0조원" in d
-    b = web.business_block({"what": ["반도체를 만들어요."], "segments": [{"name": "DS", "share": "39.0%"}], "risks": ["경쟁"], "year": 2025}, "123")
+    b = notepage.business_block({"what": ["반도체를 만들어요."], "segments": [{"name": "DS", "share": "39.0%"}], "risks": ["경쟁"], "year": 2025}, "123")
     assert "39.0%" in b and "rcpNo=123" in b and "2025년 사업보고서" in b
-    assert "회사가 꼽은 위험" in web.risk_block({"risks": ["경쟁이 심해요"]}) and web.risk_block(None) == ""
+    assert "회사가 꼽은 위험" in notepage.risk_block({"risks": ["경쟁이 심해요"]}) and notepage.risk_block(None) == ""
 
 
 def test_weekly_mail_carries_wave_images(monkeypatch):
@@ -431,7 +426,7 @@ def test_weekly_mail_carries_wave_images(monkeypatch):
 
 
 def test_feed_photos_never_repeat_on_one_screen():
-    p = web.Photos()
+    p = ui.Photos()
     assert p.topic("chip") and all("chip" in x for x in p.topic("chip"))
     picks = [p.pick("MAJOR_CONTRACT", None) for _ in range(20)] + [p.pick(None, "264") for _ in range(10)]
     assert len(set(picks)) == len(picks)  # 같은 화면에 같은 사진은 두 번 없다
@@ -454,11 +449,11 @@ def test_big_holders_list_and_page():
 
 
 def test_industry_bars():
-    d = web.bars(["반도체", "반도체", "화학", None], [1, 1, 1, 1], "곳")
+    d = charts.bars(["반도체", "반도체", "화학", None], [1, 1, 1, 1], "곳")
     assert "width:50.00%" in d and ">반도체</span>" in d and ">50%</span>" in d and ">기타</span>" in d and ">25%</span>" in d and "2곳</span>" in d
-    assert web.bars([], []) == ""
+    assert charts.bars([], []) == ""
 
-    assert web.sector("264") == "전자·반도체" and web.sector("64992") == "금융" and web.sector("7150") == "지주회사" and web.sector(None) is None
+    assert ui.sector("264") == "전자·반도체" and ui.sector("64992") == "금융" and ui.sector("7150") == "지주회사" and ui.sector(None) is None
 
 
 def test_demo_browse_without_email_is_read_only(monkeypatch):
@@ -479,9 +474,9 @@ def test_demo_browse_without_email_is_read_only(monkeypatch):
 
 
 def test_mark_uses_group_color_not_logo():
-    assert "#1428A0" in web.mark("삼성전자") and ">삼성<" in web.mark("삼성전자")
-    assert ">SK<" in web.mark("SK하이닉스") and ">KB<" in web.mark("KB금융")
-    assert web.mark("유한양행") == web.mark("유한양행") and ">유<" in web.mark("유한양행")  # 그 밖의 회사는 이름마다 같은 색
+    assert "#1428A0" in ui.mark("삼성전자") and ">삼성<" in ui.mark("삼성전자")
+    assert ">SK<" in ui.mark("SK하이닉스") and ">KB<" in ui.mark("KB금융")
+    assert ui.mark("유한양행") == ui.mark("유한양행") and ">유<" in ui.mark("유한양행")  # 그 밖의 회사는 이름마다 같은 색
 
 
 def test_daily_failure_mails_the_operator(monkeypatch):
@@ -506,8 +501,8 @@ def test_invite_link_tags_trial_users_and_report_counts_weeks(capsys):
     app, con = _app()
     assert 'name="c" value="trial-1"' in call(app, "/?c=trial-1")[2]
     assert 'name="c"' not in call(app, "/?c=<x>")[2]  # 이상한 이름은 버린다
-    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-1")  # 처음 — 링크로 들어오며 묶인다
-    call(app, "/auth?t=" + quote(web.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-2")  # 처음 묶음 그대로
+    call(app, "/auth?t=" + quote(auth.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-1")  # 처음 — 링크로 들어오며 묶인다
+    call(app, "/auth?t=" + quote(auth.login_token("a@b.c", SECRET, 1_000_000.0)) + "&c=trial-2")  # 처음 묶음 그대로
     assert con.execute("select cohort from users where email = 'a@b.c'").fetchone() == ("trial-1",)
 
     con.execute("update users set created_at = '2026-11-17T09:00' where email = 'a@b.c'")
@@ -551,18 +546,18 @@ def test_calendar_merges_same_day_same_kind_and_shows_market_events():
 
 
 def test_money_blocks_and_use_ring():
-    h = web.money_blocks((2025, 1000, 200, -50, 400, 600))
+    h = notepage.money_blocks((2025, 1000, 200, -50, 400, 600))
     assert "100원 팔면" in h and "20원" in h and "적자" in h and "부채비율 150%" in h
-    assert web.money_blocks((2025, None, 8, 5, 60, 737)) == ""  # 금융사(매출 없음)는 그리지 않는다
-    d = web.dividend_block([(2025, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))
+    assert notepage.money_blocks((2025, None, 8, 5, 60, 737)) == ""  # 금융사(매출 없음)는 그리지 않는다
+    d = notepage.dividend_block([(2025, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))
     assert "배당으로 나눠 줌" in d and "25%" in d and "회사에 남김" in d
-    assert "배당으로 나눠 줌" not in web.dividend_block([(2024, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))  # 해가 다르면 도넛 없음
+    assert "배당으로 나눠 줌" not in notepage.dividend_block([(2024, 100, 250, 25.0)], (2025, 1000, 300, 1000, 1, 1))  # 해가 다르면 도넛 없음
 
 
 def test_soften_parentheses():
-    h = web.soften("영업이익이 늘었어요(9.0조원 · 7,921억원)(영업이익률 8.8%). 끝")
+    h = notepage.soften("영업이익이 늘었어요(9.0조원 · 7,921억원)(영업이익률 8.8%). 끝")
     assert h.count("<span") == 1 and "(9.0조원 · 7,921억원 · 영업이익률 8.8%)" in h and "text-outline" in h
-    assert web.soften("괄호 없음") == "괄호 없음"
+    assert notepage.soften("괄호 없음") == "괄호 없음"
 
 def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
     """코스닥 등 노트가 아직 없는 상장사도 담긴다 — 카드는 「내일 아침」, 검색 목록(/stocks.js)엔 상장사 전체."""
@@ -579,26 +574,26 @@ def test_any_listed_stock_can_be_added_and_waits_for_tomorrow():
 
 def test_repeated_numbers_and_paragraphs():
     seen: set = set()
-    a = web.sentence({"text": "매출이 줄었어요(9.0조원 · 7,921억원).", "refs": ["F1"]}, seen)
-    b = web.sentence({"text": "본업으로 남긴 돈도 줄었어요(9.0조원 · 7,921억원).", "refs": ["F2"]}, seen)
+    a = notepage.sentence({"text": "매출이 줄었어요(9.0조원 · 7,921억원).", "refs": ["F1"]}, seen)
+    b = notepage.sentence({"text": "본업으로 남긴 돈도 줄었어요(9.0조원 · 7,921억원).", "refs": ["F2"]}, seen)
     assert "9.0조원" in a and "9.0조원" not in b and b.startswith("본업으로 남긴 돈도 줄었어요.")
-    h = web.paras([{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "남겼어요.", "refs": ["F5"]},
+    h = notepage.paras([{"text": "많이 팔았어요.", "refs": ["F1"]}, {"text": "남겼어요.", "refs": ["F5"]},
                    {"text": "빚이 적어요.", "refs": ["F3"]}], set())
     assert h.count("<p") == 2  # 실적 한 문단 · 살림 한 문단
 
 
 def test_returns_watch_and_cite_tone():
-    d = web.dividend_block([(2025, 100, 10**12, 25.0)], None, [("2026-08-01", 3 * 10**12)])
+    d = notepage.dividend_block([(2025, 100, 10**12, 25.0)], None, [("2026-08-01", 3 * 10**12)])
     assert "자사주 사기로 한 돈 · 1번" in d and "3.0조원" in d and "2025년 배당" in d
-    assert "자사주" not in web.dividend_block([(2025, 100, 10**12, 25.0)], None, [])
+    assert "자사주" not in notepage.dividend_block([(2025, 100, 10**12, 25.0)], None, [])
     fins = [(2025, 1000, 88, 50, 400, 503), (2024, 1000, 97, 50, 400, 400)]
-    h = web.risk_block({"risks": ["수급 불균형에 따른 가격 변동 위험", "차입금 금리 위험", "환율 위험"]}, fins)
+    h = notepage.risk_block({"risks": ["수급 불균형에 따른 가격 변동 위험", "차입금 금리 위험", "환율 위험"]}, fins)
     assert "영업이익률 8.8% (2025년 · 2024년 9.7%)" in h and "부채비율 125.8%" in h and h.count("살펴볼 숫자:") == 2
-    assert web.risk_block({"risks": ["가격 위험", "수요 위험"]}, fins).count("살펴볼 숫자:") == 1  # 같은 숫자는 한 번만
-    h = web.risk_block({"risks": ["발주 계획에 따라 달라짐"]}, fins)
+    assert notepage.risk_block({"risks": ["가격 위험", "수요 위험"]}, fins).count("살펴볼 숫자:") == 1  # 같은 숫자는 한 번만
+    h = notepage.risk_block({"risks": ["발주 계획에 따라 달라짐"]}, fins)
     assert "매출 1,000원 (2025년 · 전년보다 +0.0%)" in h and "「살펴볼 숫자」는" in h
-    assert "「살펴볼 숫자」는" not in web.risk_block({"risks": ["환율 위험"]}, fins)
-    assert "text-outline/70" in web.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in web.sentence({"text": "재무", "refs": ["F1"]})
+    assert "「살펴볼 숫자」는" not in notepage.risk_block({"risks": ["환율 위험"]}, fins)
+    assert "text-outline/70" in notepage.sentence({"text": "기사", "refs": ["N1"]}) and "text-primary/70" in notepage.sentence({"text": "재무", "refs": ["F1"]})
 
 
 def test_rates_article_measures_from_bank_of_korea_series():
@@ -616,9 +611,9 @@ def test_rates_article_measures_from_bank_of_korea_series():
     assert "금리 흐름" in html_ and "자료: 한국은행 ECOS" in html_ and html_.count("<polyline") == 5
 
 def test_metrics_compares_last_year_and_this_year():
-    h = web.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
+    h = notepage.metrics([(2025, 4_600, 2_100, 0, 0, 0), (2024, 4_590, 1_339, 0, 0, 0)])
     assert "2024년 → 2025년" in h and "+56.8%" in h and h.count("bg-outline-variant") == 2 and h.count("bg-primary") == 2
-    assert web.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다
+    assert notepage.metrics([(2025, 1, 1, 0, 0, 0)]) == ""  # 전년이 없으면 그리지 않는다
 
 
 def test_calendar_shows_my_companys_bond_on_pay_day():
@@ -653,14 +648,14 @@ def test_adding_a_stock_without_note_starts_first_note_now(monkeypatch):
 
 def test_money_blocks_finance_and_industry_usual():
     fin = (2025, 1000, 70, 50, 135, 1368)
-    h = web.money_blocks(fin, {"금융": True})
+    h = notepage.money_blocks(fin, {"금융": True})
     assert "금융회사는 잣대가 달라요" in h and "부채비율 1" not in h and "ROE 37.0%" in h
-    h = web.money_blocks((2025, 1000, 30, 20, 400, 600), {"백원당": 3.2, "부채비율": 180.0, "업종": "무역·도매", "곳수": 4})
+    h = notepage.money_blocks((2025, 1000, 30, 20, 400, 600), {"백원당": 3.2, "부채비율": 180.0, "업종": "무역·도매", "곳수": 4})
     assert "보통(중간값): 영업이익 3원" in h and "원래 조금씩 남겨요" in h and "보통(중간값)은 180%" in h
 
 
 def test_high_debt_sector_shows_reason():
-    h = web.money_blocks((2025, 1000, 70, 50, 100, 446), {"업종": "방위산업", "곳수": 1, "빚이유": "수주 대금을 미리 받아요"})
+    h = notepage.money_blocks((2025, 1000, 70, 50, 100, 446), {"업종": "방위산업", "곳수": 1, "빚이유": "수주 대금을 미리 받아요"})
     assert "부채비율 446%" in h and "방위산업 업종은 수주 대금을 미리 받아요." in h
 
 
@@ -702,7 +697,7 @@ def test_follow_notice_and_lists():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
     con.commit()
-    a, b, aid, bid = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}", 1, 2
+    a, b, aid, bid = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}", 1, 2
     assert "알림 1개" not in call(app, "/", cookie=a)[2]
     call(app, "/follow", "POST", f"u={aid}&back=" + quote(f"/f/{aid}?tab=followers"), b)
     assert "알림 1개" in call(app, "/", cookie=a)[2]  # 위쪽 알림 단추에 빨간 숫자
@@ -715,15 +710,15 @@ def test_follow_notice_and_lists():
 
 
 def test_industry_chip_icon():
-    assert "settings" in web.industry_chip("29") and ">기계<" in web.industry_chip("29")
-    assert web.industry_chip(None) == ""
+    assert "settings" in ui.industry_chip("29") and ">기계<" in ui.industry_chip("29")
+    assert ui.industry_chip(None) == ""
 
 
 def test_follow_back_must_be_our_path():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
     con.commit()
-    b = f"s={web.sign('2', SECRET)}"
+    b = f"s={auth.sign('2', SECRET)}"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/\\evil.example"), b)[1]["Location"] == "/u/1"
     assert call(app, "/follow", "POST", "u=1&back=" + quote("/f/1?tab=followers"), b)[1]["Location"] == "/f/1?tab=followers"
 
@@ -790,18 +785,18 @@ def test_learn_figures():
     ck = _login(app)
     body = call(app, "/learn/start", cookie=ck)[2]
     assert "주식을 처음 사기까지" in body and "이틀 뒤 내 것으로 확정" in body
-    assert "PER" in web.figure(learn.FIGURE["ratios"]) and "<polyline" in web.figure(learn.FIGURE["inverse-leverage"])
+    assert "PER" in notepage.figure(learn.FIGURE["ratios"]) and "<polyline" in notepage.figure(learn.FIGURE["inverse-leverage"])
     assert len({f["type"] for f in learn.FIGURE.values()}) >= 8  # 여러 모양 (사용자 10/10: 다 똑같다)
     for f in learn.FIGURE.values():
-        assert web.figure(f).startswith("<figure"), f["type"]
+        assert notepage.figure(f).startswith("<figure"), f["type"]
 
 
 def test_book_author_photo(tmp_path):
     from hanjang import web
-    face, credit = web.book_face("book-graham")
+    face, credit = ui.book_face("book-graham")
     assert "/static/people/graham.jpg" in face and "Public domain" in credit
-    assert web.book_face("book-lynch") == ("", "")  # 자유 이용 사진이 없으면 그림 없이
-    for key in web.BOOK_FACE.values():
+    assert ui.book_face("book-lynch") == ("", "")  # 자유 이용 사진이 없으면 그림 없이
+    for key in ui.BOOK_FACE.values():
         assert (web.STATIC / "people" / f"{key}.jpg").exists() and key in web.PEOPLE
     app, _ = _app()
     assert call_raw(app, "/static/people/graham.jpg")[1]["Content-Type"] == "image/jpeg"  # 투자자 목록에 없는 지은이도 열린다
@@ -810,7 +805,7 @@ def test_private_account_needs_approved_follow():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가'), (2, 'b@b.c', '2026-10-01', '나나')")
     con.commit()
-    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    a, b = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     call(app, "/me/private", "POST", "", a)
     assert "비공개 계정 끄기" in call(app, "/me/settings", cookie=a)[2]
     p = call(app, "/u/1", cookie=b)[2]
@@ -860,7 +855,7 @@ def test_notices_this_week():
     con.execute("insert into holdings values (1, '005930', ?)", (now,))
     con.execute("insert into articles (ref, ticker, date, kind, body, made_at) values ('x', '005930', '2026-10-09', 'contract', ?, ?)",
                 (json.dumps({"title": "큰 계약을 맺었어요", "paragraphs": [{"text": "a", "refs": []}], "links": {}}), now))
-    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    me, you = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     call(app, "/follow", "POST", "u=2", me)
     call(app, "/regram", "POST", "k=learn&r=start", you)
     assert app.initial(1).unread == 2  # 리그램 1 + 내 종목 소식 1
@@ -936,7 +931,7 @@ def test_morning_card_on_home(monkeypatch):
     monkeypatch.setattr(llm, "ask", lambda *a, **k: asked.append(a[2]) or a[3]({"sentence": "에페 주사제가 팔아도 된다는 품목허가를 받았다고 알렸어요."}))
     assert morning.prepare(con, today) == 1 and len(asked) == 1  # 코드 풀이가 있는 유상증자는 AI 를 부르지 않는다
     assert morning.prepare(con, today) == 0 and len(asked) == 1  # 공시마다 한 번
-    body = call(app, "/", cookie=f"s={web.sign('1', SECRET)}")[2]
+    body = call(app, "/", cookie=f"s={auth.sign('1', SECRET)}")[2]
     assert "아침 한 장" in body and ">한화오션</span>" in body and "새 주식을 찍어 팔아" in body and "공시 원문 보기" in body and "품목허가를 받았다고 알렸어요" in body
     assert "실적 발표" in body and "유상증자 공시는 이렇게 읽어요" in body
     try:
@@ -955,12 +950,12 @@ def test_personas_seen_by_everyone_with_label():
     assert personas.seed(con) == len(personas.PEOPLE)
     demo = con.execute("select id from users where email = ?", (personas.DEMO_EMAIL,)).fetchone()[0]
     first = con.execute("select id from users where email = ?", ("chip" + personas.DOMAIN,)).fetchone()[0]
-    me = f"s={web.sign('1', SECRET)}"
+    me = f"s={auth.sign('1', SECRET)}"
     assert "삼성전자" in app.this_week() and "minsu_k" in app.suggest(1)
     body = call(app, f"/u/{first}", cookie=me)[2]
     assert "minsu_k" in body
     assert "minsu_k" in call(app, "/feed?q=" + quote("minsu"), cookie=me)[2]
-    assert "님이 리그램" in call(app, "/feed", cookie=f"s={web.sign(str(demo), SECRET)}")[2]
+    assert "님이 리그램" in call(app, "/feed", cookie=f"s={auth.sign(str(demo), SECRET)}")[2]
     assert not con.execute("select 1 from follows where follower_id in (select id from users where email like '%' || ?) and followee_id = 1", (personas.DOMAIN,)).fetchone()
 
 
@@ -968,7 +963,7 @@ def test_save_lists_and_highlighter():
     """저장 — 나만 보는 목록 · 좋아요 목록 · 형광펜(칠하기·다시 불러오기·지우기·남의 것은 못 지움) (사용자 10/10)."""
     app, con = _app()
     con.execute("insert into users (id, email, created_at) values (1, 'me@b.c', '2026-10-01'), (2, 'you@b.c', '2026-10-01')")
-    me, you = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    me, you = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     con.execute("update users set nickname = '나닉', rules_at = 'x' where id = 1")
     con.execute("update users set nickname = '너닉', rules_at = 'x' where id = 2")
     assert 'action="/save"' in call(app, "/n/005930", cookie=me)[2]
@@ -1000,7 +995,7 @@ def test_share_quote_to_profile():
     """형광펜 띠의 「공유」 — 글에 실제로 있는 문장만 내 프로필(리그램)에 인용구로 (사용자 10/10)."""
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'me@b.c', '2026-10-01', '나닉')")
-    me = f"s={web.sign('1', SECRET)}"
+    me = f"s={auth.sign('1', SECRET)}"
     said = lambda form: json.loads(call(app, "/hl/share", "POST", form, me)[2])["msg"]  # noqa: E731
     assert said("p=/n/005930&t=" + quote("많이 팔았어요.")) == "내 프로필에 올렸어요"
     body = call(app, "/me", cookie=me)[2]
@@ -1024,7 +1019,7 @@ def test_month_list_sorts_and_drops_minor():
                 " ('3', '000001', '2026-10-07', '판매·인도 대수 알림 (8-K 2.02)', 'EARNINGS', 2, 0)")
     con.execute("insert into ipos (corp_code, rcept_no, name, sub_start, sub_end) values ('c', '9', '새회사', '2026-10-12', '2026-10-13')")
     con.commit()
-    a = f"s={web.sign('1', SECRET)}"
+    a = f"s={auth.sign('1', SECRET)}"
     page = call(app, "/calendar?m=2026-10", cookie=a)[2]
     month = page[page.index('id="month-list"'):]
     assert "유상증자" in month and "판매·인도" not in month  # 보통 공시는 목록에서 빠지고
@@ -1202,11 +1197,11 @@ def test_login_mail_is_capped_per_address_and_overall(monkeypatch):
         b"".join(app(env | {"CONTENT_LENGTH": str(len(body)), "wsgi.input": io.BytesIO(body)}, lambda s, h: got.update(status=s, headers=dict(h))))
         return got
 
-    assert [ask(i, "1.1.1.1")["status"][:3] for i in range(web.LOGIN_IP_HOURLY + 2)] == ["200"] * web.LOGIN_IP_HOURLY + ["429"] * 2
-    assert len(sent) == web.LOGIN_IP_HOURLY and ask(99, "2.2.2.2")["status"].startswith("200")  # 다른 곳에서는 된다
-    for i in range(200, 200 + web.LOGIN_ALL_HOURLY):
+    assert [ask(i, "1.1.1.1")["status"][:3] for i in range(auth.LOGIN_IP_HOURLY + 2)] == ["200"] * auth.LOGIN_IP_HOURLY + ["429"] * 2
+    assert len(sent) == auth.LOGIN_IP_HOURLY and ask(99, "2.2.2.2")["status"].startswith("200")  # 다른 곳에서는 된다
+    for i in range(200, 200 + auth.LOGIN_ALL_HOURLY):
         ask(i, f"3.3.{i // 250}.{i % 250}")
-    assert len(sent) == web.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
+    assert len(sent) == auth.LOGIN_ALL_HOURLY and ask(999, "4.4.4.4")["status"].startswith("429")  # 전체 한도
     h = ask(1000, "5.5.5.5")["headers"]
     assert "form-action 'self'" in h["Content-Security-Policy"] and "frame-ancestors 'none'" in h["Content-Security-Policy"]
 
@@ -1251,14 +1246,14 @@ def test_login_with_six_digit_code_from_the_mail(monkeypatch):
     call(app, "/login", "POST", "email=a%40b.c&agree=1")
     code = mails[0][1].split()[-1]
     wrong = "000000" if code != "000000" else "111111"
-    for _ in range(web.CODE_TRIES):
+    for _ in range(auth.CODE_TRIES):
         last = call(app, "/login/code", "POST", f"email=a%40b.c&code={wrong}")[2]
     assert "여러 번 틀렸어요" in last and "Set-Cookie" not in call(app, "/login/code", "POST", f"email=a%40b.c&code={code}")[1]
 
     app, _ = _app(now=1_000_000.0)  # 15분이 지나면 만료
     mails.clear()
     call(app, "/login", "POST", "email=a%40b.c&agree=1")
-    app.clock = lambda: 1_000_000.0 + web.LINK_TTL + 1
+    app.clock = lambda: 1_000_000.0 + auth.LINK_TTL + 1
     assert "만료" in call(app, "/login/code", "POST", f"email=a%40b.c&code={mails[0][1].split()[-1]}")[2]
 
 
@@ -1272,7 +1267,7 @@ def test_report_block_rules_and_ban(monkeypatch):
     monkeypatch.setattr(sources, "env", lambda: {"SMTP_USER": "op@x.kr", "PRIVACY_CONTACT": "help@x.kr"})
     con.execute("insert into users (id, email, created_at, nickname, bio) values (1, 'a@b.c', '2026-10-01', '가가', '소개'), (2, 'b@b.c', '2026-10-01', '나나', null), (3, 'c@b.c', '2026-10-01', '다다', null)")
     con.commit()
-    a, b, c = (f"s={web.sign(str(i), SECRET)}" for i in (1, 2, 3))
+    a, b, c = (f"s={auth.sign(str(i), SECRET)}" for i in (1, 2, 3))
     assert "올리면 안 되는 것" in call(app, "/rules")[2] and "help@x.kr" in call(app, "/rules")[2]  # 로그인 없이 · 연락처
     # 금지 말 — 닉네임·자기소개
     assert "msg=" in call(app, "/me/profile", "POST", "nickname=" + quote("리딩방장") + "&bio=", a)[1]["Location"]
@@ -1318,11 +1313,11 @@ def test_my_tree_grows_with_days_and_shows_this_month():
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
     con.executemany("insert into views (user_id, page, at) values (1, 'cards', ?)", [(f"2026-09-{d:02d}T08:00:00",) for d in range(1, 21)])
     con.commit()
-    body = call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    body = call(app, "/me", cookie=f"s={auth.sign('1', SECRET)}")[2]
     assert con.execute("select days from users where id = 1").fetchone()[0] == 21  # 남은 기록 20일 + 오늘
     con.execute("delete from views")  # 열어본 기록이 지워져도(180일) 나무는 줄지 않는다
     con.commit()
-    assert "지금까지 21일 들어왔어요" in call(app, "/me", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "지금까지 21일 들어왔어요" in call(app, "/me", cookie=f"s={auth.sign('1', SECRET)}")[2]
     assert "내 나무" in body and "지금까지 21일 들어왔어요" in body and "자라는 나무" in body and "잎이 풍성한 나무까지 19일" in body
 
 
@@ -1335,16 +1330,16 @@ def test_login_cookie_expires_on_the_server_and_old_cookies_are_upgraded():
     con.commit()
     new = web.session_cookie(1, SECRET, now[0]).split(";")[0]
     assert "내 종목" in call(app, "/", cookie=new)[2] and "Set-Cookie" not in call(app, "/", cookie=new)[1]
-    now[0] += web.SESSION_TTL + 1
+    now[0] += auth.SESSION_TTL + 1
     assert "시작하기" in call(app, "/", cookie=new)[2]  # 기한(1년)이 지나면 서버가 받지 않는다 — 다시 로그인
-    assert "시작하기" in call(app, "/", cookie="s=" + web.sign("1|9999999999999", SECRET).replace("1|", "2|"))[2]  # 번호 바꿔치기
+    assert "시작하기" in call(app, "/", cookie="s=" + auth.sign("1|9999999999999", SECRET).replace("1|", "2|"))[2]  # 번호 바꿔치기
 
-    old = f"s={web.sign('1', SECRET)}"  # 날짜 없는 옛 쿠키
-    now[0] = web.LEGACY_UNTIL - 10
+    old = f"s={auth.sign('1', SECRET)}"  # 날짜 없는 옛 쿠키
+    now[0] = auth.LEGACY_UNTIL - 10
     s, h, body = call(app, "/", cookie=old)
     assert "내 종목" in body and web.read_session(h["Set-Cookie"].split(";")[0][2:], SECRET, now[0]) == (1, False)  # 받아 주고, 새 쿠키로 바꿔 준다
     assert "Max-Age=0" in call(app, "/logout", cookie=old)[1]["Set-Cookie"]  # 로그아웃은 그대로 지운다
-    now[0] = web.LEGACY_UNTIL + 10
+    now[0] = auth.LEGACY_UNTIL + 10
     assert "시작하기" in call(app, "/", cookie=old)[2]  # 정한 날이 지나면 옛 쿠키는 끝
 
 
@@ -1457,7 +1452,7 @@ def test_others_see_my_tree_unless_private():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname, days) values (1, 'a@b.c', '2026-10-01', '가가', 50), (2, 'b@b.c', '2026-10-01', '나나', 1)")
     con.commit()
-    a, b = f"s={web.sign('1', SECRET)}", f"s={web.sign('2', SECRET)}"
+    a, b = f"s={auth.sign('1', SECRET)}", f"s={auth.sign('2', SECRET)}"
     p = call(app, "/u/1", cookie=b)[2]
     assert "가가의 나무" in p and "지금까지 50일 들어왔어요" in p and "최근 석 달" in p and "까지 " not in p[p.index("가가의 나무"):p.index("최근 석 달")].replace("지금까지", "")  # 나무·날 수·잔디 — 「다음 단계까지」만 본인에게
     call(app, "/me/private", "POST", "", a)
@@ -1474,7 +1469,7 @@ def test_line_tree_on_notice_error_and_offline_pages():
     app, con = _app()
     con.execute("insert into users (id, email, created_at, nickname) values (1, 'a@b.c', '2026-10-01', '가가')")
     con.commit()
-    a = f"s={web.sign('1', SECRET)}"
+    a = f"s={auth.sign('1', SECRET)}"
     s404, _, body = call(app, "/nope", cookie=a)
     assert s404.startswith("404") and 'alt="나무"' in body and "없는 화면이에요" in body
     assert 'alt="나무"' in call(app, "/offline")[2]
@@ -1533,7 +1528,7 @@ def test_things_found_by_clicking_through_every_screen(monkeypatch):
     app, con = _app()
     monkeypatch.setattr(mail, "send", lambda *a, **k: None)
     assert "autofocus" in re.search(r'<input[^>]*name="code"[^>]*>', call(app, "/login", "POST", "email=a%40b.c&agree=1")[2])[0]  # 코드 칸이 화면 아래로 밀려 있었다
-    _, h, _ = call(app, "/auth?t=" + quote(web.login_token("new@b.c", SECRET, 1_000_000.0)))
+    _, h, _ = call(app, "/auth?t=" + quote(auth.login_token("new@b.c", SECRET, 1_000_000.0)))
     ck = h["Set-Cookie"].split(";")[0]
     body = call(app, "/welcome", "POST", "nickname=" + quote("리딩방장") + "&rules=1", ck)[2]
     assert "쓸 수 없는 말" in body and re.search(r'name="rules"[^>]* checked', body)  # 오류로 다시 떠도 동의 체크는 그대로
@@ -1833,7 +1828,7 @@ def test_price_swing_inquiry_leads_and_market_line_points_outside():
     assert "한장은 주가와 지수를 다루지 않아요" in page and morning.QUOTES in page and "시장 뉴스 찾아보기" in page
     assert "한장은 주가와 지수를 다루지 않아요" in morning.html(morning.build(con, [], today))  # 시장 자료가 없는 날에도 길은 있다
     assert [x["kind"] for x in articles.events(con, today)] == ["MAJOR_CONTRACT"]  # 조회공시는 기사로 키우지 않는다
-    assert "시세 보기" in call(app, "/n/005930", cookie=f"s={web.sign('1', SECRET)}")[2]
+    assert "시세 보기" in call(app, "/n/005930", cookie=f"s={auth.sign('1', SECRET)}")[2]
 
 
 def test_government_news_matched_to_my_industry(monkeypatch):
@@ -1899,7 +1894,7 @@ def test_guest_first_remembers_wanted_stock_and_insights_count_real_visits(monke
     assert "가입하면 「삼성전자」부터 바로 담아 드려요" in page and 'name="email"' in page
     ck = jar(h, ck)
     assert unquote(ck["want"]) == "삼성전자"
-    s, h, _ = hit("/auth?t=" + web.login_token("new@x.y", SECRET, app.clock()), cookie=cookie())
+    s, h, _ = hit("/auth?t=" + auth.login_token("new@x.y", SECRET, app.clock()), cookie=cookie())
     ck = jar(h, ck)
     uid = con.execute("select id from users where email = 'new@x.y'").fetchone()[0]
     con.execute("update users set nickname = '새사람', rules_at = 'x' where id = ?", (uid,))
@@ -1919,14 +1914,14 @@ def test_guest_first_remembers_wanted_stock_and_insights_count_real_visits(monke
         assert hit(q, cookie=cookie())[0].startswith("204")
     assert [k for (k,) in con.execute("select kind from visits where id > ? order by id", (n,))] == ["js", "gate_show"]
 
-    assert call(app, "/admin", cookie=f"s={web.sign(str(uid), SECRET)}")[0].startswith("404") and call(app, "/admin")[0].startswith("404")  # 운영자가 아니면 없는 화면
-    assert "운영자 인사이트" not in call(app, "/", cookie=f"s={web.sign(str(uid), SECRET)}")[2]
+    assert call(app, "/admin", cookie=f"s={auth.sign(str(uid), SECRET)}")[0].startswith("404") and call(app, "/admin")[0].startswith("404")  # 운영자가 아니면 없는 화면
+    assert "운영자 인사이트" not in call(app, "/", cookie=f"s={auth.sign(str(uid), SECRET)}")[2]
     g = call(app, "/login?want=" + quote("현대차"))
     assert "가입하면 「현대차」부터 바로 담아 드려요" in g[2] and "want=" in g[1]["Set-Cookie"]
     assert 'id="guest-gate"' not in hit("/login", cookie=cookie())[2]  # 가입 화면엔 덮개가 없다 — 있으면 이메일을 못 넣는다
     con.execute("insert into users (email, created_at, nickname, rules_at) values ('boss@x.y', '2026-10-01', '운영자', 'x')")
     con.commit()
-    boss = f"s={web.sign(str(con.execute("select id from users where email = 'boss@x.y'").fetchone()[0]), SECRET)}"
+    boss = f"s={auth.sign(str(con.execute("select id from users where email = 'boss@x.y'").fetchone()[0]), SECRET)}"
     assert 'href="/admin"' in call(app, "/", cookie=boss)[2]  # 운영자 계정이면 홈 맨 아래에 인사이트로 가는 길
     board = call(app, "/admin?d=7", cookie=boss)[2]
     assert "가입 덮개를 본 사람" in board and "이메일을 넣은 사람" in board and "망설인" not in board

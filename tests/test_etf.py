@@ -3,7 +3,7 @@
 import json
 from datetime import date
 
-from hanjang import collect, db, etf, web
+from hanjang import collect, db, etf, notepage
 
 # DART 투자설명서 표지 (2026-10-08 신한SOL국고채3년 · 10-01 삼성KODEX 코스피에서 줄임)
 SOL = ("정 정 신 고 (보고) 2026년 10월 08일 1. 정정대상 공시서류 : 간이투자설명서 2. 정정대상 공시서류의 최초제출일 : 2022.08.22 "
@@ -50,7 +50,7 @@ def test_note_is_plain_and_renders_like_a_stock_note():
     assert all(s["refs"] == ["F1"] for sec in body["sections"] for s in sec["sentences"])  # 모든 문장에 원문 링크
     _, lev = etf.note("삼성KODEX미국달러선물레버리지특별자산상장지수투자신탁[미국달러-파생형]", {}, "r", "2026-10-01")
     assert "두 배만큼" in json.dumps(lev, ensure_ascii=False)
-    html_ = web.render_note("SOL 국고채3년", "ETFabcde", "2026-10-05", body, "code:etf", facts)
+    html_ = notepage.render_note("SOL 국고채3년", "ETFabcde", "2026-10-05", body, "code:etf", facts)
     assert "무엇을 담는 상자인가요?" in html_ and "dart.fss.or.kr" in html_
 
 

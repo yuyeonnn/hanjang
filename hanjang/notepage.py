@@ -2,12 +2,11 @@
 
 import json
 import re
-from datetime import date
 from urllib.parse import quote
 
 from hanjang import notes, tree
 from hanjang.charts import DONUT, chapter, price_chart
-from hanjang.ui import DART_VIEW, RULE, RULE_FLIP, avatar, e, industry_chip, logo, page
+from hanjang.ui import RULE, RULE_FLIP, avatar, e, industry_chip, logo, page
 
 
 def business_block(biz: dict | None, rno: str | None) -> str:
@@ -18,7 +17,7 @@ def business_block(biz: dict | None, rno: str | None) -> str:
         f'<div class="flex items-center gap-2 py-1"><span class="w-[44%] text-[12px] leading-4 text-on-surface-variant">{e(s["name"])}</span>'
         f'<span class="flex-1 h-2 rounded-full bg-surface-container overflow-hidden"><span class="block h-full bg-primary rounded-full" style="width:{min(float(s["share"][:-1]), 100):.1f}%"></span></span>'
         f'<span class="w-12 text-right text-[12px] font-semibold text-on-surface tabular-nums">{e(s["share"])}</span></div>' for s in biz.get("segments", []))  # fmt: skip
-    url = rno if (rno or "").startswith("http") else DART_VIEW.format(rno)  # 미국은 report() 가 SEC 주소를 넘긴다
+    url = rno if (rno or "").startswith("http") else notes.DART.format(rno)  # 미국은 report() 가 SEC 주소를 넘긴다
     link = f'<a class="text-outline underline" href="{url}" target="_blank" rel="noopener">{"연차 보고서(10-K) 원문" if url.startswith("https://www.sec.gov") else "사업보고서 원문"}</a>' if rno else ""
     return chapter("무엇으로 돈을 버나요?", " ".join(e(x) for x in biz["what"]),
                    (f'<div class="mt-space-xs"><div class="font-label-micro text-label-micro text-outline mb-1">부문별 매출 비중</div>{segs}</div>' if segs else "")
@@ -37,13 +36,13 @@ def ring(parts: list[tuple[float, str]], size: str = "w-20 h-20") -> str:
 
 def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
     """회사 사정 아래 그림 둘 — ① 100원 팔면 얼마 남나(매출→영업이익→순이익) ② 빚과 내 돈(부채 : 자본).
-    증권사 보고서의 손익·재무상태표를 그대로 옮기지 않고 질문 하나에 그림 하나 (사용자 10/9). 매출이 없는 금융사는 ①②를 그리지 않는다
+    증권사 보고서의 손익·재무상태표를 그대로 옮기지 않고 질문 하나에 그림 하나. 매출이 없는 금융사는 ①②를 그리지 않는다
     (예금이 빚으로 잡혀 부채비율이 뜻이 없다)."""
     if not fin:
         return ""
     mid = mid or {}
     y, rev, oi, ni, eq, li = fin
-    if mid.get("금융"):  # 증권·은행·보험 — 고객 돈이 빚으로, 사고판 금액이 매출로 잡혀 두 그림 모두 다른 업종과 같은 잣대가 아니다 (사용자 10/9)
+    if mid.get("금융"):  # 증권·은행·보험 — 고객 돈이 빚으로, 사고판 금액이 매출로 잡혀 두 그림 모두 다른 업종과 같은 잣대가 아니다
         roe = f" 대신 자기 돈으로 1년에 얼마를 벌었는지(ROE {ni / eq * 100:.1f}%)를 봐요." if ni is not None and eq and eq > 0 else ""
         return ('<div class="py-space-md my-space-xs border-b border-outline-variant/30"><div class="font-label-regular text-label-regular text-on-surface font-semibold">금융회사는 잣대가 달라요</div>'
                 '<p class="mt-1 text-[13px] leading-relaxed text-on-surface-variant">고객이 맡긴 돈이 「빚」으로 잡혀 부채비율이 원래 수백~천 %이고, 사고판 금액이 「매출」로 잡혀 100원당 남긴 돈이 작게 나와요. '
@@ -80,7 +79,7 @@ def money_blocks(fin: tuple | None, mid: dict | None = None) -> str:
 
 
 def returns_html(divs: list[tuple], buys: list[tuple]) -> str:
-    """주주에게 돌려준 돈 — 최근 해 배당 총액 + 최근 1년 자사주 취득 결정 금액. 기간이 달라 더하지 않고 나란히 (사용자 10/9 검토)."""
+    """주주에게 돌려준 돈 — 최근 해 배당 총액 + 최근 1년 자사주 취득 결정 금액. 기간이 달라 더하지 않고 나란히."""
     rows = []
     if divs and divs[-1][2]:
         rows.append((f"{divs[-1][0]}년 배당", divs[-1][2], DONUT[0]))
@@ -194,10 +193,9 @@ TIPS = {  # 주주를 위한 읽기 팁 — 이 달에 가장 많은 공시 종�
     "CB_BW": ("전환사채는 전환 가격을 함께 봐요", "주식으로 바뀌면 주식 수가 늘어 기존 주주 몫이 묽어질 수 있어요."),
 }
 TIP_DEFAULT = ("공시 원문은 DART에서 누구나 볼 수 있어요", "번호를 누르면 금융감독원 전자공시 원문이 열려요.")
-FACT_SHORT = {"F1": "매출", "F2": "영업이익", "F3": "부채비율", "F4": "ROE"}
-# 출처 번호는 읽기를 방해하지 않게 — 본문보다 작은 회색 위첨자 (사용자 10/7). 누르면 출처 창
+# 출처 번호는 읽기를 방해하지 않게 — 본문보다 작은 회색 위첨자. 누르면 출처 창
 CITE = "align-super ml-0.5 text-[9px] leading-none font-normal hover:text-on-surface-variant transition-colors"
-# 출처 번호 색 — 누가 말한 것인지 (사용자 10/9 검토: 사실과 해석을 나눠 보이게). 아래 「작성 기준」에 같은 색으로 풀이
+# 출처 번호 색 — 누가 말한 것인지. 아래 「작성 기준」에 같은 색으로 풀이
 CITE_TONE = {"F": "text-primary/70", "D": "text-secondary/80", "I": "text-secondary/80", "N": "text-outline/70"}
 
 
@@ -252,7 +250,7 @@ def paras(sents: list[dict], seen: set) -> str:
 
 
 def soften(text: str) -> str:
-    """괄호 속 숫자 보조 설명은 작고 회색으로 — 「(9.0조원 · 7,921억원)(영업이익률 8.8%)」 처럼 본문을 끊지 않게 (사용자 10/9).
+    """괄호 속 숫자 보조 설명은 작고 회색으로 — 「(9.0조원 · 7,921억원)(영업이익률 8.8%)」 처럼 본문을 끊지 않게.
     붙어 있는 괄호 둘은 하나로 잇는다. 글은 바꾸지 않는다(숫자·출처 그대로)."""
     text = re.sub(r"\)\s*\(", " · ", e(text))
     return re.sub(r"\(([^()]*)\)", r'<span class="text-[12px] text-outline">(\1)</span>', text)
@@ -308,7 +306,7 @@ FILLED = "font-variation-settings:'FILL' 1,'wght' 600"  # 꽉 찬 검은 그림 
 
 
 def figure(f: dict | None) -> str:
-    """읽기 팁 인포그래픽 — 상자·흰 바탕 없이 큰 검은 그림과 글. flow 는 휴대폰에서 세로·넓은 화면에서 가로로 (사용자 10/10)."""
+    """읽기 팁 인포그래픽 — 상자·흰 바탕 없이 큰 검은 그림과 글. flow 는 휴대폰에서 세로·넓은 화면에서 가로로."""
     if not f:
         return ""
     head = (f'<figure class="my-space-xl"><figcaption class="mb-5 text-[13px] font-semibold tracking-wide text-outline">{e(f["title"])}</figcaption>')
@@ -344,7 +342,7 @@ def figure(f: dict | None) -> str:
         items = "".join(f'<div class="flex flex-col gap-2">{icon(ic, "text-[40px] lg:text-[48px]")}<b class="text-[15px] leading-[21px] text-on-surface">{e(t)}</b>'
                         f'<span class="text-[13px] leading-[19px] text-on-surface-variant">{e(d)}</span></div>' for ic, t, d in f["items"])  # fmt: skip
         return head + f'<div class="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-7">{items}</div>{note}</figure>'
-    if f["type"] == "ladder":  # 먼저 받는 차례 — 왼쪽 맞춤 + 아래 화살표, 번호·배경·들여쓰기 없이 (사용자 10/10)
+    if f["type"] == "ladder":  # 먼저 받는 차례 — 왼쪽 맞춤 + 아래 화살표, 번호·배경·들여쓰기 없이
         arrow = '<span class="material-symbols-outlined text-[22px] text-outline-variant pl-2" aria-hidden="true">arrow_downward</span>'
         rows = arrow.join(f'<div class="flex items-center gap-3">{icon(ic, "text-[36px] lg:text-[44px]")}'
                           f'<span class="flex flex-col min-w-0"><b class="text-[15px] leading-[22px] text-on-surface">{e(t)}</b>'
@@ -403,10 +401,6 @@ def md(made: str) -> str:
 NEWS_TITLES = ("최근 소식", "이번 주 소식", "요즘 무슨")  # 공시·소식 절 — 새 이름과 옛 노트 이름
 
 
-def redone(week: str, made: str) -> str:
-    """주 중간에 다시 쓴 노트면 「 · 10월 8일 고침」 — 월요일에 쓴 그대로면 빈 글."""
-    d = date.fromisoformat(made[:10]) if re.match(r"\d{4}-\d{2}-\d{2}", made or "") else None
-    return f" · {d.month}월 {d.day}일 고침" if d and d.isoformat() > week else ""
 
 
 def owners_block(owners: tuple | None) -> str:
@@ -454,7 +448,7 @@ def render_note(name: str, ticker: str, week: str, body: dict, writer: str, fact
         f'<aside class="my-space-xl lg:my-10 text-center"{"" if chart else ' style="margin-top:0"'}>{RULE}<p class="py-space-lg px-space-md font-body-reading-strong font-bold text-[18px] leading-[30px] lg:text-[20px] lg:leading-[34px] text-primary">{e(notes.mend(body["headline"]))}</p>{RULE_FLIP}</aside>',
     ]  # fmt: skip
     recent = ""
-    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 「좋게 볼 점과 주의해서 볼 점」 아래에 놓는다 (사용자 10/11)
+    if report.get("events"):  # 요즘 생긴 일 — 내 종목 카드에 뜬 그 문구들. 「좋게 볼 점과 주의해서 볼 점」 아래에 놓는다
         rows = "".join(
             f'<a href="{"#who" if icon in WHO_ICONS else e(href)}" class="py-3 flex items-start gap-2.5"><span class="material-symbols-outlined text-[18px] mt-0.5 {tint}">{icon}</span>'
             f'<span class="min-w-0 flex-1 flex flex-col gap-0.5"><span class="text-[15px] leading-[21px] font-semibold text-on-surface">{e(what)}</span>'

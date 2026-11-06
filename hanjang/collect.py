@@ -150,7 +150,7 @@ def per_stock(con: sqlite3.Connection, dart: "sources.Dart", tickers: list[str],
 
 
 def first(ticker: str, today: date | None = None) -> bool:
-    """새로 담은 종목 — 그 종목 자료만 바로 받고 첫 노트를 쓴다(1~2분). 다음 아침까지 기다리지 않게 (사용자 10/9).
+    """새로 담은 종목 — 그 종목 자료만 바로 받고 첫 노트를 쓴다(1~2분). 다음 아침까지 기다리지 않게.
     DART 가 쉬면(점검) 아무것도 하지 않고 False — 다음 매일 실행이 받는다. 화면 서버가 따로 띄운 실에서 부른다."""
     from hanjang import notes
 

@@ -32,10 +32,10 @@ DIRECTION = {"RIGHTS_ISSUE": -1, "CB_BW": -1, "LAWSUIT": -1, "TRADING_HALT": -1,
 # 순서대로 첫 번째가 이긴다. 여기 없는 제목만 AI 가 분류한다
 TITLE_RULES = (
     (r"최대주주등소유주식변동", "OTHER", 1),
-    # 걸리는 공시 — 예전엔 「기타」로 묻혔다. 그날 바로 보이고 알림이 간다(사용자 10/12). 보도 해명의 재공시는 morning.rumors 가 중요도를 낮춘다
+    # 걸리는 공시 — 예전엔 「기타」로 묻혔다. 그날 바로 보이고 알림이 간다. 보도 해명의 재공시는 morning.rumors 가 중요도를 낮춘다
     (r"횡령|배임", "FRAUD", 3),
     (r"풍문또는보도", "RUMOR", 2),
-    # 주가가 크게 움직여 거래소가 까닭을 물은 것(「현저한 시황변동」)과 회사의 답 — 한장이 주가 자료 없이 「내 종목이 크게 움직였다」를 아는 유일한 길 (사용자 10/13)
+    # 주가가 크게 움직여 거래소가 까닭을 물은 것(「현저한 시황변동」)과 회사의 답 — 한장이 주가 자료 없이 「내 종목이 크게 움직였다」를 아는 유일한 길
     (r"현저한시황변동", "SWING", 2),
     (r"자기주식(취득|소각)|주식소각결정|자기주식취득신탁계약체결", "BUYBACK", 3),
     (r"(?<!무)유상증자결정", "RIGHTS_ISSUE", 3),
@@ -121,6 +121,16 @@ TITLE_PLAIN = (
 )
 
 
+def source_url(con: sqlite3.Connection, rno: str | None) -> str:
+    """원문 주소 — 국내 접수번호(숫자)는 DART, 미국 접수번호(0001045810-26-000073)는 SEC 공시 목록 쪽. 모르면 빈 글."""
+    if not rno:
+        return ""
+    if "-" not in rno:
+        return DART.format(rno)
+    row = con.execute("select s.cik from filings f join stocks s using(ticker) where f.accession = ?", (rno,)).fetchone()
+    return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else ""
+
+
 def korean_num(n: int) -> str:
     """사람이 읽는 숫자 — 968091 → 「96만 8,091」 · 12345678 → 「1,234만 5,678」 · 1234 → 「1,234」. 정확한 값 그대로(반올림 없음)."""
     sign, n = ("-" if n < 0 else ""), abs(n)
@@ -135,7 +145,7 @@ def korean_num(n: int) -> str:
 # AI 가 몰래 한 셈 — 「두 배 넘게」「절반」「3분의 1」. 숫자 검사를 피해 가는 말이라 따로 막는다 (계산은 코드만, 불변식 2)
 CALC = re.compile(r"(?<![가-힣])(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|몇|수십|\d+)\s?배|절반|(\d+|[이삼사오육칠팔구십])\s?분의\s?(\d+|[일이삼사오육칠팔구])")
 
-# 자릿수가 긴 날숫자(「164,500,200,000」) — 사람이 읽기 힘들다. 글에 나오면 탈락 (사용자 10/8)
+# 자릿수가 긴 날숫자(「164,500,200,000」) — 사람이 읽기 힘들다. 글에 나오면 탈락
 LONGNUM = re.compile(r"(?<![\d,.])\d{1,3}(?:,\d{3}){2,}(?![\d,])")
 
 
@@ -177,12 +187,12 @@ PREDICT = re.compile(r"전망이|전망돼|것으로 보여|것으로 보입|것
 UP = re.compile(r"늘|증가|커졌|많아졌|올랐|개선|흑자로")
 DOWN = re.compile(r"줄|감소|작아졌|적어졌|내렸|악화|떨어|적자로")
 SLOT = re.compile(r"\{([A-Z]\d+)\.([가-힣]+)\}")
-# 읽기 검사 (사용자 10/9: 깨진 이음·되풀이·어려운 말이 하나라도 있으면 안 된다) — 걸리면 다시 쓰게 한다
+# 읽기 검사 — 걸리면 다시 쓰게 한다
 HARD = re.compile(r"유상증자|신주|발행가액|공정공시|기재정정|단일판매|전환사채|자기주식|잠정실적|결산실적")  # 괄호 밖에서 — 쉬운 말로 바꿔 쓴다
 STEM = re.compile(r"(늘었|줄었|많았|적었|높았|낮았|돌아섰|이어졌|늘렸|줄였)(?![어고는지으다던기을거네죠습음])")  # 줄기 뒤에 끝이 없음
 JUDGE = re.compile(r"반가운|반갑|호재|악재|좋은 소식|나쁜 소식|긍정적인 신호|부정적인 신호")
 REPEAT = re.compile(r"([가-힣][가-힣 ]{6,}[가-힣])[^.]*?\1")  # 한 문장 안에서 같은 말(8자 넘게)이 두 번
-TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "최근 소식", "임원·큰손은 어떻게 움직였나요?")  # 「이번 주」라 하면서 석 달 전 공시가 섞였다 (사용자 10/9)  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
+TITLES = ("회사 사정은 어떤가요?", "올해 장사는 어떤가요?", "최근 소식", "임원·큰손은 어떻게 움직였나요?")  # 「이번 주」라 하면서 석 달 전 공시가 섞였다  # 소식 = 공시(D) + 뉴스룸·언론 RSS(N)
 NEWS_DAYS = 7
 EVENT_DAYS = 90
 
@@ -408,7 +418,7 @@ def trend(cur: int, prev: int | None) -> tuple[int, str, str]:
 
 
 def story_facts(fin: list[tuple], url: str, yy: str) -> list[dict]:
-    """「회사 사정」을 이야기로 쓰게 하는 재료 — 지표를 늘어놓지 않고 「지금 어떤 상황인지」 말하려면 필요하다 (사용자 10/8).
+    """「회사 사정」을 이야기로 쓰게 하는 재료 — 지표를 늘어놓지 않고 「지금 어떤 상황인지」 말하려면 필요하다.
     F5 = 남기는 정도(100원 팔아 본업으로 몇 원) · F6 = 몇 년 흐름 속 올해의 자리. 계산은 코드가, 말은 AI 가. tone 은 중립(좋다·나쁘다는 F1~F4 가 정한다)."""
     out = []
     y, rev, oi = fin[0][0], fin[0][1], fin[0][2]
@@ -574,7 +584,7 @@ def us_facts(con: sqlite3.Connection, ticker: str) -> list[dict]:
                     "slots": {"첫지역": geo[0]["name"], "첫지역몫": geo[0]["share"], "둘째지역": geo[1]["name"], "둘째지역몫": geo[1]["share"]}})  # fmt: skip
     ol = con.execute("select accession, date, body from outlooks where ticker = ?", (ticker,)).fetchone()
     items = ol and json.loads(ol[2])["items"]
-    if items:  # 회사가 실적 발표에서 밝힌 다음 기간 전망 — 회사의 말 그대로, 숫자는 원문 대조를 통과한 것만 (사용자 10/9: 싣는다)
+    if items:  # 회사가 실적 발표에서 밝힌 다음 기간 전망 — 회사의 말 그대로, 숫자는 원문 대조를 통과한 것만
         from hanjang.us import METRIC_KO, say_outlook
         d = date.fromisoformat(ol[1])
         period = json.loads(ol[2]).get("period", "")
@@ -726,7 +736,7 @@ def peers_of(con: sqlite3.Connection, ticker: str) -> tuple[str | None, list[tup
 
 def industry_mid(con: sqlite3.Connection, ticker: str) -> dict:
     """같은 업종(우리 종목 안) 중간값 — 100원당 남긴 돈 · 부채비율. 셋 이상일 때만. 금융회사면 {"금융": True}.
-    업종마다 원래 빚이 많거나(조선 선수금·항공 리스) 조금 남기는(유통·상사) 구조가 있어, 절대 기준만으로 판단하지 않게 (사용자 10/9)."""
+    업종마다 원래 빚이 많거나(조선 선수금·항공 리스) 조금 남기는(유통·상사) 구조가 있어, 절대 기준만으로 판단하지 않게."""
     me = con.execute("select market, induty_code, sic from stocks where ticker = ?", (ticker,)).fetchone()
     code = me and (me[2] if me[0] == "US" else me[1])
     label, all_rows = peers_of(con, ticker)
@@ -752,7 +762,7 @@ def industry_mid(con: sqlite3.Connection, ticker: str) -> dict:
 
 
 def when(d: date, today: date) -> str:
-    """공시가 얼마나 지난 일인지 — 「최근 소식」에서 이번 주 일과 지난 일을 나눠 말하게 (사용자 10/9: 「이번 주」라며 7월 공시)."""
+    """공시가 얼마나 지난 일인지 — 「최근 소식」에서 이번 주 일과 지난 일을 나눠 말하게."""
     days = (today - d).days
     return "이번 주" if days <= 7 else "지난주" if days <= 14 else f"{d.month}월"
 
@@ -867,7 +877,6 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
                       (ticker, (today - timedelta(days=EVENT_DAYS)).isoformat())).fetchall()  # fmt: skip
     for k, (rno, d, title, code, dr) in enumerate(evs, 1):  # 중요한 것부터(D1 이 가장 중요), 같으면 최근 것부터
         d = date.fromisoformat(d)
-        tone = ""
         day = f"{d.month}월 {d.day}일"
         easy = plain(title)
         if code == "RUMOR":  # 보도 해명은 원문 표에서 꺼낸 문장(morning.rumors)
@@ -878,7 +887,7 @@ def _facts(con: sqlite3.Connection, ticker: str, today: date, us: dict | None) -
                 o = date.fromisoformat(on[0])
                 easy = f"실적을 {o.month}월 {o.day}일에 발표하겠다고 미리 알렸어요"
         what = f" — 무슨 일: {easy}" if easy else ""
-        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}{tone}", "url": link(rno),
+        out.append({"id": f"D{k}", "text": f"{day} {EVENT_KO[code]} 공시 「{tidy(title)}」{what}", "url": link(rno),
                     "tone": dr or 0, "slots": {"날짜": day, "종류": EVENT_KO[code], "제목": f"「{tidy(title)}」", "시기": when(d, today)}
                     | ({"무슨일": easy} if easy else {})})  # fmt: skip
     out += insider_facts(con, ticker, today)
@@ -1007,18 +1016,18 @@ def dedupe(text: str) -> str:
 
     text = re.sub(r"(\d+월) (?=\1 \d)", "", text)  # 「8월 {D3.날짜}」→「8월 8월 3일」 → 「8월 3일」
     text = re.sub(r"\(([^()]*)\)", one, text)
-    # 괄호에 기사 제목만 넣은 것은(하나든 여럿이든) 통째로 뺀다 — 출처 번호로 기사가 열린다 (사용자 10/8)
+    # 괄호에 기사 제목만 넣은 것은(하나든 여럿이든) 통째로 뺀다 — 출처 번호로 기사가 열린다
     return re.sub(r" ?\(「[^」]*」(?:(?:, ?| ?· ?)「[^」]*」)*\)", "", text)
 
 
 def undash(text: str) -> str:
-    """줄표(—) 대신 매끄러운 문장으로 — 「알렸어요 — 아직 숫자는 없어요」 → 「알렸어요. 아직 숫자는 없어요」 (사용자 10/9)."""
+    """줄표(—) 대신 매끄러운 문장으로 — 「알렸어요 — 아직 숫자는 없어요」 → 「알렸어요. 아직 숫자는 없어요」."""
     text = re.sub(r"(요|다)\s*—\s*", r"\1. ", text)
     return re.sub(r"\s*—\s*", ", ", text)
 
 
 def reword(text: str) -> str:
-    """예전에 틀리게 풀었던 말 — 「결산실적공시 예고」는 1년치가 아니라 실적 발표 날짜 알림이다 (사용자 10/9). 노트 글·출처 창 모두."""
+    """예전에 틀리게 풀었던 말 — 「결산실적공시 예고」는 1년치가 아니라 실적 발표 날짜 알림이다. 노트 글·출처 창 모두."""
     text = re.sub(r"1년치 결산 실적을 발표할 날짜를", "실적을 발표할 날짜를", text)
     text = re.sub(r"1년(?:치)? (?:결산 )?실적을 언제 발표할지", "실적을 언제 발표할지", text)
     text = re.sub(r"(날짜를 미리 알렸어요|발표할지 미리 알렸어요)(\([^()]*\))?(?:\.|,)?\s*(?:—\s*)?아직 숫자는 없어요", r"\1\2", text)
@@ -1061,7 +1070,7 @@ def unparen(text: str) -> str:
 
 def mend(text: str) -> str:
     """빈칸 값(낱말 줄기 「4번째로 많았」「줄였」, 「2021년」)에 AI 가 토씨·글자를 또 붙여 깨진 이음을 고친다.
-    fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」 (사용자 10/9 검토)."""
+    fill 에서도, 화면에 그릴 때도(이미 쓴 노트) 쓴다 — 「많았으로」「높았였어요」「3년년」「줄였 보고」「(9.4% -9.4%)」."""
     text = re.sub(r"(았|었)(?:으로|로)(?=[,\s])", r"\1고", text)
     text = re.sub(r"(았|었)(?:였|이었)", r"\1", text)
     text = re.sub(r"(\d년)년", r"\1", text)
@@ -1077,7 +1086,7 @@ def mend(text: str) -> str:
     text = re.sub(r"(렸|였|았|었) 보고를", r"\1다는 보고를", text)
     text = re.sub(r"(렸|였|았|었) (보고|공시)", r"\1다고 \2", text)
     text = re.sub(r"(\d[\d,]*(?:건|주|명|곳))([^()]{0,20})\(\1\)", r"\1\2", text)  # 「1건 있었어요(1건)」
-    # 날짜로 시작하는 문장 — 날짜는 문장 끝 괄호로 (사용자 10/9: 날짜가 앞에서 오가면 요점이 안 보인다)
+    # 날짜로 시작하는 문장 — 날짜는 문장 끝 괄호로
     text = re.sub(r"(?:^|(?<=[.!?] ))(\d+월 \d+일(?:(?:과|와|,| ·) (?:\d+월 )?\d+일)*)(?:에는|에도|에|엔|,)?\s+(.+?)([.!?])(?=\s|$)",
                   lambda m: f"{m[2][:1].upper()}{m[2][1:]}({m[1]}){m[3]}", text)
     text = re.sub(r"(았|었)에(?=\s)", r"\1던 해에", text)  # 「4번째로 많았에 머물렀어요」
@@ -1109,7 +1118,7 @@ def fill(sent: dict, by: dict[str, dict]) -> dict:
         bare = re.sub(rf"(?<!\d){mth}", "", bare)
     bare = re.sub(r"100원(어치|당)?", "", bare)  # 「100원어치 팔아 13원 남겨요」 — 셈의 단위지 사실 숫자가 아니다
     # 근거로 든 사실(refs·쓴 빈칸)에 글자 그대로 적힌 숫자는 빈칸 없이 옮겨도 된다 (토큰 대조) — 빈칸만 고집하면
-    # 맞는 숫자도 버려져 AI 글 대신 사실 목록이 나간다 (사용자 10/8: 「무슨 일: …」은 글이 아니다)
+    # 맞는 숫자도 버려져 AI 글 대신 사실 목록이 나간다
     cited = set(refs) | {fid for fid, _ in SLOT.findall(raw)}
     src = set().union(*(numbers(by[r]["text"]) for r in cited if r in by)) if cited else set()
     # 기간·횟수 같은 작은 정수(「최근 5년」「3건」)는 어느 사실에 있든 된다 — 큰 금액·비율은 근거 사실에 있어야만
@@ -1249,7 +1258,7 @@ def fill_note(j: dict, fs: list[dict]) -> dict:
         return {by[r]["slots"]["날짜"] for r in refs if r in by and "날짜" in by[r].get("slots", {})}
 
     def keep(xs):
-        """틀린 문장만 빼고 나머지는 살린다 — 한 문장 때문에 글 전체가 사실 목록으로 바뀌지 않게 (사용자 10/8)."""
+        """틀린 문장만 빼고 나머지는 살린다 — 한 문장 때문에 글 전체가 사실 목록으로 바뀌지 않게."""
         nonlocal total
         out = []
         for x in xs:
@@ -1384,7 +1393,7 @@ def code_note(fs: list[dict]) -> dict:
 
 
 def finish(note: dict, fs: list[dict], name: str = "") -> dict:
-    """좋게 본 것·걱정되는 것 — 해당 사실이 없는 칸은 비워 두고 화면에서 띄우지 않는다 (사용자 10/7).
+    """좋게 본 것·걱정되는 것 — 해당 사실이 없는 칸은 비워 두고 화면에서 띄우지 않는다.
     소제목이 없으면(코드 대체 글) 코드가 짓는다. 언론 키워드도 여기서 코드가 센다."""
     for key, title in (("good", "재무·공시에서 좋게 본 점"), ("concern", "재무·공시에서 걱정되는 점")):
         note[key] = note.get(key) or []

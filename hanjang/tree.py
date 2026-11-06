@@ -29,7 +29,7 @@ PINKS = ("#dc94a8", "#e6a8b8", "#eebbc8", "#f5cfd8", "#fae1e7")  # 110일 뒤 �
 
 
 # 수관 — 큰 덩이 하나에 작은 잎 덩이 여덟이 둘레로 겹친 모양(가운데 x·y, 반지름). 테두리가 뭉게뭉게해 공이 아니라 나무처럼 보이고,
-# 아랫단이 가장 넓다. 왼쪽·오른쪽은 거의 같되 똑같지는 않게 (사용자 10/13)
+# 아랫단이 가장 넓다. 왼쪽·오른쪽은 거의 같되 똑같지는 않게
 PUFFS = ((0, 0, 0.8), (0, -0.62, 0.4), (-0.5, -0.4, 0.42), (0.52, -0.38, 0.43), (-0.88, 0.1, 0.36), (0.86, 0.12, 0.38), (-0.56, 0.42, 0.38), (0.54, 0.44, 0.37), (0, 0.42, 0.4))
 
 
@@ -60,7 +60,7 @@ LEAVES, FLOWERS = _spots()
 
 
 def _clover(k: int) -> str:
-    """하트 모양 둥근 잎 k 장이 한 점에서 벌어진 잎 뭉치 (사용자 10/13: 보내 준 그림의 나무처럼). 크기 1 짜리 path."""
+    """하트 모양 둥근 잎 k 장이 한 점에서 벌어진 잎 뭉치. 크기 1 짜리 path."""
     d = ""
     for i in range(k):
         c, v = math.cos(math.tau * i / k), math.sin(math.tau * i / k)
@@ -92,7 +92,7 @@ def svg(n: int) -> str:
     name, _ = stage(n)
     gx, gy = 160, 270
     out = [f'<ellipse cx="{gx}" cy="{gy + 6}" rx="120" ry="10" fill="#dfe9cf" opacity="0.7"/>']
-    # 발밑 — 잔디가 나무 둘레에서부터 번져 한 달쯤이면 땅을 다 덮는다. 그 위에 작은 꽃(보름쯤부터) (사용자 10/11: 잔디로 뒤덮이게)
+    # 발밑 — 잔디가 나무 둘레에서부터 번져 한 달쯤이면 땅을 다 덮는다. 그 위에 작은 꽃(보름쯤부터)
     cover = min(1.0, (n + 3) / 30) if n else 0
     if cover:
         rx = 40 + 80 * cover
@@ -104,7 +104,7 @@ def svg(n: int) -> str:
             lean, tall = rng.uniform(-3, 3), rng.uniform(5, 10)
             blades.append((y, f'<path d="M{x:.1f} {y:.1f} q{lean / 2:.1f} -{tall / 2:.1f} {lean:.1f} -{tall:.1f}" stroke="{rng.choice(("#6fa172", "#8fbb7c", "#a3cc8c", "#7fae7a"))}"/>'))
         out.append('<g fill="none" stroke-width="1.5" stroke-linecap="round">' + "".join(b for _, b in sorted(blades)) + "</g>")
-    if n == 0:  # 흙 둔덕은 씨앗일 때만 — 싹이 난 뒤엔 잔디 위에 바로 선다 (사용자 10/11: 갈색 동그라미가 어색하다)
+    if n == 0:  # 흙 둔덕은 씨앗일 때만 — 싹이 난 뒤엔 잔디 위에 바로 선다
         out.append(f'<ellipse cx="{gx}" cy="{gy + 2}" rx="34" ry="7" fill="#8a6a48"/>')
     for i, x in enumerate((92, 232, 60, 262, 120, 204)[: min(6, n // 15)]):
         y, c = 262 + (i % 2) * 2, ("#f4c6cf", "#f6dc8a", "#ffffff")[i % 3]
@@ -179,7 +179,7 @@ def line(mood: str = "calm", width: int = 210) -> str:
 
 
 def perch(mood: str = "calm", width: int = 92) -> str:
-    """두 줄 띠(실선+점선) 바로 위에 세우는 나무 — 띠가 땅이 된다(사용자 10/14: 띠에 붙여 놓는 게 가장 예쁘다).
+    """두 줄 띠(실선+점선) 바로 위에 세우는 나무 — 띠가 땅이 된다.
     flex 줄(align-items:flex-end)의 오른쪽 끝에 넣고, 그 줄 바로 아래에 띠가 오게 한다. 그림 아래 여백만큼 살짝 내려 띠에 닿게."""
     return f'<span style="flex:none;display:flex;margin-bottom:-{2 if mood in MOODS else 1}px">{line(mood, width)}</span>'
 

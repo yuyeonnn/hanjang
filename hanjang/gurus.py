@@ -1,7 +1,7 @@
 """미국 유명 투자자 — SEC 13F(운용 자산 1억 달러가 넘는 투자자가 분기 끝 45일 안에 내는 미국 주식 보유 신고).
 미국 정부 자료라 자유롭게 쓴다(docs/stage3-us.md 「약관 확인」). 매일 실행에서 투자자마다 공시 목록 한 번 —
 새 13F 가 나온 투자자만 보유 표를 다시 받는다. 13F 에는 티커가 없어 CUSIP 으로 우리 종목과 맞춘다(cusip_us.txt).
-정치인 주식 거래 신고(STOCK Act)는 미국 법이 상업적 사용을 막아 뺐다 — 전문가 확인 뒤에 (사용자 10/10)."""
+정치인 주식 거래 신고(STOCK Act)는 미국 법이 상업적 사용을 막아 뺐다 — 전문가 확인 뒤에."""
 
 import io
 import re
@@ -108,6 +108,14 @@ def norm(name: str) -> tuple:
     return tuple(ABBR.get(w, w) for w in words if w not in SUFFIX)
 
 
+def name_index(sec) -> dict:
+    """정규화한 이름 → CIK. 같은 이름이 여럿이면 처음 것(티커 표는 시가총액 큰 순)."""
+    index: dict = {}
+    for c, title in sec.tickers().values():
+        index.setdefault(norm(title), c)
+    return index
+
+
 def sic_of(con, sec, index: dict, issuer: str) -> str:
     """우리 종목이 아닌 회사의 SIC — 이름으로 SEC 회사 표(CIK)를 찾고 공시 목록에서 SIC. 한 번 찾은 CIK 는 sics 표에. 못 찾으면 빈 값."""
     cik = index.get(norm(issuer))
@@ -132,10 +140,8 @@ def main(today: date | None = None, con=None, sec=None) -> None:
         if con.execute("select 1 from guru_holdings where guru = ? and accn = ? and sic is not null", (key, got[0])).fetchone():
             continue  # 새 신고가 없으면 그대로 (업종을 아직 안 붙인 옛 줄이면 다시)
         person = key in GURUS  # 업종 도넛은 유명 투자자만 — 기관(블랙록 수천 종목)까지 업종을 찾으면 SEC 를 수천 번 부른다
-        if person and index is None:  # 정규화한 이름 → CIK. 같은 이름이 여럿이면 처음 것(티커 표는 시가총액 큰 순)
-            index = {}
-            for c, title in sec.tickers().values():
-                index.setdefault(norm(title), c)
+        if person and index is None:
+            index = name_index(sec)
         merged: dict[str, list] = {}  # 우리 종목은 티커로 합친다 — 알파벳 A·C 가 두 줄로 나오지 않게
         for cik, g in each:
             for c, name, v, s in parse(table(sec, cik, g[0])):
@@ -154,9 +160,7 @@ def main(today: date | None = None, con=None, sec=None) -> None:
         top = con.execute("select cusip, issuer from guru_holdings where guru = ? and coalesce(sic, '') = '' and ticker is null"
                           " order by value desc limit 30", (key,)).fetchall()  # fmt: skip
         if top and index is None:
-            index = {}
-            for c, title in sec.tickers().values():
-                index.setdefault(norm(title), c)
+            index = name_index(sec)
         for c, issuer in top:
             con.execute("update guru_holdings set sic = ? where guru = ? and cusip = ?", (sic_of(con, sec, index, issuer), key, c))
         con.commit()

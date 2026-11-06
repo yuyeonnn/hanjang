@@ -1,7 +1,8 @@
 """SQLite 한 파일 — 표 정의는 docs/erd.md 가 정본. 같은 데이터를 다시 넣어도 PK 로 덮어쓴다(멱등).
-prices · betas 는 아직 만들지 않는다 — 시세를 쓸 권리가 없다 (docs/data-rights.md §4)."""
+prices 는 PRICE_DEV=1 인 내 컴퓨터에서만 채운다 · betas 는 만들지 않는다 — 시세를 남에게 보일 권리가 없다 (docs/data-rights.md §4)."""
 
 import sqlite3
+from datetime import timedelta
 
 from hanjang.sources import ROOT
 
@@ -150,12 +151,12 @@ MIGRATIONS = (
     "alter table stocks add column induty_code text",
     "alter table disclosures add column amount integer",
     "alter table disclosures add column plain text",  # 아침 한 장 — 코드 풀이가 없는 공시의 AI 한 문장(공시마다 한 번). 빈 칸 = 물어봤지만 못 씀
-    "alter table articles add column photo text",  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진 (사용자 10/9)
+    "alter table articles add column photo text",  # 피드 기사 사진 — 한 번 고르면 피드와 기사 화면이 늘 같은 사진
     "alter table users add column notices_seen text",  # 알림을 마지막으로 본 때 — 그 뒤의 새 팔로우만 빨간 점
     "alter table users add column mail_on integer not null default 1",  # 주간 안내 메일 켜짐(1)/꺼짐(0)
     "alter table users add column days integer",  # 내 나무 — 들어온 날 수(누적). 열어본 기록(views)은 180일 뒤 지워져도 나무는 줄지 않게
     "alter table users add column last_day text",  # 내 나무 — 마지막으로 센 날
-    "alter table users add column private integer not null default 0",  # 비공개 계정 (사용자 10/10)
+    "alter table users add column private integer not null default 0",  # 비공개 계정
     "alter table follows add column ok integer not null default 1",  # 비공개 계정 팔로우는 요청(ok 0) → 수락하면 1
     "alter table users add column nickname text",  # 남에게 보이는 이름 (이메일은 안 보인다)
     "alter table users add column bio text",  # 자기소개
@@ -229,8 +230,6 @@ def tidy(con: sqlite3.Connection, today) -> dict[str, int]:
     """오래돼 더 쓰지 않는 줄을 지운다 — 매일 실행이 부른다. 지운 줄 수를 돌려준다.
     열어본 기록: 시험 판정(6주)과 「이 주에 몇 번 읽혔나」에만 쓰니 반년이면 넉넉하다. 소식: 노트는 최근 10일 것만 쓴다.
     노트·공시·재무는 지우지 않는다 — 한 해에 수십 MB 로 작고, 지난 노트는 리그램·좋아요가 가리킨다."""
-    from datetime import timedelta
-
     out = {"views": con.execute("delete from views where at < ?", ((today - timedelta(days=VIEWS_DAYS)).isoformat(),)).rowcount,
            "news": con.execute("delete from news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount,
            "policy_news": con.execute("delete from policy_news where date < ?", ((today - timedelta(days=NEWS_DAYS)).isoformat(),)).rowcount,

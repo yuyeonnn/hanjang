@@ -1,6 +1,6 @@
 from datetime import date
 
-from hanjang import db, gurus
+from hanjang import charts, db, gurus, notepage, ui
 
 XML = """<?xml version="1.0" encoding="UTF-8"?>
 <ns1:informationTable xmlns:ns1="http://www.sec.gov/edgar/document/thirteenf/informationtable" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="x y">
@@ -73,7 +73,7 @@ def test_guru_page_and_note_owners_link_each_other():
     title, _, rows = app.owners("AAPL")
     assert title == "이 종목을 가진 유명 투자자·기관" and [(n, h, d) for n, h, _, d in rows] == [("워런 버핏 · 버크셔 해서웨이", "/learn/guru/buffett", "포트폴리오의 22.0% · 2026년 6월 30일 기준")]
     assert 'src="/static/people/buffett.jpg"' in rows[0][2] and "Public domain" in rows[0][2]  # 위키미디어 공용 사진 · 출처는 마우스를 올리면
-    assert 'href="/learn/guru/buffett"' in web.owners_block(app.owners("AAPL")) and web.owners_block(app.owners("005930")) == ""
+    assert 'href="/learn/guru/buffett"' in notepage.owners_block(app.owners("AAPL")) and notepage.owners_block(app.owners("005930")) == ""
     _, _, html_ = app.guru(1, "buffett", "", "")
     assert "어떤 업종에 많이 가졌나" in html_ and ">금융</span>" in html_ and ">44%</span>" in html_  # 금액 비중 — 아멕스 510억/1,170억
     assert "미국 주식 2종목" in html_ and "비중 22.0% · 660억 달러" in html_ and "American Express Co" in html_  # 대문자 줄임말은 보기 좋게
@@ -81,7 +81,7 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "2026년 6월 30일 기준, 2026년 8월 14일에 낸 신고" in html_ and "따라 사고팔라는 뜻이 아니에요" in html_
     assert "사진: <a" in html_ and "위키미디어 공용" in html_  # 페이지 맨 아래 사진 출처
     assert app.route("GET", "/static/people/buffett.jpg", {}, {}, None)[2][:2] == bytes([0xFF, 0xD8])  # JPEG
-    assert "/static/people/burry.jpg" not in web.guru_face("burry")  # 자유 이용 사진이 없으면 글자 동그라미
+    assert "/static/people/burry.jpg" not in ui.guru_face("burry")  # 자유 이용 사진이 없으면 글자 동그라미
     assert "가장 많이 가진 종목" in html_ and ">56.4%</span>" in html_ and ">애플</span>" in html_ and "금액이 큰 다섯 종목이에요" not in html_  # 애플 660억/1,170억
     left = html_.split('<svg viewBox="0 0 100 100"')[0].rsplit("<ul", 1)[1]  # 원 왼쪽 목록
     assert "flex-row-reverse" in left and "items-end" in left and ">American Express Co</span>" in left  # 왼쪽 반 조각은 왼쪽 목록, 오른쪽 정렬
@@ -95,16 +95,15 @@ def test_guru_page_and_note_owners_link_each_other():
     assert "지분이 큰 순서" not in big and "최근 늘리고 줄인" not in big  # 너무 자세한 목록은 뺐다
     con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no, induty_code) values ('kbam', '005930', '삼성전자', 'Y', 5.2, 0, '2026-10-01', 'r2', '264')")
     assert "5% 넘게 가진 회사</h2>" in app.big(1, "kbam", "", "")[2]  # 미국 신고가 없는 기관은 5% 목록이 전부라 남긴다
-    two = web.pie([("가", 50), ("나", 30), ("다", 20)], n=2)  # 기타는 그리지 않는다 — 상위 2종목만, 글자는 전체 중 비중
+    two = charts.pie([("가", 50), ("나", 30), ("다", 20)], n=2)  # 기타는 그리지 않는다 — 상위 2종목만, 글자는 전체 중 비중
     assert two.count("<path") == 2 and ">기타<" not in two and ">50.0%</span>" in two and "기타는 빼고 상위 2종목만 그렸어요 (전체의 80%)" in two
     assert "/learn/guru/buffett" in app.guru_list() and app.guru(1, "nobody", "", "")[0].startswith("404")
 
 
 def test_spread_out_portfolio_is_still_a_pie_without_other():
-    from hanjang import web
 
     many = [(f"종목{i}", 3) for i in range(30)]  # 넓게 나눈 곳도 파이 — 기타 없이 상위 5, 뺐다는 말은 눈에 띄게
-    h = web.pie(many)
+    h = charts.pie(many)
     assert "data-pie" in h and h.count("<path") == 5 and "기타는 빼고 상위 5종목만 그렸어요 (전체의 17%)" in h and ">기타<" not in h
 
 def test_every_holdings_list_shows_twenty():
@@ -119,7 +118,6 @@ def test_every_holdings_list_shows_twenty():
 
 
 def test_industry_tag_is_plain_gray_text():
-    from hanjang import web
 
-    assert ">#반도체</span>" in web.ind_tag(sic="3674") and "bg-" not in web.ind_tag(sic="3674")  # 상자·배경 없이 회색 글씨
-    assert ">#ETF</span>" in web.ind_tag(sic="", issuer="ISHARES TR") and web.ind_tag() == ""
+    assert ">#반도체</span>" in charts.ind_tag(sic="3674") and "bg-" not in charts.ind_tag(sic="3674")  # 상자·배경 없이 회색 글씨
+    assert ">#ETF</span>" in charts.ind_tag(sic="", issuer="ISHARES TR") and charts.ind_tag() == ""

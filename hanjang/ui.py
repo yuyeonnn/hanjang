@@ -51,7 +51,7 @@ HEAD = """<meta charset="utf-8"><meta content="width=device-width, initial-scale
 
 
 # 카카오톡·문자로 링크를 보낼 때 뜨는 미리보기 카드 — 어느 쪽을 보내도 같은 소개 (로그인 같은 화면 이름은 빼고)
-SHARE_TITLE = "한장 — 한눈에 읽는 장"  # 이행시: 한눈에 읽는 / 장(場) — 종이 한 장이면서 주식 시장 (사용자 10/12)
+SHARE_TITLE = "한장 — 한눈에 읽는 장"  # 이행시: 한눈에 읽는 / 장(場) — 종이 한 장이면서 주식 시장
 SHARE_DESC = "공시·재무·소식을 이어서, 내 종목이 지금 어떤 상황인지 쉬운 글로 설명합니다."
 
 
@@ -64,7 +64,7 @@ def share_tags() -> str:
             f'<meta name="twitter:card" content="summary_large_image">')  # fmt: skip
 
 
-# 좋아요·리그램은 화면을 다시 불러오지 않는다 — 누르면 맨 위로 튀어 올라가던 것 (사용자 10/9).
+# 좋아요·리그램은 화면을 다시 불러오지 않는다 — 누르면 맨 위로 튀어 올라가던 것.
 # 보내고 나서 같은 화면을 받아 이 두 단추 묶음만 바꿔 끼운다(숫자·눌림 상태가 서버 기준 그대로). 자바스크립트가 없으면 예전처럼 새로 불러온다
 STAY = ("<script>document.addEventListener('submit',async ev=>{const f=ev.target;const a=f.getAttribute('action');"
         "if(a!=='/like'&&a!=='/regram'&&a!=='/follow'&&a!=='/save')return;ev.preventDefault();const sel='form[action=\"/like\"],form[action=\"/regram\"],form[action=\"/follow\"],form[action=\"/save\"]';"
@@ -75,7 +75,7 @@ STAY = ("<script>document.addEventListener('submit',async ev=>{const f=ev.target
         "catch(err){f.submit();}});</script>")
 
 
-# 형광펜 — 노트·소식·읽기 팁 글을 끌어서 고르면 색 네 가지와 「복사」가 뜬다. 칠한 곳은 서버에 남아 다시 열어도 보인다 (사용자 10/10).
+# 형광펜 — 노트·소식·읽기 팁 글을 끌어서 고르면 색 네 가지와 「복사」가 뜬다. 칠한 곳은 서버에 남아 다시 열어도 보인다.
 # 자리는 글자 위치(s~e)와 그 글귀로 기억한다 — 글이 조금 바뀌어 위치가 어긋나면 같은 글귀를 찾아 칠하고, 없으면 건너뛴다.
 # 칠한 곳을 누르면 「지우기」(누를 때 고른 글이 풀리며 띠가 바로 사라지던 것을 막는다 — 다른 곳을 누르면 닫힌다). 단추·아이콘 글자는 세지 않는다(좋아요 숫자가 바뀌어도 위치가 안 밀리게)
 HL = r"""<script>(()=>{const P=location.pathname;if(!/^\/(n|a|learn)\/./.test(P))return;const root=document.querySelector('main');if(!root)return;
@@ -122,7 +122,7 @@ def page(title: str, body_attr: str, inner: str) -> str:
             f'<body class="{body_attr}">{inner}{STAY}{HL}{SEEN}</body></html>')  # fmt: skip
 
 
-# 업종마다 작은 그림 하나 — 노트 머리에 귀엽게 (사용자 10/10: 톱니바퀴 같은 것). Material Symbols(Apache 2.0) 아이콘 이름
+# 업종마다 작은 그림 하나 — 노트 머리에 귀엽게. Material Symbols(Apache 2.0) 아이콘 이름
 INDUSTRY_ICON = {"반도체": "memory", "전자부품": "developer_board", "전자·통신장비": "devices", "통신": "cell_tower",
                  "은행": "account_balance", "금융": "account_balance", "금융서비스": "account_balance", "증권": "candlestick_chart", "보험": "health_and_safety",
                  "지주회사": "domain", "제약·바이오": "medication", "연구개발": "biotech", "화학": "science", "석유정제": "oil_barrel",
@@ -244,7 +244,7 @@ def photo_for(induty_code: str | None, name: str = "") -> str:
 
 
 def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
-    """뉴닉식 한 줄 — 왼쪽 사진, 오른쪽 제목 · 두 줄 요약 · 출처와 날짜. 글씨는 작게, 줄 사이는 넉넉히 (사용자 10/8)."""
+    """뉴닉식 한 줄 — 왼쪽 사진, 오른쪽 제목 · 두 줄 요약 · 출처와 날짜. 글씨는 작게, 줄 사이는 넉넉히."""
     return (f'<article class="py-4 lg:py-6 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-3.5 items-start lg:flex-col lg:gap-4 group">'
             f'<img alt="" loading="lazy" class="w-[36%] max-w-[148px] aspect-[4/3] lg:w-full lg:max-w-none lg:aspect-[16/9] object-cover rounded-lg lg:rounded-2xl shrink-0 bg-surface-container" src="{e(img)}">'
             '<span class="min-w-0 flex flex-col gap-1 lg:gap-2 pt-0.5">'
@@ -255,7 +255,7 @@ def story(href: str, img: str, title: str, excerpt: str, source: str, day: str, 
 
 
 def note_card(t: str, name: str, home: str | None, head: str, day: str, top: str = "") -> str:
-    """노트 리그램 — 내 종목 카드와 같은 모양: 로고 · 이름 · 종목 코드 · 날짜 / 한 줄 요약 / 「노트 읽기 →」 (사용자 10/9)."""
+    """노트 리그램 — 내 종목 카드와 같은 모양: 로고 · 이름 · 종목 코드 · 날짜 / 한 줄 요약 / 「노트 읽기 →」."""
     return (f'<article class="py-4 flex flex-col gap-2">{top}<div class="flex items-center gap-2">{logo(name, home, "w-7 h-7")}'
             f'<a href="/n/{e(t)}"><h3 class="font-headline-sm text-headline-sm text-on-surface font-semibold hover:underline">{e(name)}</h3></a>'
             f'<span class="font-citation-ref text-citation-ref text-outline px-1.5 py-0.5 rounded bg-surface-container-low">{e(t)}</span>'
@@ -266,7 +266,7 @@ def note_card(t: str, name: str, home: str | None, head: str, day: str, top: str
 
 
 def row(href: str, img: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
-    """피드 기사 리그램 — 뉴닉식 한 줄: 왼쪽 작은 사진 · 제목 · 두 줄 요약 · 출처와 날짜. 넓은 화면에서도 사진은 작게 (사용자 10/9)."""
+    """피드 기사 리그램 — 뉴닉식 한 줄: 왼쪽 작은 사진 · 제목 · 두 줄 요약 · 출처와 날짜. 넓은 화면에서도 사진은 작게."""
     return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex gap-4 items-start group">'
             f'<img alt="" loading="lazy" class="w-[36%] max-w-[180px] aspect-[4/3] object-cover rounded-xl shrink-0 bg-surface-container" src="{e(img)}">'
             '<span class="min-w-0 flex flex-col gap-1 pt-0.5">'
@@ -277,7 +277,7 @@ def row(href: str, img: str, title: str, excerpt: str, source: str, day: str, to
 
 
 def mini(href: str, mark: str, title: str, excerpt: str, source: str, day: str, top: str = "") -> str:
-    """리그램 카드 — 큰 사진 없이 내 종목 카드처럼: 로고(또는 아이콘) · 이름 · 한 줄 요약 · 두 줄 설명 (사용자 10/9: 사진이 너무 커요)."""
+    """리그램 카드 — 큰 사진 없이 내 종목 카드처럼: 로고(또는 아이콘) · 이름 · 한 줄 요약 · 두 줄 설명."""
     return (f'<article class="py-4 flex flex-col gap-2">{top}<a href="{e(href)}" class="flex flex-col gap-1.5 group">'
             f'<span class="flex items-center gap-2">{mark}<b class="text-[15px] font-semibold text-on-surface">{e(source)}</b>'
             f'<span class="text-[12px] text-outline">{e(day)}</span></span>'
@@ -333,7 +333,6 @@ def logo(name: str, homepage: str | None, size: str = "w-9 h-9") -> str:
             f'onerror="this.parentNode.outerHTML={e(json.dumps(letter))}"></span>')  # fmt: skip
 
 
-DART_VIEW = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={}"
 
 
 # 큰 업종 — 통계청 산업분류 코드 앞 두 자리로 묶는다 (도넛 조각을 열 개 안쪽으로)
@@ -377,7 +376,7 @@ def bottom_nav(tab: str) -> str:
             + "</div></nav>")  # fmt: skip
 
 
-# 노트 한 줄 요약 위아래 선 — 신문 괘선처럼 굵은 실선 + 점선, 주 색 초록 (사용자 10/9)
+# 노트 한 줄 요약 위아래 선 — 신문 괘선처럼 굵은 실선 + 점선, 주 색 초록
 RULE = '<div class="border-t-2 border-primary"></div><div class="mt-[3px] border-t-2 border-dotted border-primary"></div>'
 RULE_FLIP = '<div class="border-t-2 border-dotted border-primary"></div><div class="mt-[3px] border-t-2 border-primary"></div>'
 
@@ -404,7 +403,7 @@ BOOK_FACE = {"book-graham": "graham", "book-buffett": "buffett", "book-bogle": "
 
 
 def book_face(slug: str) -> tuple[str, str]:
-    """책에서 배우기 — (글 첫머리에 띄워 글이 옆으로 흐르는 지은이 얼굴, 맨 밑 출처 한 줄) (사용자 10/10). 사진이 없으면 둘 다 빈 글."""
+    """책에서 배우기 — (글 첫머리에 띄워 글이 옆으로 흐르는 지은이 얼굴, 맨 밑 출처 한 줄). 사진이 없으면 둘 다 빈 글."""
     key = BOOK_FACE.get(slug)
     if key not in PEOPLE:
         return "", ""
@@ -416,3 +415,9 @@ def book_face(slug: str) -> tuple[str, str]:
 def kdate(iso: str) -> str:
     d = date.fromisoformat(iso)
     return f"{d.year}년 {d.month}월 {d.day}일"
+
+
+def kday(iso: str) -> str:
+    """「10월 12일 (월)」"""
+    d = date.fromisoformat(iso)
+    return f"{d.month}월 {d.day}일 ({'월화수목금토일'[d.weekday()]})"

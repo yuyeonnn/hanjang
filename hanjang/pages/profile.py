@@ -1,12 +1,14 @@
 """프로필·설정·팔로우·알림·닉네임·차단·신고"""
 
+import base64
+import binascii
 import json
 import sqlite3
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 from hanjang import mail, notes, sources, tree
-from hanjang.ui import BAD, BIO_MAX, MAX_STOCKS, NICK, PHOTO_MAX, REPORT_WHY, ago, bottom_nav, e, logo, page, photo_url, top_bar
+from hanjang.ui import BAD, BIO_MAX, MAX_STOCKS, NICK, PHOTO_MAX, REPORT_WHY, ago, bottom_nav, e, kdate, logo, page, photo_url, top_bar
 
 
 class ProfilePages:
@@ -20,33 +22,26 @@ class ProfilePages:
                  f'<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">{e(nick or "내 프로필")}</h1>{self.follow_line(uid)}</div>'
                  '<a href="/me/settings" aria-label="설정" class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container"><span class="material-symbols-outlined text-[22px]">settings</span></a></header>'
                  + (f'<p class="mt-space-md font-body-compact text-body-compact text-on-surface whitespace-pre-line">{e(bio)}</p>' if bio else "")
-                 + self.my_tree(uid)  # 내 나무는 맨 위, 위아래로 넉넉히 띄워서 (사용자 10/11)
+                 + self.my_tree(uid)  # 내 나무는 맨 위, 위아래로 넉넉히 띄워서
                  + self.regram_list("where r.user_id = ?", (uid,), "내 리그램", mine=True)
                  + self.suggest(uid)
                  + "</div></main>" + bottom_nav("me"))  # fmt: skip
         return page("내 프로필", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def my_tree(self, uid: int, today: date | None = None, nick: str | None = None) -> str:
-        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디 (사용자 10/11). 들어온 날 = 화면을 한 번이라도 연 날(views).
-        nick 을 주면 남의 프로필에 보이는 모양 — 나무·날 수·잔디(「다음 단계까지 며칠」만 본인에게). 비공개 계정은 부르는 쪽이 거른다 (사용자 10/11: 잔디도 보이게)."""
+        """내 나무 — 들어온 날이 쌓일수록 자라는 나무와 최근 석 달 잔디. 들어온 날 = 화면을 한 번이라도 연 날(views).
+        nick 을 주면 남의 프로필에 보이는 모양 — 나무·날 수·잔디(「다음 단계까지 며칠」만 본인에게). 비공개 계정은 부르는 쪽이 거른다."""
         today = today or date.today()
         counts = dict(self.con.execute("select substr(at, 1, 10), count(*) from views where user_id = ? group by 1", (uid,)).fetchall())
         if nick is None:
             counts.setdefault(today.isoformat(), 1)  # 지금 이 화면을 보고 있다
         n = self.con.execute("select days from users where id = ?", (uid,)).fetchone()[0] or len(counts)  # 누적 — 기록이 지워져도 줄지 않는다
         name, left = tree.stage(n)
-        if nick is not None:
-            return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
-                    f'<h2 class="text-[16px] font-bold text-on-surface">{e(nick)}의 나무</h2></div>'
-                    f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
-                    f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
-                    f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요</p>'
-                    f'<p class="mt-12 mb-2 text-center font-label-regular text-label-regular text-on-surface-variant">최근 석 달 · {tree.grass(counts, today)[1]}일 들어왔어요</p>'
-                    f'{tree.grass(counts, today)[0]}</section>')  # fmt: skip
         grass, came = tree.grass(counts, today)
-        nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left else ""
+        title = "내 나무" if nick is None else f"{e(nick)}의 나무"
+        nxt = f" · {dict(tree.STAGES)[n + left]}까지 {left}일" if left and nick is None else ""  # 「다음 단계까지 며칠」은 본인에게만
         return ('<section class="mt-space-xl mb-12 pb-space-xl border-b border-surface-container-high"><div class="flex items-center gap-2"><span class="w-2 h-2 shrink-0 rounded-full bg-primary"></span>'
-                '<h2 class="text-[16px] font-bold text-on-surface">내 나무</h2></div>'
+                f'<h2 class="text-[16px] font-bold text-on-surface">{title}</h2></div>'
                 f'<div class="mx-auto w-full max-w-[300px]">{tree.svg(n)}</div>'
                 f'<p class="text-center text-[16px] font-bold text-primary">{e(name)}</p>'
                 f'<p class="mt-0.5 text-center font-body-compact text-body-compact text-on-surface-variant">지금까지 {n}일 들어왔어요{e(nxt)}</p>'
@@ -54,11 +49,9 @@ class ProfilePages:
                 f'{grass}</section>')  # fmt: skip
 
     def settings(self, uid: int, msg: str | None = None) -> str:
-        email, created, mail_on, nick, bio, private = self.con.execute(
-            "select email, created_at, mail_on, nickname, bio, private from users where id = ?", (uid,)).fetchone()  # fmt: skip
-        (at,) = self.con.execute("select photo_at from users where id = ?", (uid,)).fetchone()
+        email, created, mail_on, nick, bio, private, at = self.con.execute(
+            "select email, created_at, mail_on, nickname, bio, private, photo_at from users where id = ?", (uid,)).fetchone()  # fmt: skip
         (held,) = self.con.execute("select count(*) from holdings where user_id = ?", (uid,)).fetchone()
-        joined = date.fromisoformat(created[:10])
         # 주간 안내 메일 켜기/끄기 — 누르면 바로 바뀐다 (답장 같은 절차 없이, 사용자 10/7)
         knob = "translate-x-5" if mail_on else "translate-x-0"
         track = "bg-primary" if mail_on else "bg-surface-container-highest"
@@ -134,7 +127,7 @@ class ProfilePages:
                  '<button class="self-end px-4 py-2 rounded-lg bg-primary text-on-primary font-label-regular text-label-regular font-semibold" type="submit">저장</button></form>'
                  '<section class="mt-space-lg flex flex-col divide-y divide-surface-container-high/80 border-y border-surface-container-high">'
                  + go("bookmark", "내 저장 목록", "/me/saved") + go("favorite", "내 좋아요 목록", "/me/liked")
-                 + row("event", "가입한 날", f"{joined.year}년 {joined.month}월 {joined.day}일")
+                 + row("event", "가입한 날", kdate(created[:10]))
                  + row("inventory_2", "담은 종목", f'<a class="text-primary" href="/">{held} / {MAX_STOCKS}개</a>')
                  + switch + lock + go("description", "이용 규칙", "/rules") + "</section>" + self.blocked_list(uid) +
                  '<button class="mt-space-xl w-full py-3 rounded-lg border border-outline-variant/60 text-on-surface-variant font-body-reading-strong text-body-compact hover:bg-surface-container-low transition-colors" '
@@ -192,7 +185,7 @@ class ProfilePages:
                 f'<span class="text-[13px] text-on-surface-variant truncate">{note or e(bio or "")}</span></span></a>{self.follow_button(uid, other, back)}</div>')  # fmt: skip
 
     def follow_page(self, uid: int, who: int, tab: str):
-        """인스타그램처럼 — 위에 「팔로워 N명 | 팔로잉 N명」 탭, 아래에 사람 목록과 팔로우 단추 (사용자 10/10)."""
+        """인스타그램처럼 — 위에 「팔로워 N명 | 팔로잉 N명」 탭, 아래에 사람 목록과 팔로우 단추."""
         row = self.con.execute("select nickname from users where id = ?", (who,)).fetchone()
         if not row:
             return "404 Not Found", [], self.simple("없음", "없는 사람이에요.")
@@ -216,7 +209,7 @@ class ProfilePages:
         return "200 OK", [], page("팔로워" if tab == "followers" else "팔로잉", "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def fresh(self, uid: int, since: str) -> tuple[list, list]:
-        """알림거리 (since 뒤, 최근 7일 안) — 팔로우한 사람의 새 리그램, 내가 담은 종목의 새 소식 (사용자 10/10).
+        """알림거리 (since 뒤, 최근 7일 안) — 팔로우한 사람의 새 리그램, 내가 담은 종목의 새 소식.
         담은 종목은 남에게 알리지 않는다 — 본인 알림에만 쓴다."""
         since = max(since, (datetime.now() - timedelta(days=7)).isoformat())
         regs = self.con.execute("select r.at, u.id, u.nickname, u.photo_at, r.kind, r.ref, r.week from regrams r join users u on u.id = r.user_id"
@@ -268,9 +261,6 @@ class ProfilePages:
 
     def save_photo(self, uid: int, img: str):
         """프로필 사진 — JPEG 만, 작게(PHOTO_MAX). 브라우저가 이미 256px 정사각형으로 잘라 보낸다."""
-        import base64
-        import binascii
-
         def reply(msg="", code="200 OK"):
             return code, [("Content-Type", "application/json; charset=utf-8")], json.dumps({"msg": msg}, ensure_ascii=False)
 
@@ -334,7 +324,7 @@ class ProfilePages:
             self.con.commit()
         except sqlite3.IntegrityError:
             return self.see("/me/settings?msg=" + quote(f"「{nick}」은(는) 이미 누가 쓰고 있어요."))
-        return self.see("/me")  # 저장하면 바뀐 내 프로필로 (사용자 10/9)
+        return self.see("/me")  # 저장하면 바뀐 내 프로필로
 
     def blocked(self, uid: int) -> set[int]:
         """내가 차단했거나 나를 차단한 사람 — 서로 보이지 않는다."""

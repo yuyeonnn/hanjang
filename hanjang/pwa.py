@@ -29,7 +29,7 @@ PWA_TAGS = ('<link rel="manifest" href="/manifest.webmanifest"><meta name="theme
             "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');</script>")
 
 
-# 내 종목이 하나도 없을 때 — 처음 온 사람이 빈 화면만 보던 것 (눌러 보기 10/11)
+# 내 종목이 하나도 없을 때 — 처음 온 사람이 빈 화면만 보던 것
 EMPTY_CARDS = ('<div class="py-10 flex flex-col items-center text-center gap-2 lg:col-span-2">'
                + tree.line("calm", 170) +
                '<b class="font-body-reading-strong text-body-reading-strong text-on-surface">가진 종목을 담아 보세요</b>'

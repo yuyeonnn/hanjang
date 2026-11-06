@@ -15,11 +15,11 @@ DAYS = 14  # 이 기간의 사건만
 BUYSELL = re.compile(r"샀|팔았|사들|팔아|담았|매입|처분")
 GUESS = re.compile(r"려는 (걸|것)|(걸|것)으로 볼 수|걸로 볼 수|걸 수도|셈일 수|의도|긍정적|부정적|호재|악재|영향을 (줄|미칠) 수|바빠지|바빠진|기대돼|기대가"
                    r"|으로 보여요|로 보여요|견실|안정적인 재무|좋은 실적|주목받|관심이 쏠|눈길을 끄"
-                   r"|탄탄|양호|건전한|우수한|훌륭")  # 회사의 속뜻을 짐작하는 말 · 좋다 나쁘다 평가 (22편 읽기 10/10)
+                   r"|탄탄|양호|건전한|우수한|훌륭")  # 회사의 속뜻을 짐작하는 말 · 좋다 나쁘다 평가
 # 「높은 편」「낮은 편」은 무엇과 견줬는지(「~보다」「~ 중에서」)가 같은 문장에 있을 때만 사실이다 — 「업종 중간값보다 낮은 편」은 되고 「부채비율이 낮은 편」은 평가
 EDGE = re.compile(r"(높|낮|많|적|크|작)은 편")
 MAX_TRIES = 3  # 옛 기사 다시 쓰기 — 원문을 받은 날 기준 사흘(하루 3번씩 9번)까지. 그래도 검사를 못 넘으면 문장만 솎은 옛 글로 둔다
-# 굵게 해도 줄거리가 안 잡히는 말 — 날짜만 · 값 없는 항목 이름만 · 주가 움직임 (22편 읽기 10/10)
+# 굵게 해도 줄거리가 안 잡히는 말 — 날짜만 · 값 없는 항목 이름만 · 주가 움직임
 DULL = re.compile(r"^(\d{4}년 ?)?(\d{1,2}월 ?)?(\d{1,2}일)?$|^(\d{4}년 ?)?(상반기 ?)?(누적 ?)?(매출|영업이익|순이익|부채비율|영업이익률|ROE(\(자기자본이익률\))?|업종 평균|결산 실적)$"
                   r"|^(계약|공급) ?(기간|상대방?|금액)$|하락|상승|급등|급락|주가")
 PRESS = re.compile(r"언론|보도(가|도|했|에 따르면)|기사(가|에)")  # 남의 보도를 말하려면 소식(N) 근거가 있어야 한다
@@ -33,7 +33,7 @@ MAN_EOK = re.compile(r"(\d+)만 (\d{1,3}(?:,\d{3})*)억")
 
 def thin(paragraphs: list[dict]) -> bool:
     """사건(E1) 문단에 날짜 말고 숫자가 하나도 없다 — 무슨 일인지 설명하지 못한 기사
-    (27편 읽기 10/12: 「주식교환으로 새 판을 짠다고?」가 무슨 교환인지 끝까지 안 나왔다 · 자사주 매입 기사에 금액이 없었다)."""
+."""
     text = " ".join(p["text"] for p in paragraphs if "E1" in p["refs"])
     return not re.search(r"\d", DATE.sub("", text))
 
@@ -185,10 +185,6 @@ def readable(text: str) -> str:
     return notes.LONGNUM.sub(kor, text)
 
 
-def items(j: dict) -> list[dict]:
-    return j["paragraphs"]
-
-
 def check(j: dict, fs: list[dict]) -> dict:
     by = {f["id"]: f for f in fs}
     holder = "대량보유" in fs[0]["text"]  # 지분 보고는 「늘렸·줄였」로만 — 사고판 것인지는 보고서만으로 모른다
@@ -206,7 +202,7 @@ def check(j: dict, fs: list[dict]) -> dict:
         raise ValueError("사건 문단에 숫자가 없음")
     n_titles = [t for f in fs if f["id"][0] == "N" and (t := re.search(r"「([^」]*)」", f["text"]))]
     years = set(re.findall(r"(?<!\d)(?:19|20)\d\d(?=년)", " ".join(f["text"] + " " + f.get("doc", "") for f in fs)))
-    for x in items(j):
+    for x in j["paragraphs"]:
         text, refs = x["text"], x["refs"]
         if not refs or not set(refs) <= set(by):
             raise ValueError(f"근거 없는 문장: {text!r}")
@@ -228,7 +224,7 @@ def check(j: dict, fs: list[dict]) -> dict:
             raise ValueError(f"근거 없는 언론 이야기: {text!r}")
         if any(f"「{t[1]}」" in text for t in n_titles):
             raise ValueError(f"소식 제목 인용: {text!r}")
-    if (n := sum(len(x["text"]) for x in items(j))) < MIN_CHARS:
+    if (n := sum(len(x["text"]) for x in j["paragraphs"])) < MIN_CHARS:
         raise ValueError(f"너무 짧음 {n}자")
     return {"title": title, "paragraphs": j["paragraphs"]}
 
@@ -250,7 +246,7 @@ def fetch(dart: "sources.Dart | None", ref: str) -> str:
 def write(con: sqlite3.Connection, ev: dict, today: date, dart: "sources.Dart | None" = None, doc: str | None = None) -> dict | None:
     name = con.execute("select name from stocks where ticker = ?", (ev["ticker"],)).fetchone()[0]
     doc = fetch(dart, ev["ref"]) if doc is None else doc
-    if len(doc) < 200:  # 원문을 못 받았으면 쓰지 않는다 — 제목 한 줄로 쓰게 하면 AI 가 내용을 지어낸다(22편 읽기 10/10: 「자세한 건 공시에」만 되풀이, 없는 공급 품목). 내일 다시 받아 본다
+    if len(doc) < 200:  # 원문을 못 받았으면 쓰지 않는다 — 제목 한 줄로 쓰게 하면 AI 가 내용을 지어낸다. 내일 다시 받아 본다
         return None
     fs = materials(con, ev, today, doc)
     payload = {"today": today.isoformat(), "name": name,
@@ -263,7 +259,7 @@ def pick_marks(j: dict, texts: list[str]) -> list[list[str]]:
     """AI 가 고른 강조할 말 — 그 문단에 글자 그대로 있는 4~24자, 문단마다 둘까지만 받는다(나머지는 버린다). 본문은 건드리지 않는다."""
     if len(j["marks"]) != len(texts):
         raise ValueError("문단 수가 다름")
-    seen: set[str] = set()  # 같은 말을 문단마다 또 굵게 하지 않는다 (22편 읽기 10/10: 「유상증자」「계약금액은 …」이 두 번씩)
+    seen: set[str] = set()  # 같은 말을 문단마다 또 굵게 하지 않는다
     out = []
     for ms, t in zip(j["marks"], texts):
         ok = [m for m in dict.fromkeys(ms) if 4 <= len(m) <= 24 and m in t and m not in seen and not DULL.search(m) and not notes.LONGNUM.search(m)][:2]
@@ -275,7 +271,7 @@ def pick_marks(j: dict, texts: list[str]) -> list[list[str]]:
 
 
 def emphasize(con: sqlite3.Connection, limit: int = 20) -> int:
-    """읽기 팁처럼 핵심 말을 진하게 (사용자 10/10) — 강조가 아직 없는 기사에 문단마다 `marks` 를 붙인다. 새 기사도, 예전 기사도 여기서."""
+    """읽기 팁처럼 핵심 말을 진하게 — 강조가 아직 없는 기사에 문단마다 `marks` 를 붙인다. 새 기사도, 예전 기사도 여기서."""
     schema = {"type": "object", "additionalProperties": False, "required": ["marks"],
               "properties": {"marks": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}}}  # fmt: skip
     n = 0

@@ -1,8 +1,8 @@
 """아침 한 장 — 매일 아침 내 종목 소식 · 이번 주 일정 · 그 소식에 맞춘 짧은 꿀팁 (docs/growth.md §3-1, 시안 2026-10-10).
 
 코드가 쓴다. 쉬운 풀이가 없는 공시 제목만 AI 가 문장 하나로 — **공시마다 한 번**(매일 실행 prepare), 담은 사람이 있는 회사만.
-같은 회사 소식은 누구에게나 같아서 사용자가 늘어도 AI 비용은 늘지 않는다(사용자 10/10 ②안). 화면은 AI 를 부르지 않는다. 이어지는 문장으로(사용자 10/10: 막대기·나열 말고 자연스러운 문장, 간결하게). 회사 이름마다 원문 링크.
-주가는 쓸 권리가 없어 싣지 않는다(data-rights §4) — 그 말도 따로 적지 않는다(사용자 10/10).
+같은 회사 소식은 누구에게나 같아서 사용자가 늘어도 AI 비용은 늘지 않는다. 화면은 AI 를 부르지 않는다. 이어지는 문장으로. 회사 이름마다 원문 링크.
+주가는 쓸 권리가 없어 싣지 않는다(data-rights §4) — 그 말도 따로 적지 않는다.
 
     uv run python -m hanjang.morning 005930 000660 TSLA --day 2026-10-08   # 시안 보기 (글 + data/morning-sample.html)
 """
@@ -13,7 +13,7 @@ import sys
 from datetime import date, timedelta
 from html import escape as e
 
-from . import facets, holders, learn, notes, sources, tree
+from . import facets, holders, learn, llm, notes, sources, tree
 
 WEEK = "월화수목금토일"
 QUOTES = "https://finance.naver.com/sise/"  # 바깥 링크 — 자료를 가져오지 않는다
@@ -63,7 +63,7 @@ TIPS = {
                "신청한 금액의 절반쯤을 증거금으로 먼저 맡기고, 경쟁률에 따라 주식을 나눠 받아요. 받지 못한 증거금은 며칠 뒤 돌려받아요. "
                "투자설명서에 공모가를 정한 근거와 모은 돈의 쓰임이 적혀 있어요.", "ipo"),
 }
-WARN = "(coalesce(direction, 0) = -1 or code = 'RUMOR')"  # 걸리는 공시 — 맨 위에, 빨간 꼬리표로, 그날 바로 (사용자 10/12)
+WARN = "(coalesce(direction, 0) = -1 or code = 'RUMOR')"  # 걸리는 공시 — 맨 위에, 빨간 꼬리표로, 그날 바로
 TIP_ORDER = ("TRADING_HALT", "RIGHTS_ISSUE", "CB_BW", "CLINICAL", "EARNINGS", "BUYBACK", "DIVIDEND", "MAJOR_CONTRACT", "MA")
 
 
@@ -73,10 +73,6 @@ def since(today: date) -> date:
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
-
-
-def md(d: date) -> str:
-    return f"{d.month}월 {d.day}일({WEEK[d.weekday()]})"
 
 
 def eun(name: str) -> str:
@@ -113,8 +109,6 @@ def check(j: dict, title: str) -> str:
 def prepare(con: sqlite3.Connection, today: date) -> int:
     """매일 실행 — 지난 평일부터 나온 중요 공시 가운데 코드 풀이가 없는 것만, 담은 사람이 있는 회사만 AI 로 한 문장(disclosures.plain).
     한 번 쓰면 다시 묻지 않는다(실패해도 빈 칸으로 남겨 두고 화면은 제목을 「」로)."""
-    from . import llm
-
     rows = con.execute("select d.rcept_no, d.title, s.name from disclosures d join stocks s using(ticker) where d.date >= ? and d.importance >= 2"
                        " and d.plain is null and d.ticker in (select ticker from holdings)", (since(today).isoformat(),)).fetchall()  # fmt: skip
     n = 0
@@ -209,7 +203,7 @@ TAG = {"EARNINGS": "실적", "AGM": "주총", "DIVIDEND": "배당", "OTHER": "�
 
 def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | None = None) -> dict:
     """{"title", "when", "news": [회사마다 {"name", "url", "text"}], "follows", "week": [{"date", "label", "tag", "url"}], "tip": (제목, 글, 더 읽기)}"""
-    from .daily import src  # daily 가 이 모듈을 부른다 — 위에서 부르면 서로 물린다
+    src = notes.source_url
 
     q = ",".join("?" * len(tickers)) or "''"
     name = dict(con.execute(f"select ticker, name from stocks where ticker in ({q})", tickers).fetchall())
@@ -229,7 +223,7 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
         body = " ".join(("" if i == 0 else "이와 함께 ") + happened(title, ai) for i, (_, title, _, _, ai, _) in enumerate(items[:2]))
         news.append({"name": nm, "url": src(con, items[0][2]), "text": f"{nm}{eun(nm)} {body}", "body": body, "tag": KIND.get(items[0][3], "공시"), "warn": bool(items[0][5])})
         codes += [("EARNINGS_US" if c == "EARNINGS" and not t.isdigit() else c, t) for _, _, _, c, _, _ in items]
-    # 같은 업종 소식 — 내가 안 담은, 같은 업종 회사의 중요 공시. 내 종목이 조용한 날에도 읽을 것이 있게 (사용자 10/12)
+    # 같은 업종 소식 — 내가 안 담은, 같은 업종 회사의 중요 공시. 내 종목이 조용한 날에도 읽을 것이 있게
     # ponytail: 한국 업종(통계청 분류)만. 미국 종목의 같은 업종은 SEC 산업분류로 묶어야 한다 — 미국 종목 담은 사람이 늘면
     mine = {sources.industry_label(c) for (c,) in con.execute(f"select induty_code from stocks where ticker in ({q})", tickers)} - {None}
     peers, seen = [], set()
@@ -308,7 +302,7 @@ def build(con: sqlite3.Connection, tickers: list[str], today: date, uid: int | N
 def lead(m: dict) -> str:
     """접힌 카드의 한 줄 — 내 종목 공시가 없는 날에도 날마다 다른 글이 나오게:
     공시 > 큰손 움직임 > 놓친 소식(며칠 전) > 내 종목 일정(며칠 남았는지) > 오늘의 한 면 > 시장 일정 > 같은 업종 > 조용한 아침.
-    전에는 공시만 없으면 늘 「조용한 아침」이라, 종목 네댓 개를 담은 사람은 열흘에 일곱 날을 그 말만 봤다 (사용자 10/13 · 14일 실측)."""
+    전에는 공시만 없으면 늘 「조용한 아침」이라, 종목 네댓 개를 담은 사람은 열흘에 일곱 날을 그 말만 봤다."""
     if m["news"]:
         return m["news"][0]["text"]
     if m.get("moves"):
@@ -372,7 +366,6 @@ def html(m: dict) -> str:
         f'<span class="text-[16px] font-bold text-on-surface">{e(x["name"])}</span>'
         + (f'<span class="inline-flex items-center gap-0.5 text-[11px] font-bold text-error"><span class="material-symbols-outlined text-[14px]">error</span>꼭 확인 · {e(x["tag"])}</span></div>'
            if x.get("warn") else f'<span class="text-[11px] font-bold text-primary">{e(x["tag"])}</span></div>') +
-        ''
         f'<p class="text-[14px] leading-[23px] text-on-surface">{e(x["body"])}</p>'
         f'<a class="pt-1 text-[11px] font-bold text-primary hover:underline inline-flex items-center gap-0.5" href="{e(x["url"])}">공시 원문 보기'
         '<span class="material-symbols-outlined text-[13px]">arrow_forward</span></a></article>' for x in m["news"])  # fmt: skip
@@ -438,7 +431,7 @@ def html(m: dict) -> str:
            + "</section>")  # fmt: skip
 
     first = lead(m)
-    # 접힌 카드 — 흰 상자 대신 위아래 두 줄(실선+점선) 사이에 글만, 읽기 팁 머리글과 같은 모양 (사용자 10/10). 누르면 펼침
+    # 접힌 카드 — 흰 상자 대신 위아래 두 줄(실선+점선) 사이에 글만, 읽기 팁 머리글과 같은 모양. 누르면 펼침
     top = '<span class="block border-t-2 border-primary"></span><span class="block mt-[3px] border-t-2 border-dotted border-primary"></span>'
     bottom = '<span class="block border-t-2 border-dotted border-primary"></span><span class="block mt-[3px] border-t-2 border-primary"></span>'
     card = ('<button type="button" onclick="document.getElementById(\'morning\').showModal()" aria-haspopup="dialog" class="group block w-full mt-space-lg mb-space-xl" style="text-align:left">'
@@ -446,7 +439,7 @@ def html(m: dict) -> str:
             f'<span class="material-symbols-outlined text-[16px]">wb_sunny</span>아침 한 장 · {e(m["title"].replace(" 아침", ""))}</span>'
             f'<span class="mt-1.5 flex items-center justify-center gap-0.5 text-[17px] font-bold text-primary"><span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">{e(first)}</span></span></span>'
             + tree.perch(tree.sky(), 78) + '</span>' + bottom + '</button>')  # fmt: skip — 나무는 아래 띠 위에 선다(낮엔 해, 밤엔 달)
-    # 위에 뜨는 카드 — 뒤 화면은 가리지 않고(사용자 10/10) 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
+    # 위에 뜨는 카드 — 뒤 화면은 가리지 않고 그림자 두 겹으로 띄운다. ✕·바깥을 누르면 닫힘
     sheet = ('<dialog id="morning" onclick="if(event.target===this)this.close()" aria-label="아침 한 장" '
              'class="w-[calc(100%-32px)] max-w-[448px] max-h-[82vh] p-0 rounded-3xl bg-surface-container-lowest border border-primary/10 backdrop:bg-transparent overflow-hidden '
              'shadow-[0_24px_50px_-10px_rgba(21,69,57,0.18),0_4px_16px_rgba(0,0,0,0.05)]"><div class="flex flex-col max-h-[82vh]">'

@@ -5,19 +5,19 @@ from datetime import date, datetime, timedelta
 
 from hanjang import holders, notes
 from hanjang.notepage import CITE, EVENT_EXPLAIN, clean_title, safe_url
-from hanjang.ui import Photos, bottom_nav, e, gist, logo, page, story, top_bar
+from hanjang.ui import Photos, bottom_nav, e, gist, kday, logo, page, story, top_bar
 
 
 class FeedPages:
     def article_photo(self, aid: int, kind: str, ind: str | None, name: str, photos: "Photos | None" = None) -> str:
         """기사 사진 — 처음 고를 때 사건 종류에 맞는 주제(증자는 돈, 계약은 계약서…)로 고르고 저장한다.
-        그 뒤로 피드와 기사 화면이 같은 사진을 쓴다 (사용자 10/9: 눌렀더니 사진이 바뀌었다)."""
+        그 뒤로 피드와 기사 화면이 같은 사진을 쓴다."""
         got = self.con.execute("select photo from articles where id = ?", (aid,)).fetchone()
         if got and got[0] and not (photos and got[0] in photos.used):
             if photos:
                 photos.used.add(got[0])
             return got[0]
-        # 처음이거나, 이 화면에 이미 나온 사진이면 새로 고르고 저장한다 — 기사마다 따로 고르던 때 같은 계약서 사진이 나란히 붙었다 (사용자 10/19)
+        # 처음이거나, 이 화면에 이미 나온 사진이면 새로 고르고 저장한다 — 기사마다 따로 고르던 때 같은 계약서 사진이 나란히 붙었다
         img = (photos or Photos()).pick(kind, ind, name)
         self.con.execute("update articles set photo = ? where id = ?", (img, aid))
         self.con.commit()
@@ -159,9 +159,8 @@ class FeedPages:
                 f"select e.date, e.kind, e.title, s.ticker, s.name, s.homepage from events e join stocks s on s.ticker = e.ticker {mine}"
                 " where e.date between ? and ? order by e.date", (uid, iso, (today + timedelta(days=14)).isoformat())):  # fmt: skip
             n = (date.fromisoformat(d) - today).days
-            dd = date.fromisoformat(d)
             cards.append((95 - 5 * n, "event_upcoming", "text-secondary", name, home, what,
-                          f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar", t))
+                          f'{kday(d)}에 예정돼 있어요.', "오늘" if n == 0 else f"D-{n}", "/calendar", t))
         for inst, rate, chg, d, t, name, home in self.con.execute(
                 f"select b.inst, b.rate, b.rate_chg, b.date, s.ticker, s.name, s.homepage from big_holdings b join stocks s on s.ticker = b.stock_code {mine}"
                 " where b.rate_chg is not null and b.rate_chg != 0 and b.date >= ? order by b.date desc", (uid, back(30))):  # fmt: skip

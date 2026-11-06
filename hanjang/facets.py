@@ -11,12 +11,6 @@ from datetime import date
 from . import holders, notes
 
 
-def _src(con, rno: str) -> str:
-    from .daily import src  # daily 가 morning 을, morning 이 이 모듈을 부른다 — 위에서 부르면 서로 물린다
-
-    return src(con, rno)
-
-
 def _ro(v: str) -> str:
     return v + notes.josa(v, "로")
 
@@ -40,13 +34,13 @@ def _moved(what: str, s: dict, value: str = "값", way: str = "방향", size: st
 def _business(con, t, by, name):
     row = con.execute("select body, rcept_no from business where ticker = ?", (t,)).fetchone()
     what = json.loads(row[0]).get("what") if row else None
-    return what and ("무엇으로 돈을 버나요?", what[:3], _src(con, row[1]))
+    return what and ("무엇으로 돈을 버나요?", what[:3], notes.source_url(con, row[1]))
 
 
 def _risks(con, t, by, name):
     row = con.execute("select body, rcept_no from business where ticker = ?", (t,)).fetchone()
     risks = json.loads(row[0]).get("risks") if row else None
-    return risks and ("회사가 스스로 꼽은 위험은요?", risks[:2], _src(con, row[1]))
+    return risks and ("회사가 스스로 꼽은 위험은요?", risks[:2], notes.source_url(con, row[1]))
 
 
 def _year(con, t, by, name):
@@ -129,7 +123,7 @@ def _dividend(con, t, by, name):
     out = [f"{y}년에는 한 주에 {dps:,}원을 배당했어요." + (f" 그해 번 돈(순이익)의 {payout:.1f}%를 배당으로 나눈 거예요." if payout else "")]
     if len(rows) > 1:
         out.append("그 앞 해에는 " + ", ".join(f"{yy}년 {d:,}원" for yy, d, _, _ in rows[1:]) + "이었어요.")
-    return ("배당은 어땠나요?", out, _src(con, rno))
+    return ("배당은 어땠나요?", out, notes.source_url(con, rno))
 
 
 def _holders(con, t, by, name):
@@ -138,7 +132,7 @@ def _holders(con, t, by, name):
     if not rows:
         return None
     out = [f"{who}{notes.josa(who, '이')} {rate:.2f}%를 갖고 있다고 보고했어요({date.fromisoformat(d).year}년 {date.fromisoformat(d).month}월 보고)." for who, rate, d, _ in rows]
-    return ("큰손은 누가 있나요?", out, _src(con, rows[0][3]))
+    return ("큰손은 누가 있나요?", out, notes.source_url(con, rows[0][3]))
 
 
 FACETS = (_business, _year, _margin, _peers, _quarter, _health, _dividend, _history, _holders, _risks)  # 이 순서로 돈다 — 앞이 처음 보는 사람에게 먼저 필요한 것

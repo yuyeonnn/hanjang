@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 import httpx
 
 from hanjang import db, llm, notes
-from hanjang.sources import ROOT, CACHE, env
+from hanjang.sources import ROOT, CACHE, env, pairs
 
 UNIVERSE = ROOT / "hanjang" / "universe_us.txt"
 KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없다 — 시간대 자료 없이
@@ -44,8 +44,7 @@ def merged_facts(new: dict, old: dict) -> dict:
 
 
 def universe() -> list[tuple[str, str]]:
-    rows = (ln.split(maxsplit=1) for ln in UNIVERSE.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#"))
-    return [(t, n.strip()) for t, n in rows]
+    return pairs(UNIVERSE)
 
 
 class Edgar:
@@ -95,10 +94,7 @@ class Edgar:
         name = primary.split("/")[-1]
         return self._get(f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}/{name}").text
 
-    def form4(self, cik: int, accession: str, primary: str) -> str:
-        """Form 4 원문 XML — primaryDocument 「xslF345X06/wk-form4_….xml」에서 보기용 xsl 폴더를 뗀 파일."""
-        name = primary.split("/")[-1]
-        return self._get(f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}/{name}").text
+    form4 = doc  # Form 4 원문 XML(「xslF345X06/wk-form4_….xml」)도 같은 방법 — 테스트의 가짜 SEC 이 둘을 따로 답해 이름은 남긴다
 
 
 # --- 파싱 (순수 함수 — 테스트는 잘라 둔 JSON 으로) ---
@@ -210,7 +206,7 @@ def quarter_rows(facts: dict, fye: str, fin: bool = False) -> list[dict]:
 
     for key, p in by_len[3].items():
         fy, q = fiscal_year(p.end, fye), quarter_no(p.end, fye)
-        ytd = next((pp for kk, pp in anchors(s).items() if pp.end == p.end and months(pp) == {1: 3, 2: 6, 3: 9, 4: 12}[q]), None)
+        ytd = next((pp for pp in anchors(s).values() if pp.end == p.end and months(pp) == {1: 3, 2: 6, 3: 9, 4: 12}[q]), None)
         rows[(fy, q)] = {"fiscal_year": fy, "q": q, "start": p.start.isoformat(), "end": p.end.isoformat(), "revenue": grab("revenue", key),
                          "operating_income": grab("operating_income", key), "net_income": grab("net_income", key), "eps": grab("eps", key),
                          "revenue_ytd": grab("revenue", (ytd.start.isoformat(), ytd.end.isoformat())) if ytd else None,
@@ -218,7 +214,7 @@ def quarter_rows(facts: dict, fye: str, fin: bool = False) -> list[dict]:
                          "accn": p.accn, "currency": "USD", "basis": "3개월"}  # fmt: skip
     for key, p in by_len[12].items():  # 4분기 = 연간 − 9개월 (같은 시작일)
         fy = fiscal_year(p.end, fye)
-        nine = next((pp for kk, pp in by_len[9].items() if pp.start == p.start), None)
+        nine = next((pp for pp in by_len[9].values() if pp.start == p.start), None)
         if not nine or (fy, 4) in rows:
             continue
         k9 = (nine.start.isoformat(), nine.end.isoformat())

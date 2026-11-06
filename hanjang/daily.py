@@ -13,16 +13,6 @@ from datetime import date, timedelta
 from hanjang import articles, backup, collect, db, etf, gurus, holders, morning, nps, llm, mail, notes, personas, sources, us
 
 
-def src(con: sqlite3.Connection, rno: str | None) -> str:
-    """일정의 원문 — 국내 접수번호는 DART, 미국 접수번호(「-」가 있다)는 SEC 공시 목록."""
-    if not rno:
-        return ""
-    if "-" not in rno:
-        return notes.DART.format(rno)
-    row = con.execute("select s.cik from filings f join stocks s using(ticker) where f.accession = ?", (rno,)).fetchone()
-    return f"https://www.sec.gov/Archives/edgar/data/{row[0]}/{rno.replace('-', '')}/{rno}-index.htm" if row else ""
-
-
 def notify(con: sqlite3.Connection, week: str) -> int:
     """담은 종목 중 이번 주 노트가 있는 사용자에게만 한 통씩 — 프로필에서 메일을 끈 사람은 빼고.
     한 통에 담은 종목 노트 전부 + 보내는 날부터 7일 캘린더 (휴장일 · 내 종목 일정)."""
@@ -41,7 +31,7 @@ def notify(con: sqlite3.Connection, week: str) -> int:
         evs = con.execute(
             "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
             " join stocks s on s.ticker = e.ticker where e.date between ? and ? order by e.date", (uid, lo, hi)).fetchall()  # fmt: skip
-        evs = [(d, n, t, "", src(con, r), 0) for d, n, _, t, r in evs]  # 칩에는 쉬운 말(「실적 발표」)
+        evs = [(d, n, t, "", notes.source_url(con, r), 0) for d, n, _, t, r in evs]  # 칩에는 쉬운 말(「실적 발표」)
         evs += [(d, {"KR": "한국", "US": "미국"}[nat], {"금리": "금리 결정", "선거": "선거", "휴장": "증시 휴장"}.get(kind, kind + " 발표"), "", sources.MACRO_SOURCE[nat + kind][1], 0)
                 for d, kind, nat, _ in sources.macro_events(lo, hi)
                 if kind != "휴장" or any(s["ticker"][:1].isalpha() and not s["ticker"].startswith("ETF") for s in stocks)]  # 미국 휴장은 미국 종목이 있을 때만  # 시장 일정 — 금리·물가·고용·선거  # fmt: skip
@@ -68,7 +58,7 @@ def apart(code: str) -> None:
 
 
 def brief(con: sqlite3.Connection, today: date) -> int:
-    """아침 소식 메일 — 「아침 한 장」과 같은 내용을 종목을 담은 사람 모두에게 매일 한 통. 새 소식이 없는 날도 「새 공시는 없어요」로 (사용자 10/15).
+    """아침 소식 메일 — 「아침 한 장」과 같은 내용을 종목을 담은 사람 모두에게 매일 한 통. 새 소식이 없는 날도 「새 공시는 없어요」로.
     안내 메일을 끈 사람·막힌 계정·종목을 안 담은 사람은 빼고. 한 사람이 실패해도 나머지는 보낸다."""
     n = 0
     for uid, email in con.execute("select id, email from users where mail_on = 1 and coalesce(banned, 0) = 0").fetchall():
@@ -107,7 +97,7 @@ def watch(today: date, con: sqlite3.Connection | None = None, dart: "sources.Dar
         for (email,) in con.execute("select u.email from users u join holdings h on h.user_id = u.id"
                                     " where h.ticker = ? and u.mail_on = 1 and coalesce(u.banned, 0) = 0", (t,)).fetchall():  # fmt: skip
             try:
-                mail.send(email, *mail.alert_mail(name, morning.KIND.get(code, "공시"), line, src(con, rno)))
+                mail.send(email, *mail.alert_mail(name, morning.KIND.get(code, "공시"), line, notes.source_url(con, rno)))
                 n += 1
             except Exception as err:  # noqa: BLE001
                 print(f"바로 알림 메일 실패 ({rno}) — {type(err).__name__}", file=sys.stderr)

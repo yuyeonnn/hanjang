@@ -36,7 +36,7 @@ class SocialPages:
                 + self.save_form(uid, kind, ref, week))  # fmt: skip
 
     def save_form(self, uid: int, kind: str, ref: str, week: str) -> str:
-        """저장 — 나만 본다(숫자 없음). 설정 「내 저장 목록」에 모인다 (사용자 10/10)."""
+        """저장 — 나만 본다(숫자 없음). 설정 「내 저장 목록」에 모인다."""
         done = self.con.execute("select 1 from saves where user_id = ? and kind = ? and ref = ? and week = ?", (uid, kind, ref, week)).fetchone()
         undo = '<input type="hidden" name="undo" value="1">' if done else ""
         return (f'<form method="post" action="/save" class="ml-2 flex items-center"><input type="hidden" name="k" value="{e(kind)}"><input type="hidden" name="r" value="{e(ref)}"><input type="hidden" name="w" value="{e(week)}">{undo}'
@@ -57,7 +57,7 @@ class SocialPages:
         return page(title, "bg-surface font-body-reading text-on-surface flex flex-col min-h-screen", inner)
 
     def share_quote(self, uid: int, pg: str, text: str):
-        """고른 글귀를 내 프로필에 — 그 글의 리그램에 글귀 한 줄을 붙인다(글 하나에 하나, 다시 하면 바뀐다) (사용자 10/10).
+        """고른 글귀를 내 프로필에 — 그 글의 리그램에 글귀 한 줄을 붙인다(글 하나에 하나, 다시 하면 바뀐다).
         글귀가 실제로 그 글 안에 있을 때만 — 인용인 척 「사세요」 같은 제 말을 올리지 못하게."""
         def reply(msg):
             return "200 OK", [("Content-Type", "application/json; charset=utf-8")], json.dumps({"msg": msg}, ensure_ascii=False)
@@ -182,7 +182,7 @@ class SocialPages:
         return f'<div class="mt-space-sm flex flex-col divide-y divide-surface-container-high/80">{items or none}</div>'
 
     def suggest(self, uid: int) -> str:
-        """추천 프로필 — 최근 2주에 활발한 사람(리그램 ×2 + 좋아요 + 팔로워) 순, 이미 팔로우했거나 요청한 사람은 빼고 (사용자 10/10).
+        """추천 프로필 — 최근 2주에 활발한 사람(리그램 ×2 + 좋아요 + 팔로워) 순, 이미 팔로우했거나 요청한 사람은 빼고.
         활발한 사람이 없어도 비우지 않는다 — 사람이 적은 처음엔 누구라도 보여야 팔로우가 시작된다.
         담은 종목으로는 고르지 않는다 — 공개하지 않은 보유 종목이 드러나므로."""
         since = (datetime.now() - timedelta(days=14)).isoformat()

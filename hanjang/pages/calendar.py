@@ -10,7 +10,7 @@ from hanjang.ui import bottom_nav, e, page, top_bar
 
 
 def line(d: str, who: str, what: str, href: str, label: str, chip: str, when: str = "") -> str:
-    """이 달의 일정 한 줄 — 날짜 · 누구 **무엇** · 원문 · 꼬리표. 공시·회사채·공모주·시장 일정 모두 같은 모양 (사용자 10/19: 내 종목 일정 줄처럼 다)."""
+    """이 달의 일정 한 줄 — 날짜 · 누구 **무엇** · 원문 · 꼬리표. 공시·회사채·공모주·시장 일정 모두 같은 모양."""
     dd = date.fromisoformat(d)
     when = when or f'{dd.month}월 {dd.day}일 ({"월화수목금토일"[dd.weekday()]})'
     return (f'<article class="py-3.5 border-b border-surface-container-high flex items-center justify-between gap-2">'
@@ -38,7 +38,7 @@ class CalendarPages:
             " join holdings h on h.ticker = d.ticker and h.user_id = ? join stocks s on s.ticker = d.ticker"
             " where d.date between ? and ? and d.importance >= 2 and d.code != 'OTHER' order by d.date",
             (uid, lo, hi)).fetchall()  # fmt: skip
-        # 같은 날 같은 회사의 같은 종류 공시는 하나로 묶는다 — 계약 두 건, 자사주 취득·소각이 같은 말로 두 번 나오지 않게 (사용자 10/9)
+        # 같은 날 같은 회사의 같은 종류 공시는 하나로 묶는다 — 계약 두 건, 자사주 취득·소각이 같은 말로 두 번 나오지 않게
         grouped: dict[tuple, list] = {}
         for r in rows:
             grouped.setdefault((r[0], r[6], r[2]), []).append(r)
@@ -53,20 +53,20 @@ class CalendarPages:
             macro_by.setdefault(x[0], []).append(x)
         # 내 종목 회사채 — 납입일(돈이 실제로 들어오는 날)에 칩. 같은 신고서의 회차(2년물·3년물)는 하나로
         bonds = self.con.execute(
-            "select b.rcept_no, min(b.pay_date), s.name, s.ticker, sum(b.amount), group_concat(b.maturity), group_concat(b.uses, '|'), max(b.lead)"
+            "select b.rcept_no, min(b.pay_date), s.name, s.ticker, sum(b.amount)"
             " from bonds b join holdings h on h.ticker = b.ticker and h.user_id = ? join stocks s on s.ticker = b.ticker"
             " where b.pay_date between ? and ? group by b.rcept_no order by 2", (uid, lo, hi)).fetchall()  # fmt: skip
         bond_by: dict[str, list] = {}
         for x in bonds:
             bond_by.setdefault(x[1], []).append(x)
         # 공모주 — 시장 전체(내 종목 아님). 한 달 수십 곳이라 칩은 청약 첫날·상장 예정일에만, 금리·물가 칩 뒤에
-        ipos = self.con.execute("select name, sub_start, sub_end, list_date, price, total, lead, uses, rcept_no from ipos"
+        ipos = self.con.execute("select name, sub_start, sub_end, list_date, rcept_no from ipos"
                                 " where sub_start between ? and ? or list_date between ? and ? order by sub_start", (lo, hi, lo, hi)).fetchall()  # fmt: skip
         ipo_by: dict[str, list] = {}
         for x in ipos:
-            ipo_by.setdefault(x[1], []).append((x[0], "청약", x[8]))
+            ipo_by.setdefault(x[1], []).append((x[0], "청약", x[4]))
             if x[3]:
-                ipo_by.setdefault(x[3], []).append((x[0], "상장", x[8]))
+                ipo_by.setdefault(x[3], []).append((x[0], "상장", x[4]))
         ahead: dict[str, list] = {}  # 공시에서 읽은 일정(실적 발표·주총·배당 기준일·지급일) — 테두리 칩으로 지난 공시와 구분
         for d, name, kind, what, rno in self.con.execute(
                 "select e.date, s.name, e.kind, e.title, e.rcept_no from events e join holdings h on h.ticker = e.ticker and h.user_id = ?"
@@ -87,7 +87,7 @@ class CalendarPages:
                 elif d == today:
                     num = (f'<div class="flex items-center justify-between"><span class="w-5 h-5 flex items-center justify-center rounded-full bg-primary-container text-on-primary font-label-micro text-label-micro font-bold">{d.day}</span>'
                            '<span class="text-[8px] text-primary-container font-semibold">오늘</span></div>')  # fmt: skip
-                elif iso in hol:  # 공휴일은 시안대로 검은 숫자 + 이름 (사용자 10/7: 시안 그대로)
+                elif iso in hol:  # 공휴일은 시안대로 검은 숫자 + 이름
                     num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-on-surface font-medium">{d.day}</span>'
                 elif i in (0, 6):  # 주말은 빨간 숫자
                     num = f'<span class="font-label-micro text-label-micro lg:text-[14px] text-tertiary font-semibold">{d.day}</span>'
@@ -96,7 +96,7 @@ class CalendarPages:
                 cell = num
                 if iso in hol and d.month == m:
                     cell += f'<span class="text-[8px] lg:text-[11px] text-on-surface-variant leading-tight line-clamp-1 mt-0.5">{e(hol[iso])}</span>'
-                # 칸 안 칩은 한 줄 — 넘치면 말줄임(…), 전체 이름은 마우스를 올리면·오른쪽 목록에서. 칸마다 셋까지, 나머지는 「+N」 (사용자 10/9: 줄바꿈이 별로)
+                # 칸 안 칩은 한 줄 — 넘치면 말줄임(…), 전체 이름은 마우스를 올리면·오른쪽 목록에서. 칸마다 셋까지, 나머지는 「+N」
                 chips = []
                 for rs in by.get(iso, []) if d.month == m else []:
                     _, name, code, _, rno, dr, _, _, _ = rs[0]
@@ -117,10 +117,10 @@ class CalendarPages:
                     chips.append(f'<span title="{e(name)} 공모주 {what}" class="{CHIP} border border-secondary/50 text-secondary">'
                                  f"<span class='lg:hidden'>{e(short_name(name))} {what}</span><span class='hidden lg:inline'>{e(name)} 공모주 {what}</span></span>")  # fmt: skip
                 cell += "".join(chips[:3]) + (f'<span class="mt-0.5 text-[9px] lg:text-[11px] text-outline">+{len(chips) - 3}</span>' if len(chips) > 3 else "")
-                pick = f' data-day="{iso}" onclick="pickDay(this.dataset.day)"' if d.month == m else ""  # 칸 어디를 눌러도(칩 포함) 그날 일정 — 칩은 원문 링크가 아니다(사용자 10/10: 누르면 원문으로 넘어가 힘들다) 일정
+                pick = f' data-day="{iso}" onclick="pickDay(this.dataset.day)"' if d.month == m else ""  # 칸 어디를 눌러도(칩 포함) 그날 일정 — 칩은 원문 링크가 아니다 일정
                 cells.append(f'<div{pick} class="min-h-[52px] lg:min-h-[112px] p-1 lg:p-2 rounded-lg flex flex-col justify-start lg:border-t lg:border-surface-container-high {"" if d.month != m else "cursor-pointer hover:bg-surface-container-low"}">{cell}</div>')
         items = []
-        minor = set()  # 「이 달의 일정」 목록에서 뺄 것 — 달력 칸·그날 일정에는 그대로 (사용자 10/10: 너무 많다, 덜 중요한 건 빼)
+        minor = set()  # 「이 달의 일정」 목록에서 뺄 것 — 달력 칸·그날 일정에는 그대로
         for rs in mine:
             d, name, code, title, rno, dr, t, _, imp = rs[0]
             if not (dr or imp >= 3 or (code == "EARNINGS" and not re.match(r"판매|예비", title) and "예고" not in title)):
@@ -130,11 +130,11 @@ class CalendarPages:
             items.append((1, d, line(d, name, title, self.src(rno), label, chip)))
         soon = [(d, *x) for d in sorted(ahead) if d[:7] == f"{y}-{m:02d}" for x in ahead[d]]
         items += [(0, d, line(d, name, what, self.src(rno), "일정", "border border-primary/40 text-primary")) for d, name, _, what, rno in soon]
-        for rno, pay, name, t, total, mats, uses, lead in bonds:  # 내 종목 회사채 — 공시와 같은 자리
+        for rno, pay, name, t, total in bonds:  # 내 종목 회사채 — 공시와 같은 자리
             if pay[:7] != f"{y}-{m:02d}":
                 continue
             items.append((1, pay, line(pay, name, f"회사채 {notes.won(total)} 납입", self.src(rno), "회사채", "bg-surface-container-high text-on-surface-variant")))
-        for name, a, b, listed, price, total, lead, uses, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
+        for name, a, b, listed, rno in ipos:  # 공모주 — 맨 뒤 (금리·물가가 더 많은 사람에게 닿는다)
             d = a if a[:7] == f"{y}-{m:02d}" else listed if listed and listed[:7] == f"{y}-{m:02d}" else None
             if not d:
                 continue
@@ -154,7 +154,7 @@ class CalendarPages:
         for x in items:
             for dd_ in x[3]:
                 days.setdefault(dd_, []).append(x[2])
-        sort = "old" if sort in ("new", "old") else "rel"  # 이 달의 일정 — 관련 높은 순(기본) · 날짜순(1일부터). 최신순은 날짜순을 거꾸로 한 것뿐이라 뺐다(사용자 10/16) — 옛 주소 s=new 는 날짜순으로
+        sort = "old" if sort in ("new", "old") else "rel"  # 이 달의 일정 — 관련 높은 순(기본) · 날짜순(1일부터). 최신순은 날짜순을 거꾸로 한 것뿐이라 뺐다 — 옛 주소 s=new 는 날짜순으로
         if sort != "rel":
             items.sort(key=lambda x: x[1])
         items = [x[2] for x in items if not x[4]]

@@ -50,13 +50,8 @@ def login_mail(link: str, code: str) -> tuple[str, str]:
             "직접 요청하지 않았다면 이 메일은 지우셔도 돼요. 코드를 남에게 알려 주지 마세요.")  # fmt: skip
 
 
-RED = "#ba1a1a"  # 화면의 error 색
-
-
 def alert_mail(name: str, kind: str, line: str, link: str) -> tuple[str, str, str]:
     """걸리는 공시가 나온 그날 바로 한 통(daily.watch) — 무슨 일인지 한 문장과 원문 링크만. 사고팔라는 말은 없다(불변식 1)."""
-    from html import escape as e
-
     url = base_url()
     foot = "담은 종목에 꼭 확인할 공시가 나온 날에만 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
     html = (f'<div style="font-family:{FONT};max-width:560px;margin:0 auto;padding:28px 22px;background:#fff">'
@@ -70,10 +65,8 @@ def alert_mail(name: str, kind: str, line: str, link: str) -> tuple[str, str, st
 
 
 def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
-    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 화~토 하루 한 통(사용자 10/11, 소식 없는 날도 10/15).
+    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 화~토 하루 한 통.
     m = morning.build 의 결과, body = morning.text(m). 메일 앱은 CSS 를 못 읽어 인라인 스타일만."""
-    from html import escape as e
-
     url = base_url()
     who = "·".join(x["name"] for x in m["news"][:3]) + (" 등" if len(m["news"]) > 3 or m.get("more") else "")
     soon = next((x["label"] for x in m["week"] if x.get("url")), "")

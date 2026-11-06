@@ -1,6 +1,7 @@
 """그림 — 막대·도넛·꺾은선 (SVG 를 글자로 만든다)."""
 
 import json
+import math
 
 from hanjang import gurus, notes, sources
 from hanjang.ui import e
@@ -22,7 +23,7 @@ def groups(labels: list[str | None], w: list[float]) -> list[tuple[str, tuple[fl
 
 
 def bars(labels: list[str | None], weights: list[float], unit: str = "종목", note: str = "") -> str:
-    """업종 — 가로로 긴 막대 하나를 비율대로 나누고, 밑에 두 줄씩 이름. 도넛보다 크기 차이가 한눈에 (사용자 10/10)."""
+    """업종 — 가로로 긴 막대 하나를 비율대로 나누고, 밑에 두 줄씩 이름. 도넛보다 크기 차이가 한눈에."""
     if not labels:
         return ""
     parts, total = groups(labels, weights), sum(weights) or 1
@@ -34,22 +35,20 @@ def bars(labels: list[str | None], weights: list[float], unit: str = "종목", n
                    f'<span class="hidden sm:inline w-9 text-right text-[11px] text-outline tabular-nums">{n}{unit}</span></li>'
                    for (k, (v, n)), col in zip(parts, DONUT))  # fmt: skip
     return ('<section class="mt-space-xl"><h2 class="font-headline-sm text-headline-sm text-on-surface">어떤 업종에 많이 가졌나</h2>'
-            f'<div class="mt-3 flex h-2.5 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'  # 막대는 얇게 (사용자 10/10: 조금만 줄여)
+            f'<div class="mt-3 flex h-2.5 w-full rounded-full overflow-hidden gap-[2px] bg-surface">{segs}</div>'  # 막대는 얇게
             f'<ul class="mt-4 grid grid-cols-2 gap-x-5 gap-y-2.5">{keys}</ul>'
             + (f'<p class="mt-3 text-[11px] text-outline">{e(note)}</p>' if note else "") + "</section>")  # fmt: skip
 
 
 def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종목", n: int = 5) -> str:
-    """포트폴리오 파이 — 금액이 큰 n 종목만(기타 없이). 원은 가운데, 양옆에 반듯한 이름 목록(사용자 10/10).
-    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평(사용자 10/10).
+    """포트폴리오 파이 — 금액이 큰 n 종목만(기타 없이). 원은 가운데, 양옆에 반듯한 이름 목록.
+    오른쪽 반의 조각은 오른쪽 목록(왼쪽 정렬), 왼쪽 반은 왼쪽 목록(오른쪽 정렬). 이름은 자기 조각 높이에 — 선이 거의 수평.
     겹치면 위아래로 비킨다. 조각에서 이름 옆 색 네모까지 곧은 선 — 글자는 HTML 이라 위치를 그린 뒤에 PIE_LINES 가 재서 긋는다(화면 크기가 바뀌면 다시).
     items = [(이름, 금액)] 큰 순. 13F 금액은 한 사람·한 기관의 돈이라 더하면 포트폴리오 비중이다."""
-    import math
-
     total = sum(v for _, v in items)
     if not items or total <= 0:
         return ""
-    # 기타는 그리지 않는다 — 상위 n 종목끼리 원을 나누고, 글자는 전체 중 비중 그대로(사용자 10/10)
+    # 기타는 그리지 않는다 — 상위 n 종목끼리 원을 나누고, 글자는 전체 중 비중 그대로
     parts = [(k, v / total * 100) for k, v in items[:n]]
     cols, shown = DONUT, sum(p for _, p in parts)
     slices, sides, a = [], {True: [], False: []}, -math.pi * parts[0][1] / shown  # 가장 큰 조각을 3시 방향 가운데로
@@ -75,7 +74,7 @@ def pie(items: list[tuple[str, float]], title: str = "가장 많이 가진 종�
 
     return (f'<section class="mt-space-lg"><h2 class="font-headline-sm text-headline-sm text-on-surface">{e(title)}</h2>'
             + (f'<p class="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-surface-container text-[13px] text-on-surface-variant">'
-               f'<span class="material-symbols-outlined text-[16px] text-primary">info</span>기타는 빼고 상위 {len(parts)}종목만 그렸어요 (전체의 {shown:.0f}%)</p>' if shown < 99.95 else "")  # 꼭 보이게 (사용자 10/10)
+               f'<span class="material-symbols-outlined text-[16px] text-primary">info</span>기타는 빼고 상위 {len(parts)}종목만 그렸어요 (전체의 {shown:.0f}%)</p>' if shown < 99.95 else "")  # 꼭 보이게
             + '<div data-pie class="relative mt-2 py-6 flex items-start gap-6 lg:gap-10">' + column(False)
             + f'<svg viewBox="0 0 100 100" class="w-36 h-36 lg:w-52 lg:h-52 shrink-0" role="img" aria-label="{e(title)}">{"".join(slices)}</svg>'
             + column(True) + '<svg class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg></div></section>' + PIE_LINES)  # fmt: skip
@@ -99,13 +98,13 @@ addEventListener('load',pieLines);addEventListener('resize',pieLines);document.f
 
 
 def ind_tag(kr: str | None = None, sic: str | None = None, issuer: str = "") -> str:
-    """종목 이름 옆 회색 작은 글씨 「#반도체」 — 한국은 통계청 업종, 미국은 SEC 산업분류(짧은 이름을 아는 것만, 아니면 큰 업종). 상자·배경 없이(사용자 10/10)."""
+    """종목 이름 옆 회색 작은 글씨 「#반도체」 — 한국은 통계청 업종, 미국은 SEC 산업분류(짧은 이름을 아는 것만, 아니면 큰 업종). 상자·배경 없이."""
     name = sources.industry_label(kr) if kr else (notes.SIC_LABEL.get(sic or "") or gurus.sector(sic, issuer))
     name = "ETF" if name and name.startswith("ETF") else name
     return f'<span class="shrink-0 text-[12px] font-normal text-outline">#{e(name)}</span>' if name else ""
 
 
-TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게(사용자 10/10)
+TOP_LIST = 20  # 「많이 가진 순서」는 어디서나 20종목까지 — 유명 투자자·국민연금·다른 기관 모두 같게
 
 
 def issuer_name(issuer: str, ours: str | None) -> str:
@@ -152,8 +151,6 @@ def chapter(title: str, body: str, extra: str = "", anchor: str = "") -> str:
 
 def index_chart(got: dict) -> str:
     """한국·미국 주가지수 선 그림 — 세로는 로그 눈금(같은 % 변화가 같은 높이). 한국 자료가 시작된 달부터."""
-    import math
-
     start = got["한국"]["from"]
     lines = {n: [(d, v) for d, v in g["series"] if d >= start] for n, g in got.items()}
     ds = sorted({d for pts in lines.values() for d, _ in pts})
@@ -163,7 +160,7 @@ def index_chart(got: dict) -> str:
     def xy(d, v):
         return f"{P + (ds.index(d) / (len(ds) - 1)) * (W - P - 4):.1f},{H - 18 - (math.log(v) - lo) / (hi - lo) * (H - 30):.1f}"
 
-    # 실선 + 색으로만 구분 — 점선은 끊겨 보이고, 화면 폭에 따라 굵기가 변하지 않게 non-scaling-stroke (사용자 10/9)
+    # 실선 + 색으로만 구분 — 점선은 끊겨 보이고, 화면 폭에 따라 굵기가 변하지 않게 non-scaling-stroke
     color = {"한국": "#154539", "미국": "#b4532a"}
     polys = "".join(f'<polyline stroke="{color.get(n, "#717975")}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="{" ".join(xy(d, v) for d, v in pts)}"/>'
                     for n, pts in lines.items())  # fmt: skip

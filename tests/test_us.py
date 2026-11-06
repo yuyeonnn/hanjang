@@ -4,7 +4,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-from hanjang import db, us
+from hanjang import db, notepage, us
 
 FX = Path(__file__).parent / "fixtures"
 
@@ -209,7 +209,7 @@ def test_us_note_page_has_no_won_charts_and_says_sec(monkeypatch):
     app = web.App(con, "s")
     r = app.report("NVDA")
     assert r["us"] and r["fin"] is None and r["divs"] == []
-    html_ = web.render_note("엔비디아", "NVDA", "2026-10-05", note, "code", fs, report=r)
+    html_ = notepage.render_note("엔비디아", "NVDA", "2026-10-05", note, "code", fs, report=r)
     assert "한눈에 보기" not in html_ and "2,159억원" not in html_ and "2,159억 달러" in html_
     assert "DART) 원문이 열려요" not in html_ and "SEC) 공시 원문이 열려요" in html_
     assert notes.mend("합계 433만 2,118주이에요.") == "합계 433만 2,118주예요."
