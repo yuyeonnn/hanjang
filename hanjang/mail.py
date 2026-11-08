@@ -188,6 +188,40 @@ def _week(start: date, events, holidays) -> str:
             f"<tr>{head}</tr><tr>{''.join(cells)}</tr></table></td></tr>")  # fmt: skip
 
 
+def morning_mail(m: dict, body: str) -> tuple[str, str, str]:
+    """아침 소식 메일 — 화면의 「아침 한 장」(morning.build)과 같은 내용을 한 통으로. 화~토 하루 한 통.
+    m = morning.build 의 결과, body = morning.text(m). 메일 앱은 CSS 를 못 읽어 인라인 스타일만."""
+    url = base_url()
+    who = "·".join(x["name"] for x in m["news"][:3]) + (" 등" if len(m["news"]) > 3 or m.get("more") else "")
+    soon = next((x["label"] for x in m["week"] if x.get("url")), "")
+    moves = m.get("moves", [])
+    subject = (f"[한장] 오늘 내 종목 소식 — {who}" if m["news"] else f"[한장] 내 종목 큰손 움직임 — {moves[0].rstrip('.')}" if moves
+               else f"[한장] 곧 있는 내 종목 일정 — {soon}" if soon else f"[한장] {m['title']} — 새 공시 없는 조용한 아침이에요")
+    foot = "화~토 아침마다 보내요. 그만 받으려면 한장 프로필 → 설정에서 「안내 메일」을 끄면 돼요."
+    news = "".join(f'<p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:{INK}">'
+                   f'<a href="{e(x["url"])}" style="color:{RED if x.get("warn") else GREEN};font-weight:700;text-decoration:none">{"[꼭 확인] " if x.get("warn") else ""}{e(x["name"])}</a> '
+                   f'<span style="color:{SUB}">{e(x["body"])}</span></p>' for x in m["news"])  # fmt: skip
+    week = "".join(f'<tr><td style="padding:5px 12px 5px 0;font-size:13px;color:{MUTE};white-space:nowrap">{e(_day(x["date"]))}</td>'
+                   f'<td style="padding:5px 0;font-size:14px;color:{INK}">{e(x["label"])}</td></tr>' for x in m["week"][:6])  # fmt: skip
+    head, tip, _ = m["tip"]
+    html = (f'<div style="font-family:{FONT};max-width:560px;margin:0 auto;padding:28px 22px;background:#fff">'
+            f'<p style="margin:0 0 4px;font-size:13px;color:{MUTE}">{e(m["title"])}</p>'
+            f'<h1 style="margin:0 0 18px;font-size:21px;line-height:1.4;color:{GREEN}">오늘 내 종목 소식</h1>'
+            + (news or f'<p style="margin:0 0 14px;font-size:15px;color:{SUB}">새로 나온 내 종목 공시는 없어요.</p>')
+            + "".join(f'<p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:{SUB}">{e(x)}</p>' for x in moves)
+            + (f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">시장 · 같은 업종</h2>'
+               + "".join(f'<p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:{SUB}">{x}</p>' for x in
+                         ([e(m["market"])] if m.get("market") else [])
+                         + [f'#{e(p["label"])} <a href="{e(p["url"])}" style="color:{GREEN};font-weight:700;text-decoration:none">{e(p["name"])}</a> {e(p["body"])}' for p in m.get("peers", [])])
+               if m.get("market") or m.get("peers") else "")
+            + (f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">이번 주</h2><table style="border-collapse:collapse">{week}</table>' if week else "")
+            + f'<h2 style="margin:22px 0 6px;font-size:15px;color:{INK}">알아 두면 좋아요 · {e(head)}</h2>'
+            f'<p style="margin:0 0 20px;font-size:14px;line-height:1.7;color:{SUB}">{e(tip)}</p>'
+            f'<p style="margin:0 0 22px"><a href="{e(url)}" style="display:inline-block;padding:11px 18px;border-radius:999px;background:{GREEN};color:#fff;font-size:14px;font-weight:700;text-decoration:none">한장에서 보기</a></p>'
+            f'<p style="margin:0;padding-top:14px;border-top:1px solid {LINE};font-size:12px;line-height:1.6;color:{MUTE}">사실만 모았어요. 사고팔라는 뜻이 아니에요.<br>{foot}</p></div>')  # fmt: skip
+    return subject, f"{body}\n\n한장에서 보기: {url}\n\n{foot}", html
+
+
 def weekly_mail(week: str, stocks: list[dict], events=(), holidays=()) -> tuple[str, str, str]:
     """한 사람에게 한 통 — 앞으로 7일 캘린더 + 담은 종목 노트 전문. (제목, 글자 본문, HTML 본문).
     stocks = [{ticker, name, body, facts, fin?}] · fin = [(연도, 매출, 영업이익)]

@@ -1550,6 +1550,37 @@ def test_things_found_by_clicking_through_every_screen(monkeypatch):
     assert "피드로 돌아가기" in call(app, "/u/50", cookie=ck)[2]
 
 
+def test_morning_brief_mail_every_day(monkeypatch):
+    """아침 소식 메일 — 종목을 담은 사람에게 매일 한 통, 새 소식이 없는 날도. 끈 사람은 빼고."""
+    from datetime import date
+
+    from hanjang import daily, mail, sources
+
+    app, con = _app()
+    ck = _login(app)
+    call(app, "/add", "POST", "q=" + quote("삼성전자"), ck)
+    sent = []
+    monkeypatch.setattr(mail, "send", lambda to, subject, text, html="": sent.append((to, subject, text, html)) or True)
+    today = date(2026, 10, 14)  # 수요일
+    assert daily.brief(con, today) == 1 and sent.pop()[1] == "[한장] 10월 14일 수요일 아침 — 새 공시 없는 조용한 아침이에요"  # 새 소식 없어도
+    collect.save_disclosures(con, [sources.Disclosure("20261013000001", "005930", date(2026, 10, 13), "주요사항보고서(자기주식취득결정)")])
+    con.execute("update disclosures set code='BUYBACK', importance=3, direction=1")
+    assert daily.brief(con, today) == 1
+    to, subject, text, html = sent[0]
+    assert subject == "[한장] 오늘 내 종목 소식 — 삼성전자" and "삼성전자" in text and "안내 메일」을 끄면" in text
+    assert "오늘 내 종목 소식" in html and "한장에서 보기" in html and "사고팔라는 뜻이 아니에요" in html
+    con.execute("update users set mail_on = 0")
+    assert daily.brief(con, today) == 0  # 안내 메일을 끈 사람
+    con.execute("update users set mail_on = 1")
+    con.execute("delete from disclosures")
+    con.execute("insert into events values ('005930', '2026-10-15', 'EARNINGS', '실적 발표', '20261013000001')")
+    assert daily.brief(con, today) == 1 and sent[-1][1].startswith("[한장] 곧 있는 내 종목 일정 — 삼성전자 실적 발표")  # 내일 일정
+    con.execute("delete from events")
+    con.execute("insert into big_holdings (inst, stock_code, corp_name, corp_cls, rate, rate_chg, date, rcept_no) values ('nps', '005930', '삼성전자', 'Y', 7.76, 0.5, '2026-10-13', 'r2')")
+    assert daily.brief(con, today) == 1  # 큰손 움직임만 있어도 — 아침 한 장과 메일에 같은 문장
+    assert sent[-1][1] == "[한장] 내 종목 큰손 움직임 — 국민연금이 삼성전자 지분을 늘렸어요(지분 7.76%)" and "국민연금이 삼성전자 지분을 늘렸어요" in sent[-1][3]
+
+
 def test_smoke_draws_real_pages_without_writing_to_the_db(tmp_path, monkeypatch):
     """올린 뒤 확인(hanjang.smoke · deploy/check.sh)이 꺼내는 화면 — 진짜 DB 에는 아무것도 쓰지 않는다."""
     import sqlite3
@@ -1616,6 +1647,7 @@ def test_morning_has_market_line_and_same_industry_news():
     assert m["market"] == "원/달러 환율은 1,403.5원으로 앞 거래일보다 3.5원 올랐어요(10월 12일). 국고채 3년 금리는 2.83%로 앞 거래일보다 0.02%p 내렸어요(10월 12일)."
     assert [x["name"] for x in m["peers"]] == ["SK하이닉스"]  # 같은 업종만 — 현대차는 안 나온다
     assert "시장 · 같은 업종" in morning.html(m) and "원/달러 환율은" in morning.text(m)
+    assert "원/달러 환율은" in mail.morning_mail(m, morning.text(m))[2]
 
 
 def test_learn_quiz_daily_question_and_path_stamps():

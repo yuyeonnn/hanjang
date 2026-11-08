@@ -57,6 +57,23 @@ def apart(code: str) -> None:
     subprocess.run([sys.executable, "-X", "utf8", "-c", "import sys; sys.stdout.reconfigure(encoding='utf-8'); " + code], check=True)
 
 
+def brief(con: sqlite3.Connection, today: date) -> int:
+    """아침 소식 메일 — 「아침 한 장」과 같은 내용을 종목을 담은 사람 모두에게 매일 한 통. 새 소식이 없는 날도 「새 공시는 없어요」로.
+    안내 메일을 끈 사람·막힌 계정·종목을 안 담은 사람은 빼고. 한 사람이 실패해도 나머지는 보낸다."""
+    n = 0
+    for uid, email in con.execute("select id, email from users where mail_on = 1 and coalesce(banned, 0) = 0").fetchall():
+        tickers = [t for (t,) in con.execute("select ticker from holdings where user_id = ? order by added_at", (uid,))]
+        if not tickers:
+            continue
+        m = morning.build(con, tickers, today, uid)
+        try:
+            mail.send(email, *mail.morning_mail(m, morning.text(m)))
+            n += 1
+        except Exception as err:  # noqa: BLE001
+            print(f"아침 소식 메일 실패 (사용자 {uid}) — {type(err).__name__}", file=sys.stderr)
+    return n
+
+
 def main(today: date) -> None:
     """하루 세 번 불린다(07·13·19시). 아침에 끝까지 돌았으면 오후엔 바로 끝난다. DART 가 쉬는 날(점검)엔 DART 가 필요한 일만 건너뛰고
     나머지는 어제까지의 자료로 끝까지 돈다 — 오후에 DART 가 돌아오면 그때 마저 한다(월요일 안내 메일도 그때).
@@ -114,9 +131,13 @@ def main(today: date) -> None:
     mailed = bool(before.get("mailed"))
     if monday and got and wrote:  # 빈 노트로 안내 메일을 보내지 않게 — 받기와 노트가 다 된 날만
         mailed = step("안내 메일", lambda: print(f"안내 메일 {notify(db.connect(), notes.week_of(today))}명"))
+    # 아침 소식 메일 — 하루 한 번, 화~토(월요일은 소식지가 나가고, 일요일은 토요일에 이미 금요일 소식을 보냈다)
+    briefed = bool(before.get("briefed"))
+    if not briefed and got and 1 <= today.weekday() <= 5:
+        briefed = step("아침 소식 메일", lambda: print(f"아침 소식 메일 {brief(db.connect(), today)}명"))
     if llm.spent.get("no_credit") and (to := sources.env().get("SMTP_USER")):  # 멈추진 않았지만 운영자는 알아야 한다
         mail.send(to, "[한장] OpenAI 크레딧 소진 — 오늘 노트는 코드 문장으로", "platform.openai.com 결제(Billing)에서 크레딧을 채우면 다음 실행부터 AI 글로 돌아와요.")
-    STATE.write_text(json.dumps({"date": today.isoformat(), "dart": dart_up, "failed": failed, "mailed": mailed, "complete": dart_up and not failed}, ensure_ascii=False), encoding="utf-8")  # fmt: skip
+    STATE.write_text(json.dumps({"date": today.isoformat(), "dart": dart_up, "failed": failed, "mailed": mailed, "briefed": briefed, "complete": dart_up and not failed}, ensure_ascii=False), encoding="utf-8")  # fmt: skip
     if failed:
         raise SystemExit(f"실패한 단계: {', '.join(failed)}")
 
