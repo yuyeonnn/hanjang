@@ -3,8 +3,8 @@
 > 우분투 서버 1대 · 사용자 `hanjang` · 코드 `/srv/hanjang`. 화면 서버는 127.0.0.1:8000, 앞에서 **Caddy** 가 https 를 맡는다.
 > 매일 07:00(한국 시간) 실행은 systemd 타이머. 설정 파일은 [deploy/](../deploy).
 
-> **지금 서버** (2026-10-08): 구글 클라우드 `education-508407` 프로젝트의 `hanjang` (us-central1-a · e2-micro · Debian 13) · https://hanjangapp.com (2026-10-12 부터 · 옛 주소 34-44-40-196.sslip.io 는 새 주소로 넘어간다)
-> 들어가기: `ssh -i ~/.ssh/hanjang-deploy hanjang-deploy@34.44.40.196` · 저장소는 서버의 읽기 전용 키(GitHub deploy key `hanjang-server`)로 받는다.
+> **지금 서버** (2026-10-08): 구글 클라우드 VM 한 대 (us-central1-a · e2-micro · Debian 13) · https://hanjangapp.com (2026-10-12 부터 · 옛 sslip.io 주소는 새 주소로 넘어간다)
+> 들어가기: `ssh -i <배포 키> <배포 계정>@<서버 IP>` — 실제 값은 저장소에 두지 않고 내 컴퓨터 `.env` 의 `HANJANG_SSH`·`HANJANG_KEY` 에 둔다 · 저장소는 서버의 읽기 전용 deploy key 로 받는다.
 > 아래 1~3 은 [deploy/setup.sh](../deploy/setup.sh) 가 한 번에 한다: `.env` 를 `/tmp/hanjang.env` 로 올리고 `sudo sh setup.sh <도메인>`.
 > 무료 크레딧은 2026-12 중순(67일)에 끝난다 — 그 전에 결제 계정으로 올려야 서버가 멈추지 않는다(e2-micro 미국 1대는 그 뒤에도 무료 범위).
 
@@ -82,8 +82,8 @@ sh deploy/check.sh
 
 ## 주소 (2026-10-12)
 
-**https://hanjangapp.com** — Cloudflare 에서 등록(1년, 자동 연장 · 사용자 계정). DNS 는 Cloudflare, A 레코드 `@`·`www` → `34.44.40.196`, **Proxy 꺼짐(DNS only)** — 켜면 Caddy 가 인증서를 못 받는다.
-서버 `/etc/caddy/sites/hanjang.caddy`: `hanjangapp.com` 가 화면 서버로, `www.hanjangapp.com` 와 옛 주소 `34-44-40-196.sslip.io` 는 새 주소로 넘긴다(301, 경로 그대로). 옛 설정은 `/etc/caddy/hanjang.caddy.bak-20261012`.
+**https://hanjangapp.com** — Cloudflare 에서 등록(1년, 자동 연장 · 사용자 계정). DNS 는 Cloudflare, A 레코드 `@`·`www` → 서버 IP, **Proxy 꺼짐(DNS only)** — 켜면 Caddy 가 인증서를 못 받는다.
+서버 `/etc/caddy/sites/hanjang.caddy`: `hanjangapp.com` 가 화면 서버로, `www.hanjangapp.com` 와 옛 sslip.io 주소는 새 주소로 넘긴다(301, 경로 그대로). 옛 설정은 `/etc/caddy/hanjang.caddy.bak-20261012`.
 메일 속 링크는 `.env` 의 `BASE_URL=https://hanjangapp.com`. 로그인 쿠키는 주소마다 따로라, 옛 주소로 로그인해 있던 사람은 새 주소에서 한 번 다시 로그인한다.
 서버 IP 가 바뀌면 Cloudflare 의 A 레코드 두 줄만 고치면 된다(주소는 그대로).
 
@@ -93,35 +93,35 @@ sh deploy/check.sh
 
 | 무엇이 잘못되면 | 누가 · 어디로 |
 |---|---|
-| 사이트가 안 열림 · 매일 실행이 30시간 넘게 안 돎 · DB · 디스크 10% 미만 | 구글 클라우드 모니터링이 5분마다 미국·아시아·유럽에서 `/health` 를 연다 → 두 곳 넘게 5분 이상 실패하면 **psiobinq@gmail.com** (업타임 체크 `hanjang-health`, 알림 정책 「한장 — 사이트 또는 매일 실행 이상」) |
+| 사이트가 안 열림 · 매일 실행이 30시간 넘게 안 돎 · DB · 디스크 10% 미만 | 구글 클라우드 모니터링이 5분마다 미국·아시아·유럽에서 `/health` 를 연다 → 두 곳 넘게 5분 이상 실패하면 **운영자 Gmail** (업타임 체크 `hanjang-health`, 알림 정책 「한장 — 사이트 또는 매일 실행 이상」) |
 | 매일 실행이 도중에 실패 · 서버 밖 백업 실패 · OpenAI 크레딧 소진 | 서버가 직접 운영자 Gmail(`.env` 의 `SMTP_USER`)로 |
 | DART 점검(주말에 잦다) | 멈추지 않는다 — DART 가 필요한 일(국내 받기·사업보고서 읽기·ETF·큰손)만 건너뛰고 나머지는 돈다. 운영자 Gmail 로 하루 한 번 알리고, **13시·19시에 다시 해 본다**(아침에 끝까지 돌았으면 바로 끝남). 어디까지 됐는지는 `data/daily.json` |
 
-**서버 밖 백업** — 매일 실행이 백업을 만든 뒤 압축해 `gs://hanjang-backup-education-508407/` 에 올린다(같은 날 두 번이면 시각을 붙여 따로).
+**서버 밖 백업** — 매일 실행이 백업을 만든 뒤 압축해 `gs://<백업 버킷>/` 에 올린다(같은 날 두 번이면 시각을 붙여 따로).
 - 버킷: us-central1 · 공개 차단 · **14일 지나면 저절로 삭제**(처리방침 3항과 같게).
 - 서버의 열쇠: `data/gcs-backup.json`(git 밖, 600) — 계정 `hanjang-backup@…` 은 이 버킷에 **넣기만** 된다. 서버가 털려도 백업을 읽거나 지우지 못한다. `.env` 의 `BACKUP_BUCKET` 이 없으면 건너뛴다.
 - 되돌리기(서버가 통째로 없어졌을 때) — 내 컴퓨터에서:
   ```bash
-  gcloud storage ls gs://hanjang-backup-education-508407/
-  gcloud storage cp gs://hanjang-backup-education-508407/hanjang-YYYYMMDD-HHMMSS.db.gz . && gunzip hanjang-YYYYMMDD-HHMMSS.db.gz
+  gcloud storage ls gs://<백업 버킷>/
+  gcloud storage cp gs://<백업 버킷>/hanjang-YYYYMMDD-HHMMSS.db.gz . && gunzip hanjang-YYYYMMDD-HHMMSS.db.gz
   ```
   새 서버를 `deploy/setup.sh` 로 세운 뒤 이 파일을 `/srv/hanjang/data/hanjang.db` 로 올리고 `sudo systemctl restart hanjang-web`. 백업 안의 이메일은 개인정보다 — 다 쓰면 내 컴퓨터의 사본을 지운다.
 - 열쇠를 바꿀 때: `gcloud iam service-accounts keys create` → 서버 `data/gcs-backup.json` 교체 → 옛 열쇠 `keys delete`.
 
-**도메인을 옮기면** 감시 주소도 바꾼다 — 업타임 체크의 주소는 고칠 수 없어 새로 만든다: `gcloud monitoring uptime create hanjang-health --resource-type=uptime-url --resource-labels=host=<새 도메인>,project_id=education-508407 --protocol=https --path=/health --period=5 --timeout=10 --matcher-content=ok --matcher-type=contains-string --regions=usa-iowa,asia-pacific,europe` → 알림 정책 조건의 `check_id` 를 새 이름으로 고침 → 옛 체크(`hanjang-health-bDwzkNMaS98`) 지움.
+**도메인을 옮기면** 감시 주소도 바꾼다 — 업타임 체크의 주소는 고칠 수 없어 새로 만든다: `gcloud monitoring uptime create hanjang-health --resource-type=uptime-url --resource-labels=host=<새 도메인>,project_id=<GCP 프로젝트> --protocol=https --path=/health --period=5 --timeout=10 --matcher-content=ok --matcher-type=contains-string --regions=usa-iowa,asia-pacific,europe` → 알림 정책 조건의 `check_id` 를 새 이름으로 고침 → 옛 체크 지움.
 
 ### 연속 백업 (Litestream, 2026-10-12)
 
 하루 한 번 백업만으로는 마지막 하루치(담기·좋아요·팔로우)를 잃을 수 있어, **Litestream** 이 DB 의 WAL 을 1초마다 서버 밖으로 복사한다.
 
 - 서버: `/etc/litestream.yml`(DB 경로·저장소), `/etc/systemd/system/litestream.service.d/hanjang.conf`(hanjang 사용자로 · 열쇠 `data/gcs-backup.json`). `systemctl status litestream`.
-- 저장소: `gs://hanjang-litestream-education-508407/hanjang.db/` — 하루 백업 버킷과 **따로**(이 열쇠는 여기서만 지울 수 있다). 72시간 보관.
+- 저장소: `gs://<Litestream 버킷>/hanjang.db/` — 하루 백업 버킷과 **따로**(이 열쇠는 여기서만 지울 수 있다). 72시간 보관.
 - **복구** (서버에서, 화면 서버를 먼저 끈다):
 
 ```bash
 sudo systemctl stop hanjang-web litestream
 sudo -u hanjang mv /srv/hanjang/data/hanjang.db /srv/hanjang/data/hanjang.db.bad
-sudo -u hanjang env GOOGLE_APPLICATION_CREDENTIALS=/srv/hanjang/data/gcs-backup.json litestream restore -o /srv/hanjang/data/hanjang.db gs://hanjang-litestream-education-508407/hanjang.db
+sudo -u hanjang env GOOGLE_APPLICATION_CREDENTIALS=/srv/hanjang/data/gcs-backup.json litestream restore -o /srv/hanjang/data/hanjang.db gs://<Litestream 버킷>/hanjang.db
 sudo systemctl start litestream hanjang-web
 ```
 

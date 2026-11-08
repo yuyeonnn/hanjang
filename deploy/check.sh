@@ -3,10 +3,13 @@
 # 서버가 실제로 만드는 화면 20여 개를 꺼내 상태와 스크립트 문법을 보고, 바깥 주소로도 한 번 열어 본다. 문제가 있으면 실패로 끝난다.
 # 왜: 테스트는 화면의 글자만 본다 — 스크립트 하나가 깨진 채 올라가 검색 자동완성·캡처 올리기가 멈춘 적이 있다(2026-10-11).
 set -eu
-HOST="${HANJANG_SSH:-hanjang-deploy@34.44.40.196}"
-KEY="${HANJANG_KEY:-$HOME/.ssh/hanjang-deploy}"
-URL="${HANJANG_URL:-https://hanjangapp.com}"
 HERE="$(dirname "$0")"
+# 접속 정보는 저장소에 두지 않는다 — 환경변수나 내 컴퓨터 .env 의 HANJANG_SSH(계정@서버)·HANJANG_KEY(키 파일)
+envval() { if [ -f "$HERE/../.env" ]; then sed -n "s/^$1=//p" "$HERE/../.env" | tail -1; fi; }
+HOST="${HANJANG_SSH:-$(envval HANJANG_SSH)}"
+KEY="${HANJANG_KEY:-$(envval HANJANG_KEY)}"
+URL="${HANJANG_URL:-https://hanjangapp.com}"
+[ -n "$HOST" ] && [ -n "$KEY" ] || { echo "HANJANG_SSH(계정@서버)·HANJANG_KEY(키 파일)를 환경변수나 .env 에 넣는다"; exit 1; }
 
 ssh -i "$KEY" -o BatchMode=yes "$HOST" 'cd /srv/hanjang && sudo -u hanjang /srv/hanjang/.venv/bin/python -X utf8 -m hanjang.smoke' | node "$HERE/check.js"
 

@@ -30,10 +30,10 @@
 
 ## 도메인 옮기기
 
-1. 도메인을 사고, DNS 에 **A 레코드 → 34.44.40.196** 을 넣는다.
+1. 도메인을 사고, DNS 에 **A 레코드 → 서버 IP** 을 넣는다.
 2. 서버에서 `cd /srv/hanjang && sudo sh deploy/setup.sh <새 도메인>` — 다시 돌려도 괜찮은 스크립트다. `.env` 의 `BASE_URL` 과 Caddy 주소를 새 도메인으로 바꾸고, https 인증서는 Caddy 가 저절로 받는다.
 3. 옛 주소로 들어오는 사람을 넘겨주려면 `/etc/caddy/sites/old.caddy` 에 한 줄 넣고 `sudo systemctl reload caddy`:
-   `34-44-40-196.sslip.io { redir https://<새 도메인>{uri} permanent }`
+   `<옛 IP>.sslip.io { redir https://<새 도메인>{uri} permanent }`
 4. 쿠키는 주소마다 따로라 **모두 한 번씩 다시 로그인**한다(메일 링크).
 5. 바깥 감시의 주소도 새 도메인으로 — [deploy.md](deploy.md) 「감시와 백업」 맨 끝.
 
@@ -55,7 +55,7 @@
 
 ## Lighthouse (10/10, 로그인 화면 · 느린 4G 가정)
 
-실제 서버(https://34-44-40-196.sslip.io, 미국 서버를 한국에서 잼) 기준. 내 컴퓨터의 개발 서버는 압축·HTTP/2 가 없어 훨씬 낮게 나오니 실제 서버로 잰다.
+실제 서버(옛 sslip.io 주소, 미국 서버를 한국에서 잼) 기준. 내 컴퓨터의 개발 서버는 압축·HTTP/2 가 없어 훨씬 낮게 나오니 실제 서버로 잰다.
 
 | | 처음 | 고친 뒤 |
 |---|---|---|
