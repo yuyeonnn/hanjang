@@ -57,7 +57,7 @@ class ProfilePages:
         track = "bg-primary" if mail_on else "bg-surface-container-highest"
         switch = (f'<form method="post" action="/me/mail" class="py-3.5 flex items-center justify-between"><span class="flex items-center gap-2 font-body-compact text-body-compact text-on-surface-variant">'
                   '<span class="material-symbols-outlined text-primary text-[18px]">mark_email_unread</span><span class="flex flex-col"><span>안내 메일</span>'
-                  '<span class="font-label-micro text-label-micro text-outline">월요일 소식지 · 화~토 아침 한 통 · 꼭 확인할 공시는 그날 바로</span></span></span>'
+                  '<span class="font-label-micro text-label-micro text-outline">월요일 아침 소식지 한 통</span></span></span>'
                   f'<button aria-label="안내 메일 {"끄기" if mail_on else "켜기"}" aria-pressed="{"true" if mail_on else "false"}" type="submit" class="flex items-center gap-2">'
                   f'<span class="font-label-micro text-label-micro {"text-primary" if mail_on else "text-outline"} font-semibold">{"ON" if mail_on else "OFF"}</span>'
                   f'<span class="w-11 h-6 rounded-full p-0.5 {track} transition-colors"><span class="block w-5 h-5 rounded-full bg-surface-container-lowest shadow-sm transition-transform {knob}"></span></span></button></form>')  # fmt: skip
